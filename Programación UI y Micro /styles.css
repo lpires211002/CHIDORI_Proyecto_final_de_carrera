@@ -1,0 +1,148 @@
+body {
+  font-family: 'Montserrat', sans-serif;
+  text-align: center;
+  margin: 20px;
+  height: 100%;
+  background-attachment: fixed ;
+  background: linear-gradient(#0e0e0e, #545658);
+
+}
+
+h1 {
+  font-family: 'Bebas Neue', cursive;
+  font-size: 50px;
+  color: whitesmoke;
+  text-shadow: 2px 2px 5px rgba(245, 245, 245, 0.643);
+}
+
+canvas {
+  width: 90%;
+  max-width: 1200px;
+  height: 200px;
+  max-height: 500px;
+  background: black;
+  margin: 20px auto;
+  display: block;
+  border: 1px solid;
+  border-radius: 10px;
+  padding: 20px 10px;
+  box-shadow: 0 0 10px 0 #616161fd;
+}
+
+/* Estilos para los botones */
+button {
+  font-size: 16px;
+  font-family: 'Montserrat', sans-serif;
+  padding: 10px 20px;
+  margin: 7px;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+  color: rgb(0, 0, 0);
+  transition: background-color 0.3s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+#startStopBtn { background-color: green; }
+#markEventBtn { background-color: #f3450f; }
+#resetBtn { background-color: #fcac03; }
+#downloadBtn { background-color: #8f1414; }
+
+/* Modal styles */
+.modal {
+  display: none; /* Oculto por defecto */
+  position: fixed;
+  z-index: 100;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.4);
+}
+.modal-content {
+  background-color: #040000;
+  color: rgb(89, 89, 89);
+  margin: 10% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 50%;
+  border-radius: 8px;
+}
+.close {
+  color: #aaa;
+  float: right;
+  font-size: 35px;
+  font-weight: bold;
+}
+.close:hover,
+.close:focus {
+  color: black;
+  cursor: pointer;
+}
+
+
+
+/* --- para el <details> de alarmas --- */
+.alarm-config {
+  width: 90%;
+  max-width: 600px;
+  margin: 0 auto 30px;
+  text-align: center;
+  color: whitesmoke;
+  font-family: 'Bebas Neue', cursive;
+}
+.alarm-config summary {
+  cursor: pointer;
+  font-weight: bold;
+  margin-bottom: 30px;
+}
+.alarm-inner {
+  padding: 10px;
+  background: #222;
+  border-radius: 5px;
+}
+.alarm-options {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.alarm-options label {
+  margin-top: 5px;
+}
+/* switch simple */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  transition: .2s;
+  border-radius: 20px;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px; width: 16px;
+  left: 2px; bottom: 2px;
+  background-color: white;
+  transition: .2s;
+  border-radius: 50%;
+}
+.switch input:checked + .slider {
+  background-color: #4caf50;
+}
+.switch input:checked + .slider:before {
+  transform: translateX(20px);
+}

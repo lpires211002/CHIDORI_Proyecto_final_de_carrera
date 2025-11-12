@@ -1,0 +1,66 @@
+#include <ESP8266WiFi.h>
+#include <WebSocketsServer.h>
+
+// Configuración WIFI
+const char* ssid = "iPhone de Luca (5)";
+const char* password = "lfplfplfp";
+
+// Configuración del WebSocket en el puerto 81
+WebSocketsServer webSocket(81);
+
+bool measuring = false; // Bandera para indicar si se está midiendo
+
+unsigned long lastTime = 0;
+const int interval = 500; // Intervalo de muestreo en milisegundos
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+  
+  Serial.println("Conectando a WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print("no conectado \n");
+  }
+  
+  Serial.println("\nConectado a WiFi.");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+  
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+}
+
+void loop() {
+  webSocket.loop();
+  
+  if (measuring && millis() - lastTime >= interval) {
+    lastTime = millis();
+    
+    int sensorValue = analogRead(A0);
+    float voltage = sensorValue * (1.0 / 1024.0);  // Convertir a voltaje (0-1V)
+    float resistance = (voltage + 0.2 )/(14 * 0.0003*5);  // Ley de Ohm (I = 500µA -> 0.0005A)
+    
+    String message = String(resistance, 2); // Valor de resistencia con 2 decimales
+    Serial.println(message);
+    webSocket.broadcastTXT(message);
+  }
+}
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  if (type == WStype_TEXT) {
+    String command = String((char*)payload);
+    if (command == "START") {
+      measuring = true;
+      Serial.println("Mediciones iniciadas.");
+    } else if (command == "STOP") {
+      measuring = false;
+      Serial.println("Mediciones detenidas.");
+    } else if (command == "RESET") {
+      measuring = false;
+      Serial.println("Mediciones reseteadas.");
+    }
+  }
+}
+
+
