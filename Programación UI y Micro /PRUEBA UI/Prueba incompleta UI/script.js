@@ -34,7 +34,7 @@ const rateDisplay = document.getElementById('rateDisplay');
 
 // --- Theme Toggle ---
 const themeToggle = document.getElementById('themeToggle');
-const htmlElement = document.documentElement;
+const bodyElement = document.body;
 let currentTheme = 'dark';
 
 function initTheme() {
@@ -44,16 +44,19 @@ function initTheme() {
 function applyTheme(theme) {
   currentTheme = theme;
   if (theme === 'light') {
-    htmlElement.classList.add('light-theme');
+    bodyElement.classList.add('light-theme');
     themeToggle.querySelector('.theme-icon').textContent = '☀️';
+    console.log('Tema claro activado');
   } else {
-    htmlElement.classList.remove('light-theme');
+    bodyElement.classList.remove('light-theme');
     themeToggle.querySelector('.theme-icon').textContent = '🌙';
+    console.log('Tema oscuro activado');
   }
 }
 
 themeToggle.addEventListener('click', () => {
   const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+  console.log('Cambiando a tema:', newTheme);
   applyTheme(newTheme);
 });
 
