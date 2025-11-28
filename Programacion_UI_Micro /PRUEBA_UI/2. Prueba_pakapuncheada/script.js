@@ -806,3 +806,73 @@ document.getElementById('exportCSVBtn').addEventListener('click', () => {
   modal.style.display = 'none';
   showCustomAlert("Datos exportados en formato CSV", "success");
 });
+
+// Export as TXT
+document.getElementById('exportTXTBtn').addEventListener('click', () => {
+  const info = getPatientInfo();
+  let txt = '';
+
+  // Metadata header
+  if (info) {
+    txt += `=== INFORMACIÓN DEL PACIENTE ===\n`;
+    txt += `Nombre: ${info.nombre}\n`;
+    txt += `Edad: ${info.edad}\n`;
+    txt += `Sexo: ${info.sexo}\n`;
+    txt += `Peso: ${info.peso} kg\n`;
+    txt += `Altura: ${info.altura} m\n`;
+    txt += `Circ. Suprailíaca: ${info.circ} cm\n`;
+    if (info.sexo === 'Femenino') {
+      txt += `Última menstruación: ${info.menstruacion}\n`;
+    }
+    txt += '\n';
+  }
+
+  // Session statistics
+  txt += `=== ESTADÍSTICAS DE LA SESIÓN ===\n`;
+  txt += `Fecha: ${new Date().toLocaleString('es-AR')}\n`;
+  txt += `Valor Inicial: ${initialValue ? initialValue.toFixed(2) : '--'} Ω\n`;
+  txt += `Valor Final: ${currentValue ? currentValue.toFixed(2) : '--'} Ω\n`;
+  if (initialValue && currentValue) {
+    const change = currentValue - initialValue;
+    const percent = (change / initialValue) * 100;
+    txt += `Cambio Total: ${change.toFixed(2)} Ω (${percent.toFixed(1)}%)\n`;
+  }
+  txt += `Duración: ${elapsedTimeDisplay.textContent}\n`;
+  txt += `Eventos Marcados: ${eventCount}\n`;
+  txt += `Puntos de Datos: ${data.length}\n\n`;
+
+  // Measurement data
+  txt += `=== MEDICIONES ===\n`;
+  txt += `Tiempo(s)\tImpedancia(Ω)\tTasa(Ω/min)\n`;
+  data.forEach((point, index) => {
+    const rate = rateData[index] ? rateData[index].y.toFixed(3) : '0.000';
+    txt += `${point.x.toFixed(2)}\t${point.y.toFixed(3)}\t${rate}\n`;
+  });
+
+  // Event list
+  if (events.length) {
+    txt += '\n=== EVENTOS (PICHIN ZEIT) ===\n';
+    events.forEach(evt => {
+      const minutes = Math.floor(evt.time / 60);
+      const seconds = Math.floor(evt.time % 60);
+      const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      txt += `Evento ${evt.id}: ${timeStr} - ${evt.value.toFixed(2)} Ω`;
+      if (evt.change !== null) {
+        txt += ` (Cambio: ${evt.change > 0 ? '+' : ''}${evt.change.toFixed(2)} Ω)`;
+      }
+      txt += '\n';
+    });
+  }
+
+  // Trigger download
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `mediciones_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  modal.style.display = 'none';
+  showCustomAlert("Archivo de texto generado exitosamente", "success");
+});
