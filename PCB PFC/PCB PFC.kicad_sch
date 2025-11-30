@@ -5,12 +5,12 @@
 	(uuid "0aa00474-80cf-4472-8457-f9764a8fc141")
 	(paper "A4")
 	(lib_symbols
-		(symbol "AD9833:AD9833"
+		(symbol "AD-9833:CJMCU-9833"
 			(exclude_from_sim no)
-			(in_bom no)
-			(on_board no)
-			(property "Reference" "U"
-				(at 0 7.62 0)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "AD9833"
+				(at 0 0 0)
 				(effects
 					(font
 						(size 1.27 1.27)
@@ -25,7 +25,7 @@
 					)
 				)
 			)
-			(property "Footprint" ""
+			(property "Footprint" "AD9833:AD9833"
 				(at 0 0 0)
 				(effects
 					(font
@@ -52,7 +52,7 @@
 					(hide yes)
 				)
 			)
-			(symbol "AD9833_1_1"
+			(symbol "CJMCU-9833_1_1"
 				(rectangle
 					(start -15.24 11.43)
 					(end 15.24 -15.24)
@@ -62,14 +62,6 @@
 					)
 					(fill
 						(type background)
-					)
-				)
-				(text "AD9833\n"
-					(at 0 1.27 0)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
 					)
 				)
 				(pin passive line
@@ -3547,6 +3539,26 @@
 			(embedded_fonts no)
 		)
 	)
+	(text "30/11/25\n"
+		(exclude_from_sim no)
+		(at 198.628 189.738 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "68d4308f-d0c8-4a5b-9016-19ffb4218cce")
+	)
+	(text "Falta Schottky, INA122 (van montados en placas aparte)\nModelar Jack de ECG correspondiente\n"
+		(exclude_from_sim no)
+		(at 206.756 170.18 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "a9225b5a-d9c8-4d78-ad63-2449e099f4e5")
+	)
 	(junction
 		(at 222.25 130.81)
 		(diameter 0)
@@ -6081,89 +6093,6 @@
 		)
 	)
 	(symbol
-		(lib_id "AD9833:AD9833")
-		(at 33.02 31.75 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom no)
-		(on_board no)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "1a4b3745-6a6e-4b6e-b1ba-b1d5e5c61cc7")
-		(property "Reference" "U7"
-			(at 33.02 16.51 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "~"
-			(at 33.02 19.05 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 33.02 31.75 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 33.02 31.75 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 33.02 31.75 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "6"
-			(uuid "b1ab02e3-6bbe-48c7-86ee-6fb811393ae6")
-		)
-		(pin "2"
-			(uuid "dfb846a3-aa13-4b29-b1c9-f24efd20edac")
-		)
-		(pin "4"
-			(uuid "5555e8b0-b79c-4394-b51a-f7a821663d8f")
-		)
-		(pin "3"
-			(uuid "86672ddc-7fa6-44d4-8e3e-a530c5d3351e")
-		)
-		(pin "1"
-			(uuid "099443f2-69d0-458c-8e8d-3a6c93092962")
-		)
-		(pin "5"
-			(uuid "eef28dad-ad34-4a67-9929-10a08d11e46f")
-		)
-		(pin "7"
-			(uuid "ea55e0de-2f11-40ea-84db-4f3ca13ee542")
-		)
-		(instances
-			(project ""
-				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
-					(reference "U7")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "power:GNDREF")
 		(at 204.47 97.79 0)
 		(unit 1)
@@ -8582,10 +8511,9 @@
 		(in_bom yes)
 		(on_board yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "98217633-5a4e-46a4-b69c-e7565379e377")
 		(property "Reference" "C1"
-			(at 55.88 30.48 90)
+			(at 53.34 40.132 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8593,7 +8521,7 @@
 			)
 		)
 		(property "Value" "C"
-			(at 55.88 33.02 90)
+			(at 55.88 34.29 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -10677,6 +10605,89 @@
 			(project "PCB PFC"
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
 					(reference "C4")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "AD-9833:CJMCU-9833")
+		(at 33.02 31.75 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "d0cb2a0c-0ca9-41f7-8e4d-bb9b4803bc3d")
+		(property "Reference" "AD1"
+			(at 33.02 16.51 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "~"
+			(at 33.02 19.05 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "MyFootprints:AD9833"
+			(at 33.02 31.75 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 33.02 31.75 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" ""
+			(at 33.02 31.75 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "7"
+			(uuid "a47bb015-009c-4a6b-8841-91b3f434f849")
+		)
+		(pin "1"
+			(uuid "5a05906d-c9fd-4536-b603-bbde3a84bdb5")
+		)
+		(pin "4"
+			(uuid "b24bf496-d7ed-4914-b4c1-cb97413dcc42")
+		)
+		(pin "5"
+			(uuid "8f7c2acd-a481-4b50-a23c-21a8bcc4d671")
+		)
+		(pin "6"
+			(uuid "eb4d55e6-4ed5-4ba5-bcd1-936508ebbbb3")
+		)
+		(pin "2"
+			(uuid "3a41baa8-37e2-4d30-881c-9c1faadcbfd5")
+		)
+		(pin "3"
+			(uuid "726d3065-b005-46a8-80bb-e5de055c3908")
+		)
+		(instances
+			(project ""
+				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
+					(reference "AD1")
 					(unit 1)
 				)
 			)
