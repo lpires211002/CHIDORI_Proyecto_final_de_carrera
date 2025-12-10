@@ -3628,7 +3628,7 @@
 		)
 		(uuid "68d4308f-d0c8-4a5b-9016-19ffb4218cce")
 	)
-	(text "Actualizacion en funcion a lo discutido con gus, agrego SJ1-3525 como jacks\n"
+	(text "Incorporo componentes SMD\n\n"
 		(exclude_from_sim no)
 		(at 224.79 170.18 0)
 		(effects
@@ -3904,7 +3904,7 @@
 	)
 	(wire
 		(pts
-			(xy 196.85 139.7) (xy 201.93 139.7)
+			(xy 196.85 139.7) (xy 198.12 139.7)
 		)
 		(stroke
 			(width 0)
@@ -4554,6 +4554,16 @@
 	)
 	(wire
 		(pts
+			(xy 213.36 139.7) (xy 214.63 139.7)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8bebb82e-118b-4f3d-baca-b269327532fe")
+	)
+	(wire
+		(pts
 			(xy 59.69 38.1) (xy 58.42 38.1)
 		)
 		(stroke
@@ -4891,16 +4901,6 @@
 			(type default)
 		)
 		(uuid "c511a9fa-5da6-48cd-ab47-ef5680fd1e4b")
-	)
-	(wire
-		(pts
-			(xy 209.55 139.7) (xy 214.63 139.7)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "c6a464d3-2cbd-47d7-91eb-668cb8630c9e")
 	)
 	(wire
 		(pts
@@ -5817,7 +5817,7 @@
 				)
 			)
 		)
-		(property "Value" "50"
+		(property "Value" "1k"
 			(at 157.988 139.7 90)
 			(effects
 				(font
@@ -5825,7 +5825,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 156.718 139.7 90)
 			(effects
 				(font
@@ -6387,7 +6387,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-8_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 72.39 54.61 0)
 			(effects
 				(font
@@ -6464,7 +6464,7 @@
 				)
 			)
 		)
-		(property "Value" "11k"
+		(property "Value" "10k"
 			(at 218.44 127.762 90)
 			(effects
 				(font
@@ -6472,7 +6472,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 218.44 129.032 90)
 			(effects
 				(font
@@ -6540,7 +6540,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 246.38 132.588 90)
 			(effects
 				(font
@@ -6761,7 +6761,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-8_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 139.7 130.81 0)
 			(effects
 				(font
@@ -6914,7 +6914,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 172.72 148.082 90)
 			(effects
 				(font
@@ -7118,7 +7118,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "2,2n"
+		(property "Value" "4.7n"
 			(at 218.44 95.2499 0)
 			(effects
 				(font
@@ -7127,7 +7127,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 213.6648 90.17 0)
 			(effects
 				(font
@@ -7381,7 +7381,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "575a64fa-d886-4072-8ac9-5f49e6e3b7da")
-		(property "Reference" "C5"
+		(property "Reference" "CLP2"
 			(at 225.044 140.97 0)
 			(effects
 				(font
@@ -7390,7 +7390,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "220p"
+		(property "Value" "270p"
 			(at 224.282 143.256 0)
 			(effects
 				(font
@@ -7399,7 +7399,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 221.2848 135.89 0)
 			(effects
 				(font
@@ -7435,7 +7435,7 @@
 		(instances
 			(project "PCB PFC"
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
-					(reference "C5")
+					(reference "CLP2")
 					(unit 1)
 				)
 			)
@@ -7538,7 +7538,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 193.04 129.032 90)
 			(effects
 				(font
@@ -7805,7 +7805,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-14_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 			(at 233.68 128.27 0)
 			(effects
 				(font
@@ -7975,7 +7975,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 91.44 93.218 90)
 			(effects
 				(font
@@ -8119,7 +8119,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-14_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 			(at 165.1 104.14 0)
 			(effects
 				(font
@@ -8376,7 +8376,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 107.6452 57.15 0)
 			(effects
 				(font
@@ -8445,7 +8445,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:CP_Radial_D5.0mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 139.3952 57.15 0)
 			(effects
 				(font
@@ -8579,7 +8579,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 46.99 62.738 90)
 			(effects
 				(font
@@ -8647,7 +8647,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-8_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 85.09 81.28 0)
 			(effects
 				(font
@@ -8914,15 +8914,15 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "98217633-5a4e-46a4-b69c-e7565379e377")
-		(property "Reference" "C1"
-			(at 53.34 40.132 90)
+		(property "Reference" "CHPad1"
+			(at 52.324 41.402 90)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 			)
 		)
-		(property "Value" "C"
+		(property "Value" "10uF"
 			(at 55.88 34.29 90)
 			(effects
 				(font
@@ -8930,7 +8930,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 59.69 37.1348 0)
 			(effects
 				(font
@@ -8966,7 +8966,7 @@
 		(instances
 			(project "PCB PFC"
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
-					(reference "C1")
+					(reference "CHPad1")
 					(unit 1)
 				)
 			)
@@ -9208,7 +9208,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 125.73 132.588 90)
 			(effects
 				(font
@@ -9342,7 +9342,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-8_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 44.45 72.39 0)
 			(effects
 				(font
@@ -9494,7 +9494,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-14_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 			(at 172.72 128.27 0)
 			(effects
 				(font
@@ -9589,7 +9589,7 @@
 				)
 			)
 		)
-		(property "Value" "4k"
+		(property "Value" "4.7k"
 			(at 259.08 142.748 90)
 			(effects
 				(font
@@ -9597,7 +9597,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 259.08 141.478 90)
 			(effects
 				(font
@@ -9665,7 +9665,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-14_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 			(at 259.08 128.27 0)
 			(effects
 				(font
@@ -9753,7 +9753,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "b3b5be51-642a-4624-9605-ec8c03cce94f")
-		(property "Reference" "C2"
+		(property "Reference" "CHP1"
 			(at 151.13 123.19 90)
 			(effects
 				(font
@@ -9761,7 +9761,7 @@
 				)
 			)
 		)
-		(property "Value" "100n"
+		(property "Value" "4.7n"
 			(at 151.13 125.73 90)
 			(effects
 				(font
@@ -9769,7 +9769,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 154.94 129.8448 0)
 			(effects
 				(font
@@ -9805,7 +9805,7 @@
 		(instances
 			(project ""
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
-					(reference "C2")
+					(reference "CHP1")
 					(unit 1)
 				)
 			)
@@ -9837,7 +9837,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 69.85 93.218 90)
 			(effects
 				(font
@@ -9888,7 +9888,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "bc233aa2-7d6a-460a-9137-4db4b94c9231")
-		(property "Reference" "C3"
+		(property "Reference" "CLP1"
 			(at 172.72 145.796 90)
 			(effects
 				(font
@@ -9904,7 +9904,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 176.53 138.7348 0)
 			(effects
 				(font
@@ -9940,7 +9940,7 @@
 		(instances
 			(project "PCB PFC"
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
-					(reference "C3")
+					(reference "CLP1")
 					(unit 1)
 				)
 			)
@@ -10106,7 +10106,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 69.85 74.168 90)
 			(effects
 				(font
@@ -10174,7 +10174,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 91.44 74.168 90)
 			(effects
 				(font
@@ -10242,7 +10242,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 27.94 71.628 90)
 			(effects
 				(font
@@ -10512,7 +10512,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-8_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 114.3 130.81 0)
 			(effects
 				(font
@@ -10591,7 +10591,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "500"
 			(at 60.96 43.1799 0)
 			(effects
 				(font
@@ -10600,7 +10600,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 60.198 41.91 90)
 			(effects
 				(font
@@ -10734,7 +10734,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-8_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 124.46 102.87 0)
 			(effects
 				(font
@@ -10822,7 +10822,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 252.222 53.34 90)
 			(effects
 				(font
@@ -10874,7 +10874,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "d092b630-4e28-4c71-a096-38e311b71e30")
-		(property "Reference" "C4"
+		(property "Reference" "CHP2"
 			(at 185.42 123.19 90)
 			(effects
 				(font
@@ -10882,7 +10882,7 @@
 				)
 			)
 		)
-		(property "Value" "1.8n"
+		(property "Value" "1.5n"
 			(at 185.42 125.73 90)
 			(effects
 				(font
@@ -10890,7 +10890,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
 			(at 189.23 129.8448 0)
 			(effects
 				(font
@@ -10926,7 +10926,7 @@
 		(instances
 			(project "PCB PFC"
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
-					(reference "C4")
+					(reference "CHP2")
 					(unit 1)
 				)
 			)
@@ -11041,7 +11041,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_DIP:DIP-14_W7.62mm"
+		(property "Footprint" "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 			(at 205.74 128.27 0)
 			(effects
 				(font
@@ -11144,7 +11144,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 160.02 129.032 90)
 			(effects
 				(font
@@ -11188,7 +11188,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 205.74 139.7 90)
+		(at 201.93 139.7 90)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -11196,23 +11196,23 @@
 		(dnp no)
 		(uuid "ddb2c6dc-9e88-4d80-b4d6-20a15c7f555e")
 		(property "Reference" "R7"
-			(at 205.994 145.796 90)
+			(at 202.184 145.796 90)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 			)
 		)
-		(property "Value" "2.2k"
-			(at 205.74 142.748 90)
+		(property "Value" "1k"
+			(at 201.93 142.748 90)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
-			(at 205.74 141.478 90)
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
+			(at 201.93 141.478 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11221,7 +11221,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 205.74 139.7 0)
+			(at 201.93 139.7 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11230,7 +11230,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 205.74 139.7 0)
+			(at 201.93 139.7 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11248,6 +11248,73 @@
 			(project "PCB PFC"
 				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
 					(reference "R7")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 209.55 139.7 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "e1ce2e34-d725-495b-8757-7e096d4c23c1")
+		(property "Reference" "R11"
+			(at 209.804 145.796 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "1k"
+			(at 209.55 142.748 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
+			(at 209.55 141.478 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 209.55 139.7 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 209.55 139.7 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "440feea8-e42e-4a51-8276-0cd58ab8014a")
+		)
+		(pin "2"
+			(uuid "fc431d66-539b-47af-a4c4-9a755cd7f121")
+		)
+		(instances
+			(project "PCB PFC"
+				(path "/0aa00474-80cf-4472-8457-f9764a8fc141"
+					(reference "R11")
 					(unit 1)
 				)
 			)
@@ -11432,7 +11499,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal"
+		(property "Footprint" "Resistor_SMD:R_0805_2012Metric"
 			(at 138.43 141.478 90)
 			(effects
 				(font
