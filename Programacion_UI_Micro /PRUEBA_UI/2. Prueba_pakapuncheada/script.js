@@ -1,7 +1,7 @@
 // script.js - Enhanced Version
 
 // --- WebSocket setup ---
-const socket = new WebSocket(`ws://172.20.10.3:81/`);
+const socket = new WebSocket(`ws://192.168.0.126:81/`);
 
 // --- State variables ---
 let startTime = null;
@@ -742,12 +742,12 @@ document.getElementById('exportPDFBtn').addEventListener('click', async () => {
   y += 8;
   
   pdf.setFontSize(10);
-  pdf.text(`Valor Inicial: ${initialValue ? initialValue.toFixed(2) : '--'} Ω`, 25, y); y += 6;
-  pdf.text(`Valor Final: ${currentValue ? currentValue.toFixed(2) : '--'} Ω`, 25, y); y += 6;
+  pdf.text(`Valor Inicial: ${initialValue ? initialValue.toFixed(2) : '--'} Ohm`, 25, y); y += 6;
+  pdf.text(`Valor Final: ${currentValue ? currentValue.toFixed(2) : '--'} Ohm`, 25, y); y += 6;
   if (initialValue && currentValue) {
     const change = currentValue - initialValue;
     const percent = (change / initialValue) * 100;
-    pdf.text(`Cambio Total: ${change.toFixed(2)} Ω (${percent.toFixed(1)}%)`, 25, y); y += 6;
+    pdf.text(`Cambio Total: ${change.toFixed(2)} Ohm (${percent.toFixed(1)}%)`, 25, y); y += 6;
   }
   pdf.text(`Duración: ${elapsedTimeDisplay.textContent}`, 25, y); y += 6;
   pdf.text(`Eventos Marcados: ${eventCount}`, 25, y); y += 6;
@@ -777,7 +777,7 @@ document.getElementById('exportPDFBtn').addEventListener('click', async () => {
       }
       const minutes = Math.floor(evt.time / 60);
       const seconds = Math.floor(evt.time % 60);
-      pdf.text(`#${evt.id} - ${minutes}:${seconds.toString().padStart(2, '0')} - ${evt.value.toFixed(2)} Ω`, 25, y);
+      pdf.text(`#${evt.id} - ${minutes}:${seconds.toString().padStart(2, '0')} - ${evt.value.toFixed(2)} Ohm`, 25, y);
       y += 5;
     });
   }

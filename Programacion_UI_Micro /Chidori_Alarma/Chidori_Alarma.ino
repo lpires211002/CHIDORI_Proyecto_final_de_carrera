@@ -89,8 +89,8 @@ typedef struct{
 sensor_t Chidori;
 
 // ==== Configuración WIFI =====
-const char* ssid = "Rafaela 2.4"; // Introducir Red WiFi
-const char* password = "0143330122";  // Introducir contraseña de la red
+const char* ssid = "Alejandra 2.4"; // Introducir Red WiFi
+const char* password = "ALE67680208";  // Introducir contraseña de la red
 
 // Configuración del WebSocket en el puerto 81
 WebSocketsServer webSocket(81);
