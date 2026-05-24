@@ -7305,7 +7305,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Package_TO_SOT_SMD:SOT-23-8"
+		(property "Footprint" "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 			(at 36.83 55.88 0)
 			(effects
 				(font
@@ -7602,7 +7602,7 @@
 				)
 			)
 		)
-		(property "Value" "22k"
+		(property "Value" "500"
 			(at 139.7 63.246 90)
 			(effects
 				(font
@@ -7743,7 +7743,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "4.7n"
+		(property "Value" "10n"
 			(at 269.24 72.3899 0)
 			(effects
 				(font
@@ -10058,7 +10058,7 @@
 				)
 			)
 		)
-		(property "Value" "4.7k"
+		(property "Value" "16.2k"
 			(at 226.06 52.578 90)
 			(effects
 				(font
@@ -10430,7 +10430,7 @@
 				)
 			)
 		)
-		(property "Value" "100p"
+		(property "Value" "4.7n"
 			(at 139.7 53.34 90)
 			(effects
 				(font
@@ -11671,7 +11671,7 @@
 				)
 			)
 		)
-		(property "Value" "1k"
+		(property "Value" "337"
 			(at 127 37.592 90)
 			(effects
 				(font
