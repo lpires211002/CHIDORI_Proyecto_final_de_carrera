@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { X, FileText, BarChart, FileJson } from 'lucide-react';
 
@@ -12,7 +12,8 @@ export default function ExportModal({
   currentValue, 
   elapsedTime, 
   eventCount,
-  onShowAlert
+  onShowAlert,
+  onSavePatient
 }) {
   const [nombre, setNombre] = useState('');
   const [edad, setEdad] = useState('');
@@ -21,6 +22,21 @@ export default function ExportModal({
   const [altura, setAltura] = useState('');
   const [circ, setCirc] = useState('');
   const [menstruacion, setMenstruacion] = useState('');
+
+  // Auto-sync patient details to database as the user types
+  useEffect(() => {
+    if (onSavePatient && (nombre || edad || sexo || peso || altura || circ)) {
+      onSavePatient({
+        nombre,
+        edad,
+        sexo,
+        peso,
+        altura,
+        circ,
+        menstruacion
+      });
+    }
+  }, [nombre, edad, sexo, peso, altura, circ, menstruacion]);
 
   if (!isOpen) return null;
 
