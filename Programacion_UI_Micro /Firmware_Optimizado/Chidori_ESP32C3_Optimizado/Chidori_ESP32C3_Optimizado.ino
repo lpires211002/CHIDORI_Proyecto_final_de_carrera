@@ -35,13 +35,13 @@
 #define GANANCIA_INA       5
 #define VShotcky           0.2
 
-// Muestreo
-#define FREQ           50000 // frecuencia de trabajo (50 kHz)
-#define T_MUESTREO_MS  1000  // Periodo de muestreo en milisegundos (1Hz)
-#define T_ENVIO_DATOS  10    // Periodo de envio de datos (cada 10 muestras)
-#define UMBRAL        -1.5   // Nivel de umbral de alerta en decibeles
-#define MUESTRAS_ALARMA 5
-#define CANT_MUESTRAS 10
+// Muestreo de alta velocidad (700 Hz)
+#define FREQ               50000 // frecuencia de trabajo (50 kHz)
+#define SAMPLE_INTERVAL_US 1428  // Intervalo para 700 Hz (1000000 us / 700 ≈ 1428 us)
+#define AVG_SAMPLES        256   // Promediador de 256 muestras antes de transmitir
+#define UMBRAL            -1.5   // Nivel de umbral de alerta en decibeles
+#define MUESTRAS_ALARMA    5
+#define CANT_MUESTRAS      10
 
 // Decibeles
 #define dB(Z,Zref) (20*log10((Z)/(Zref)))
@@ -68,10 +68,13 @@ float average_Z = 0;
 float CORRIENTE_INYECTADA;
 float GANANCIA_RECEPTOR;
 
-unsigned long t_medir = 0;
-unsigned long t_debounce = 0; // Temporizador para el antirebote por millisecond
+unsigned long t_debounce = 0; // Temporizador para el antirebote por milisegundos
+unsigned long last_sample_us = 0; // Temporizador microsegundos para muestreo 700 Hz
 
-int Counter = T_ENVIO_DATOS;
+// Acumuladores para el promediador de 256 muestras a 700 Hz
+uint32_t adc_sum = 0;
+uint16_t adc_count = 0;
+
 bool measuring = false;
 
 bool botonConfirmado = false;
@@ -100,7 +103,7 @@ void ad9833Write(uint16_t data);
 void ad9833SetFrequency(double freqHz);
 void ad9833Begin(double freqHz);
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
-void Medir_Impedancia();
+void adquirir_y_promediar();
 void Calcular_promedio(float Z);
 void checkButton();
 
@@ -128,16 +131,18 @@ void setup() {
 void loop() {
   webSocket.loop();
 
-  // --- CORRECCIÓN BUG ANTIRREBOTE (Debounce cada 10ms) ---
+  // --- ANTIRREBOTE FÍSICO CORREGIDO (Debounce cada 10ms) ---
   if (millis() - t_debounce >= 10) {
     t_debounce = millis();
     checkButton();
   }
 
-  // Medición a 1 Hz de forma precisa sin delays bloqueantes
-  if (millis() - t_medir >= T_MUESTREO_MS) {
-    t_medir = millis();
-    Medir_Impedancia();
+  // --- MUESTREO DE ALTA VELOCIDAD (700 Hz) EN SEGUNDO PLANO ---
+  if (Chidori.estado == MIDIENDO) {
+    if (micros() - last_sample_us >= SAMPLE_INTERVAL_US) {
+      last_sample_us = micros();
+      adquirir_y_promediar();
+    }
   }
 
   switch (Chidori.estado) {
@@ -148,11 +153,12 @@ void loop() {
         Serial.println(">> MIDIENDO (Por boton)");
         measuring = true;
         Chidori.estado = MIDIENDO;
+        last_sample_us = micros(); // Sincroniza marca de tiempo
       }
       break;
 
     case MIDIENDO:
-      // Si tenemos al menos una medicion valida y el calculo en dB desciende del umbral
+      // Evaluamos la atenuación en decibeles respecto al baseline
       if (!First_Measure && dB(Chidori.Z, Chidori.Ref) < UMBRAL) {
         if (--Alarm_counter == 0) {
           Chidori.estado = ALARMA;
@@ -165,7 +171,6 @@ void loop() {
         botonConfirmado = false;
         Serial.println(">> INACTIVO (Por boton)");
         measuring = false;
-        Counter = T_ENVIO_DATOS;
         First_Measure = true;
         Chidori.estado = INACTIVO;
       }
@@ -247,7 +252,7 @@ void ad9833Begin(double freqHz) {
   ad9833Write(CMD_EXIT_RESET_SINE);
 }
 
-// --- WebSocket Event Handler Integrado con la Máquina de Estados ---
+// --- WebSocket Event Handler ---
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
   if (type == WStype_TEXT) {
     String command = String((char*)payload);
@@ -258,6 +263,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       if (Chidori.estado == INACTIVO) {
         measuring = true;
         Chidori.estado = MIDIENDO;
+        adc_sum = 0;
+        adc_count = 0;
+        last_sample_us = micros();
         Serial.println(">> MIDIENDO (Por comando WS)");
       }
     } 
@@ -265,7 +273,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       measuring = false;
       Chidori.estado = INACTIVO;
       digitalWrite(BUZZER, LOW);
-      Counter = T_ENVIO_DATOS;
       First_Measure = true;
       Serial.println(">> INACTIVO (Pausado por comando WS)");
     } 
@@ -273,48 +280,51 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       measuring = false;
       Chidori.estado = INACTIVO;
       digitalWrite(BUZZER, LOW);
-      Counter = T_ENVIO_DATOS;
       First_Measure = true;
       Alarm_counter = MUESTRAS_ALARMA;
       // Vaciamos el promedio
       size_m = 0;
       average_Z = 0;
+      adc_sum = 0;
+      adc_count = 0;
       Serial.println(">> INACTIVO (Reseteado por comando WS)");
     }
   }
 }
 
-void Medir_Impedancia() {
-  if (Chidori.estado != MIDIENDO) return;
+// --- Adquisición Fisiológica a 700 Hz con Filtro de Promedio de 256 Muestras ---
+void adquirir_y_promediar() {
+  adc_sum += analogRead(ADC_PIN);
+  adc_count++;
 
-  int adc = analogRead(ADC_PIN);
-  float voltage = ADC(adc);
+  if (adc_count >= AVG_SAMPLES) {
+    float avg_adc = (float)adc_sum / AVG_SAMPLES;
+    adc_sum = 0;
+    adc_count = 0;
 
-  float Z = (voltage + VShotcky) / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);
+    float voltage = ADC(avg_adc);
+    float Z = (voltage + VShotcky) / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);
 
-  Calcular_promedio(Z);
-  Chidori.Z = average_Z;
+    // Promedio móvil adicional de 10 muestras para suavizado total
+    Calcular_promedio(Z);
+    Chidori.Z = average_Z;
 
-  if (--Counter <= 0) {
     if (First_Measure) {
       Chidori.Ref = Chidori.Z;
       First_Measure = false;
       Serial.print("⭐ Impedancia de Referencia Calibrada: ");
-      Serial.println(Chidori.Ref);
+      Serial.print(Chidori.Ref);
+      Serial.println(" Ohm");
     }
 
     String msg = String(Chidori.Z, 5);
     int clients = webSocket.connectedClients();
     if (clients > 0) {
       webSocket.broadcastTXT(msg);
-    } else {
-      Serial.println("⚠️ No hay clientes WebSocket conectados.");
     }
 
     Serial.print("Z = ");
     Serial.println(msg);
-
-    Counter = T_ENVIO_DATOS;
   }
 }
 

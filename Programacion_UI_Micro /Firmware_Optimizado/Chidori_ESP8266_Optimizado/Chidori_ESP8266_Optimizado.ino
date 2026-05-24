@@ -32,10 +32,10 @@
 #define GANANCIA_INA 5
 #define VShotcky 0.2 // Caida Diodica del Schotcky
 
-// Definiciones respecto al muestreo
+// Definiciones respecto al muestreo de alta velocidad
 #define FREQ 50e3 // frecuencia de trabajo (50 kHz)
-#define T_MUESTREO 1 // Periodo de muestreo en segundos
-#define T_ENVIO_DATOS 10 // Periodo de envio de datos
+#define SAMPLE_INTERVAL_US 1428 // Intervalo para 700 Hz (1000000 us / 700 ≈ 1428 us)
+#define AVG_SAMPLES 256 // Promediador de 256 muestras antes de transmitir
 #define UMBRAL -1.5 // Nivel de umbral de alerta en decibeles
 #define MUESTRAS_ALARMA 5 // Cantidad de muestras que permito debajo del nivel de alarma
 #define CANT_MUESTRAS 10 // Cantidad de muestras que promedio
@@ -70,7 +70,11 @@ constexpr double MCLK = 25e6; // 25 MHz frecuencia del CLK del AD9833
 float muestras[CANT_MUESTRAS] = {0}; // defino un vector con mis muestras de impedancia
 int size = 0; // ire moviendo el indice para hacer un moving average
 float average_Z = 0; // defino el promedio de muestras
-int Counter = T_ENVIO_DATOS;
+
+// Acumuladores para el promediador de 256 muestras a 700 Hz
+uint32_t adc_sum = 0;
+uint16_t adc_count = 0;
+unsigned long last_sample_us = 0;
 
 // Definicion maquina de estados
 typedef enum {
@@ -121,13 +125,11 @@ void ad9833Begin(double freqHz); // Inicia al AD9833 mediante SPI
 void ad9833Write(uint16_t data); // Envia un comando al modulo AD9833
 void ad9833SetFrequency(double freqHz); // Setea la frecuencia
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length); // Configuracion WIFI
-void Medir_Impedancia(); // mide y calcula la impedancia
-void Enviar_Impedancia(); // transmite el valor medido
+void adquirir_y_promediar(); // adquiere muestras a 700Hz y las promedia en 256
 void Calcular_promedio(float *vec, float Z); // Calcula el promedio
 void checkButton(); // Filtro para el boton
 
-// Timers 
-TickTwo timer_muestreo(Medir_Impedancia, s2ms(T_MUESTREO)); // Interrupcion para medir impedancia
+// Timers
 TickTwo timer_debounce(checkButton, 10); // Interrupcion para debounce del boton
 
 void setup() {
@@ -138,22 +140,30 @@ void setup() {
 void loop() {
   webSocket.loop();
   timer_debounce.update();
-  timer_muestreo.update();
   MDNS.update(); // Actualiza el mDNS resolver
+
+  // --- MUESTREO DE ALTA VELOCIDAD (700 Hz) EN SEGUNDO PLANO ---
+  if (Chidori.estado == MIDIENDO) {
+    if (micros() - last_sample_us >= SAMPLE_INTERVAL_US) {
+      last_sample_us = micros();
+      adquirir_y_promediar();
+    }
+  }
 
   switch (Chidori.estado) {
     case INACTIVO:
       digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
-        Serial.println(">> MIDIENDO (Por boton)");
         botonConfirmado = false;
+        Serial.println(">> MIDIENDO (Por boton)");
         measuring = true;
         Chidori.estado  = MIDIENDO;
+        last_sample_us = micros(); // Sincroniza marca de tiempo
       }
       break;
 
     case MIDIENDO:
-      // Si tenemos al menos una medicion valida y el calculo en dB desciende del umbral
+      // Evaluamos la atenuación en decibeles respecto al baseline
       if (!First_Measure && dB(Chidori.Z, Chidori.Ref) < UMBRAL) {
         Alarm_counter--;
         Serial.print("⚠️ Caida detectada! Muestras restantes para Alarma: ");
@@ -163,7 +173,6 @@ void loop() {
       }
 
       if (Alarm_counter == 0) {
-        Counter = T_ENVIO_DATOS; // Devuelvo el counter al valor original
         First_Measure = true; // Levanto el flag para la proxima medicion
         Chidori.estado = ALARMA;
       }
@@ -173,7 +182,6 @@ void loop() {
         botonConfirmado = false;
         Serial.println(">> INACTIVO (Por boton)");
         measuring = false;
-        Counter = T_ENVIO_DATOS;
         First_Measure = true;
         Chidori.estado  = INACTIVO;
       }
@@ -238,7 +246,6 @@ void Inicializar_WIFI() {
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  timer_muestreo.start();
   return;
 }
 
@@ -281,7 +288,7 @@ void ad9833Begin(double freqHz) {
   ad9833Write(CMD_EXIT_RESET_SINE);      // Salir de reset y activar seno
 }
 
-// --- WebSocket Event Handler Integrado con la Máquina de Estados ---
+// --- WebSocket Event Handler ---
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
   if (type == WStype_TEXT) {
     String command = String((char*)payload);
@@ -292,6 +299,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       if (Chidori.estado == INACTIVO) {
         measuring = true;
         Chidori.estado = MIDIENDO;
+        adc_sum = 0;
+        adc_count = 0;
+        last_sample_us = micros();
         Serial.println(">> MIDIENDO (Por comando WS)");
       }
     } 
@@ -299,7 +309,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       measuring = false;
       Chidori.estado = INACTIVO;
       digitalWrite(BUZZER, LOW);
-      Counter = T_ENVIO_DATOS;
       First_Measure = true;
       Serial.println(">> INACTIVO (Pausado por comando WS)");
     } 
@@ -307,54 +316,54 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       measuring = false;
       Chidori.estado = INACTIVO;
       digitalWrite(BUZZER, LOW);
-      Counter = T_ENVIO_DATOS;
       First_Measure = true;
       Alarm_counter = MUESTRAS_ALARMA;
       // Vaciamos el promedio
       size = 0;
       average_Z = 0;
+      adc_sum = 0;
+      adc_count = 0;
       Serial.println(">> INACTIVO (Reseteado por comando WS)");
     }
   }
 }
 
-void Medir_Impedancia() { // Mide la señal recibida y calcula la impedancia
-  // Solo medimos y transmitimos si el estado actual es MIDIENDO
-  if (Chidori.estado != MIDIENDO) return;
+// --- Adquisición Fisiológica a 700 Hz con Filtro de Promedio de 256 Muestras ---
+void adquirir_y_promediar() {
+  adc_sum += analogRead(A0);
+  adc_count++;
 
-  int sensorValue = analogRead(A0);
-  float voltage = ADC(sensorValue);  // Convertir a voltaje 
-  float resistance = (Amp2Vpp(voltage + VShotcky))/(CORRIENTE_INYECTADA*GANANCIA_RECEPTOR);  // Ley de Ohm 
-  
-  Calcular_promedio(muestras, resistance);
-  Chidori.Z = average_Z;
+  if (adc_count >= AVG_SAMPLES) {
+    float avg_adc = (float)adc_sum / AVG_SAMPLES;
+    adc_sum = 0;
+    adc_count = 0;
 
-  if (Counter > 0) {
-    Counter--;
-  } 
-  else {
-      if (First_Measure) { // La primer medicion que envio la tomo como referencia
-        Chidori.Ref = Chidori.Z;
-        First_Measure = false;
-        Serial.print("⭐ Impedancia de Referencia Calibrada: ");
-        Serial.println(Chidori.Ref);
-      }
-      
-      String message = String(Chidori.Z, 5);
-      Serial.print("Enviando por WebSocket: ");
-      Serial.print(message);
-      Serial.print(" Ohm (Ref: ");
+    float voltage = ADC(avg_adc);  // Convertir a voltaje
+    float resistance = (Amp2Vpp(voltage + VShotcky)) / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);  // Ley de Ohm
+
+    // Promedio móvil adicional de 10 muestras para suavizado total
+    Calcular_promedio(muestras, resistance);
+    Chidori.Z = average_Z;
+
+    if (First_Measure) { // La primera muestra promediada se establece como baseline Zref
+      Chidori.Ref = Chidori.Z;
+      First_Measure = false;
+      Serial.print("⭐ Impedancia de Referencia Calibrada: ");
       Serial.print(Chidori.Ref);
-      Serial.println(" Ohm)");
+      Serial.println(" Ohm");
+    }
 
-      int clients = webSocket.connectedClients();
-      if (clients > 0) {
-        webSocket.broadcastTXT(message);
-      } else {
-        Serial.println("⚠️ No hay clientes WebSocket conectados.");
-      }
-      // Una vez terminado, reseteamos el contador
-      Counter = T_ENVIO_DATOS;
+    String message = String(Chidori.Z, 5);
+    Serial.print("Enviando Z Promediado (256 muestras a 700Hz): ");
+    Serial.print(message);
+    Serial.print(" Ohm (Atenuacion: ");
+    Serial.print(dB(Chidori.Z, Chidori.Ref));
+    Serial.println(" dB)");
+
+    int clients = webSocket.connectedClients();
+    if (clients > 0) {
+      webSocket.broadcastTXT(message);
+    }
   }
 }
 
