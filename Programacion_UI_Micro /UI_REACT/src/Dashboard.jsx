@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun,
-  Settings as SettingsIcon, Cpu, LogOut,
+  Settings as SettingsIcon, Cpu, LogOut, Shield,
 } from 'lucide-react';
 
 import SettingsPanel     from './components/SettingsPanel';
@@ -25,7 +25,7 @@ import { supabase, emailToUsername } from './supabaseClient';
  * Dashboard · vista principal del clínico autenticado.
  * El gate de auth está en App.jsx; acá ya sabemos que hay session y profile.
  */
-export default function Dashboard({ session, profile, onSignOut }) {
+export default function Dashboard({ session, profile, onSignOut, isAdmin = false, onSwitchToAdmin }) {
   const userId      = session.user.id;
   const displayName = profile?.display_name || emailToUsername(session.user.email);
 
@@ -422,10 +422,24 @@ export default function Dashboard({ session, profile, onSignOut }) {
       <header className="app-header">
         <div className="brand">
           <span className="brand-mark">Chidori</span>
-          <span className="brand-tag">Bioimpedancia vesical · v2</span>
+          <span className="brand-tag">
+            {isAdmin ? 'Modo medición · sesión administrativa' : 'Bioimpedancia vesical · v2'}
+          </span>
         </div>
 
         <div className="app-actions">
+          {isAdmin && onSwitchToAdmin && (
+            <button
+              type="button"
+              className="button button-sm"
+              onClick={onSwitchToAdmin}
+              title="Volver al panel de administración"
+            >
+              <Shield size={14} />
+              Panel admin
+            </button>
+          )}
+
           <span className={`pill ${
             isSimulator ? 'pill-syncing'
             : wsStatus === 'CONNECTED' ? 'pill-live'

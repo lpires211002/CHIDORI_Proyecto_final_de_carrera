@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Shield, LogOut, CheckCircle2, X, UserCheck, UserX, RefreshCw, Search, ChevronRight } from 'lucide-react';
+import { Shield, LogOut, CheckCircle2, X, UserCheck, UserX, RefreshCw, Search, ChevronRight, Activity } from 'lucide-react';
 import { supabase, emailToUsername } from '../supabaseClient';
 
 /**
@@ -9,7 +9,7 @@ import { supabase, emailToUsername } from '../supabaseClient';
  *   1. Cuentas pendientes de aprobación · aprobar/rechazar
  *   2. Catálogo global de sesiones · drill-down a mediciones + eventos
  */
-export default function AdminView({ profile, onSignOut }) {
+export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
   const [tab, setTab] = useState('sessions'); // sessions | accounts
   const [accounts, setAccounts] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -122,6 +122,15 @@ export default function AdminView({ profile, onSignOut }) {
         </div>
 
         <div className="app-actions">
+          <button
+            type="button"
+            className="button button-sm"
+            onClick={onSwitchToDashboard}
+            title="Cambiar a la vista de medición"
+          >
+            <Activity size={14} />
+            Tomar mediciones
+          </button>
           <span className="pill pill-confirm">
             <span className="pill-dot" />
             {profile?.display_name || 'sa'}
