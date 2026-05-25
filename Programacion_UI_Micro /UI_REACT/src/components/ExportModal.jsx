@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { jsPDF } from 'jspdf';
 import { X, FileText, Table, FileType2 } from 'lucide-react';
+import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
 
 /**
  * Export modal · PDF / CSV / TXT.
  *
- * Key changes vs the prior version:
- *  · Patient data is NO LONGER auto-synced on every keystroke. It is sent
- *    once when the user clicks "Guardar paciente" or proceeds to export.
- *  · PDF header uses neutral ink, not brand orange.
- *  · Microcopy reviewed for clinical tone.
+ * Usa los helpers puros en lib/exporters.js, compartidos con el AdminView.
+ * El toggle "Guardar en la base de datos" controla si los exports también
+ * persisten los datos del paciente en Supabase (por defecto sí).
  */
 export default function ExportModal({
   isOpen,
@@ -31,7 +29,6 @@ export default function ExportModal({
   const [altura, setAltura]             = useState('');
   const [circ, setCirc]                 = useState('');
   const [menstruacion, setMenstruacion] = useState('');
-  // Controla si los exports también persisten en Supabase. Default true.
   const [saveToDb, setSaveToDb]         = useState(true);
 
   if (!isOpen) return null;
@@ -49,153 +46,60 @@ export default function ExportModal({
     };
   };
 
+  const buildMeasurements = () => (data || []).map((p, i) => ({
+    elapsed_time: p.x,
+    impedance:    p.y,
+    rate:         rateData?.[i]?.y ?? 0,
+  }));
+
+  const buildStats = () => ({
+    initialZ:   initialValue,
+    finalZ:     currentValue,
+    elapsedStr: elapsedTime,
+    eventCount,
+    samples:    (data || []).length,
+  });
+
+  const getChartImage = () => {
+    try { return window.mainChartInstance?.toBase64Image() || null; }
+    catch { return null; }
+  };
+
   const savePatient = () => {
-    if (!saveToDb) return; // checkbox desactivado: export solo local
+    if (!saveToDb) return;
     if (!onSavePatient) return;
     onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion });
     onShowAlert('Datos del paciente guardados en la nube', 'success');
   };
 
-  const handleExportPDF = async () => {
+  const handleExportPDF = () => {
     savePatient();
-    const pdf = new jsPDF();
-    const info = buildPatient();
-    let y = 22;
-
-    pdf.setFontSize(18);
-    pdf.setTextColor(30);
-    pdf.text('Chidori · Reporte de sesión', 20, y);
-    y += 8;
-    pdf.setFontSize(9);
-    pdf.setTextColor(110);
-    pdf.text(`Generado · ${new Date().toLocaleString('es-AR')}`, 20, y);
-    y += 14;
-
-    if (info) {
-      pdf.setFontSize(12);
-      pdf.setTextColor(30);
-      pdf.text('Paciente', 20, y); y += 6;
-      pdf.setFontSize(9.5);
-      pdf.setTextColor(70);
-      pdf.text(`Nombre: ${info.nombre}`, 22, y); y += 5;
-      pdf.text(`Edad: ${info.edad} años`, 22, y); y += 5;
-      pdf.text(`Sexo: ${info.sexo}`, 22, y); y += 5;
-      pdf.text(`Peso: ${info.peso} kg · Altura: ${info.altura} m`, 22, y); y += 5;
-      pdf.text(`Circunferencia suprailíaca: ${info.circ} cm`, 22, y); y += 5;
-      if (info.sexo === 'Femenino') {
-        pdf.text(`Última menstruación: ${info.menstruacion}`, 22, y); y += 5;
-      }
-      y += 6;
-    }
-
-    pdf.setFontSize(12);
-    pdf.setTextColor(30);
-    pdf.text('Sesión', 20, y); y += 6;
-    pdf.setFontSize(9.5);
-    pdf.setTextColor(70);
-    pdf.text(`Z basal: ${initialValue ? initialValue.toFixed(2) : '—'} Ω`, 22, y); y += 5;
-    pdf.text(`Z final: ${currentValue ? currentValue.toFixed(2) : '—'} Ω`, 22, y); y += 5;
-    if (initialValue && currentValue) {
-      const change = currentValue - initialValue;
-      const percent = (change / initialValue) * 100;
-      pdf.text(`Cambio total: ${change.toFixed(2)} Ω (${percent.toFixed(1)}%)`, 22, y); y += 5;
-    }
-    pdf.text(`Duración: ${elapsedTime}`, 22, y); y += 5;
-    pdf.text(`Eventos marcados: ${eventCount}`, 22, y); y += 5;
-    pdf.text(`Puntos registrados: ${data.length}`, 22, y); y += 10;
-
-    if (window.mainChartInstance) {
-      try {
-        const img = window.mainChartInstance.toBase64Image();
-        pdf.addImage(img, 'PNG', 20, y, 170, 80);
-        y += 86;
-      } catch (e) {
-        console.error('Embed chart failed', e);
-      }
-    }
-
-    if (events && events.length > 0) {
-      if (y > 250) { pdf.addPage(); y = 20; }
-      pdf.setFontSize(12);
-      pdf.setTextColor(30);
-      pdf.text('Eventos', 20, y); y += 6;
-      pdf.setFontSize(9);
-      pdf.setTextColor(70);
-      events.forEach((evt) => {
-        if (y > 280) { pdf.addPage(); y = 20; }
-        const m = Math.floor(evt.time / 60);
-        const s = Math.floor(evt.time % 60);
-        pdf.text(`#${String(evt.id).padStart(2, '0')} · ${m}:${String(s).padStart(2, '0')} · ${evt.value.toFixed(2)} Ω`, 22, y);
-        y += 5;
-      });
-    }
-
-    pdf.save(`chidori_reporte_${new Date().toISOString().slice(0, 10)}.pdf`);
+    exportPDF({
+      patient:      buildPatient(),
+      stats:        buildStats(),
+      measurements: buildMeasurements(),
+      events,
+      chartImage:   getChartImage(),
+    });
     onShowAlert('Reporte PDF generado', 'success');
     onClose();
   };
 
   const handleExportCSV = () => {
     savePatient();
-    let csv = 'tiempo_s,impedancia_ohm,tasa_ohm_min\n';
-    data.forEach((p, i) => {
-      const r = rateData[i] ? rateData[i].y.toFixed(3) : '0.000';
-      csv += `${p.x.toFixed(2)},${p.y.toFixed(3)},${r}\n`;
-    });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `chidori_datos_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    exportCSV({ measurements: buildMeasurements() });
     onShowAlert('Datos exportados en CSV', 'success');
     onClose();
   };
 
   const handleExportTXT = () => {
     savePatient();
-    const info = buildPatient();
-    let txt = '';
-    if (info) {
-      txt += '=== PACIENTE ===\n';
-      txt += `Nombre: ${info.nombre}\nEdad: ${info.edad}\nSexo: ${info.sexo}\n`;
-      txt += `Peso: ${info.peso} kg\nAltura: ${info.altura} m\n`;
-      txt += `Circ. suprailíaca: ${info.circ} cm\n`;
-      if (info.sexo === 'Femenino') txt += `Última menstruación: ${info.menstruacion}\n`;
-      txt += '\n';
-    }
-    txt += '=== SESIÓN ===\n';
-    txt += `Fecha: ${new Date().toLocaleString('es-AR')}\n`;
-    txt += `Z basal: ${initialValue ? initialValue.toFixed(2) : '—'} Ω\n`;
-    txt += `Z final: ${currentValue ? currentValue.toFixed(2) : '—'} Ω\n`;
-    if (initialValue && currentValue) {
-      const c = currentValue - initialValue;
-      const p = (c / initialValue) * 100;
-      txt += `Cambio total: ${c.toFixed(2)} Ω (${p.toFixed(1)}%)\n`;
-    }
-    txt += `Duración: ${elapsedTime}\nEventos: ${eventCount}\nPuntos: ${data.length}\n\n`;
-    txt += '=== MEDICIONES ===\ntiempo_s\timpedancia_ohm\ttasa_ohm_min\n';
-    data.forEach((p, i) => {
-      const r = rateData[i] ? rateData[i].y.toFixed(3) : '0.000';
-      txt += `${p.x.toFixed(2)}\t${p.y.toFixed(3)}\t${r}\n`;
+    exportTXT({
+      patient:      buildPatient(),
+      stats:        buildStats(),
+      measurements: buildMeasurements(),
+      events,
     });
-    if (events.length) {
-      txt += '\n=== EVENTOS ===\n';
-      events.forEach((e) => {
-        const m = Math.floor(e.time / 60);
-        const s = Math.floor(e.time % 60);
-        txt += `#${e.id} · ${m}:${String(s).padStart(2, '0')} · ${e.value.toFixed(2)} Ω`;
-        if (e.change != null) txt += ` · Δ ${e.change > 0 ? '+' : ''}${e.change.toFixed(2)} Ω`;
-        txt += '\n';
-      });
-    }
-    const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `chidori_mediciones_${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
     onShowAlert('Archivo de texto generado', 'success');
     onClose();
   };
@@ -231,11 +135,11 @@ export default function ExportModal({
               <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>Encabezado + tabla legible</span>
             </button>
             <span className="readout-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--type-mute)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
-              {data.length} puntos · {events.length} eventos
+              {(data || []).length} puntos · {(events || []).length} eventos
             </span>
           </div>
 
-          {/* Toggle · guardar en la nube */}
+          {/* Toggle: guardar en la nube */}
           <div
             className="surface"
             style={{
@@ -258,11 +162,7 @@ export default function ExportModal({
               </div>
             </div>
             <label className="switch" title="Guardar datos del paciente en la nube">
-              <input
-                type="checkbox"
-                checked={saveToDb}
-                onChange={(e) => setSaveToDb(e.target.checked)}
-              />
+              <input type="checkbox" checked={saveToDb} onChange={(e) => setSaveToDb(e.target.checked)} />
               <span className="switch-track" />
             </label>
           </div>
