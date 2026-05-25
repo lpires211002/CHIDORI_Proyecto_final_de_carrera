@@ -11,16 +11,25 @@ export default function AlarmBanner({ active, message, hint, onAcknowledge }) {
   const intervalRef = useRef(null);
   const originalTitleRef = useRef(null);
 
+  // Stop any in-flight oscillators and tear down audio + title flash + interval.
+  const teardown = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (originalTitleRef.current !== null) {
+      document.title = originalTitleRef.current;
+      originalTitleRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch { /* noop */ }
+      audioCtxRef.current = null;
+    }
+  };
+
   useEffect(() => {
     if (!active) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      if (originalTitleRef.current !== null) {
-        document.title = originalTitleRef.current;
-        originalTitleRef.current = null;
-      }
+      teardown();
       return;
     }
 
@@ -35,7 +44,7 @@ export default function AlarmBanner({ active, message, hint, onAcknowledge }) {
     // Repeating low-mid tone (every 1.6s)
     const playTone = () => {
       try {
-        if (!audioCtxRef.current) {
+        if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
         }
         const ctx = audioCtxRef.current;
@@ -72,14 +81,11 @@ export default function AlarmBanner({ active, message, hint, onAcknowledge }) {
       } catch { /* noop */ }
     }
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      if (originalTitleRef.current !== null) {
-        document.title = originalTitleRef.current;
-        originalTitleRef.current = null;
-      }
-    };
+    return teardown;
   }, [active, message]);
+
+  // Defensive: ensure unmount tears down even if React skips the cleanup path
+  useEffect(() => teardown, []);
 
   if (!active) return null;
 

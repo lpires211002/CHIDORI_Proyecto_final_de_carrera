@@ -77,6 +77,10 @@ export default function App() {
   const [alarmPercent, setAlarmPercent] = useState('');
   const [alarmDiff, setAlarmDiff]       = useState('');
   const [alarmFired, setAlarmFired]     = useState(false);
+  // Edge-triggered: once fired and acknowledged, the alarm will only re-fire
+  // after Z rises ABOVE the threshold (re-arm) and falls below it again.
+  // Without this, the next sample below threshold would re-trigger immediately.
+  const [alarmArmed, setAlarmArmed]     = useState(true);
 
   /* ── UI state ──────────────────────────────────────────────────────── */
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -89,7 +93,7 @@ export default function App() {
   useEffect(() => {
     stateRef.current = {
       measuring, startTime, pausedDuration, data, initialValue, currentValue,
-      alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired,
+      alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired, alarmArmed,
       supabase, sessionId, eventCount, cloud,
     };
   });
@@ -220,17 +224,36 @@ export default function App() {
       });
     }
 
-    // Alarm evaluation
-    if (cur.alarmEnabled && !cur.alarmFired) {
-      let trigger = false;
+    // Alarm evaluation · edge-triggered
+    //   - Fire only when armed and Z crosses below threshold
+    //   - Acknowledging clears `alarmFired` but keeps it disarmed
+    //   - Re-arm automatically when Z rises above threshold by a small hysteresis margin
+    if (cur.alarmEnabled) {
+      let threshold = null;
       if (cur.alarmType === 'abs' && cur.alarmAbs) {
-        if (val <= parseFloat(cur.alarmAbs)) trigger = true;
+        threshold = parseFloat(cur.alarmAbs);
       } else if (cur.alarmType === 'percent' && cur.alarmPercent) {
-        if (val <= baseline * (parseFloat(cur.alarmPercent) / 100)) trigger = true;
+        threshold = baseline * (parseFloat(cur.alarmPercent) / 100);
       } else if (cur.alarmType === 'diff' && cur.alarmDiff) {
-        if (val <= baseline - parseFloat(cur.alarmDiff)) trigger = true;
+        threshold = baseline - parseFloat(cur.alarmDiff);
       }
-      if (trigger) setAlarmFired(true);
+
+      if (threshold !== null && Number.isFinite(threshold)) {
+        // Hysteresis: 2% of threshold (or 0.5 Ω minimum) to avoid chatter near the boundary
+        const margin = Math.max(0.5, Math.abs(threshold) * 0.02);
+
+        if (val <= threshold) {
+          if (cur.alarmArmed && !cur.alarmFired) {
+            setAlarmFired(true);
+            setAlarmArmed(false);
+          }
+        } else if (val >= threshold + margin) {
+          // Re-arm only when Z is comfortably above the threshold
+          if (!cur.alarmArmed && !cur.alarmFired) {
+            setAlarmArmed(true);
+          }
+        }
+      }
     }
   };
 
@@ -371,6 +394,7 @@ export default function App() {
     setRate(0);
     setEventCount(0);
     setAlarmFired(false);
+    setAlarmArmed(true);
     setSessionId(null);
     simulatedZRef.current = 150.0;
     setConfirmReset(false);
@@ -384,6 +408,7 @@ export default function App() {
     setAlarmAbs(calib.zFull.toString());
     setAlarmEnabled(true);
     setAlarmFired(false);
+    setAlarmArmed(true);
   };
 
   /* ── Patient persistence (explicit, not per-keystroke) ────────────── */
