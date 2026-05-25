@@ -1,88 +1,74 @@
 import React from 'react';
 
-export default function StatsGrid({ 
-  initialValue, 
-  currentValue, 
-  elapsedTime, 
-  eventCount, 
-  rate 
+/**
+ * Readout strip · hierarchical, not a 6-tile carpet.
+ *
+ *   [ HERO · Z actual ]  [ Z basal ]  [ Δ acumulado ]  [ Tasa ]
+ *
+ * No gradient text, no bounce icon. Numbers are tabular, in the display
+ * serif. Color only encodes state (signal = recovering, alarm = rising).
+ */
+export default function StatsGrid({
+  initialValue,
+  currentValue,
+  elapsedTime,
+  eventCount,
+  rate,
 }) {
-  const getChange = () => {
-    if (initialValue === null || currentValue === null) return { diff: null, pct: null };
-    const diff = currentValue - initialValue;
-    const pct = (diff / initialValue) * 100;
-    return { diff, pct };
-  };
+  const fmt = (v, d = 1) => (v === null || v === undefined ? '—' : v.toFixed(d));
 
-  const { diff, pct } = getChange();
+  const diff = (initialValue != null && currentValue != null)
+    ? currentValue - initialValue
+    : null;
+  const pct = (diff != null && initialValue) ? (diff / initialValue) * 100 : null;
 
-  const formatValue = (val) => {
-    if (val === null || val === undefined) return '--';
-    return val.toFixed(2);
-  };
-
-  const getIndicator = () => {
-    if (diff === null || diff === 0) return '→';
-    return diff > 0 ? '↑' : '↓';
-  };
-
-  const getIndicatorClass = () => {
-    if (diff === null || diff === 0) return 'change-indicator';
-    return diff > 0 ? 'change-indicator positive' : 'change-indicator negative';
-  };
-
-  const getIndicatorValueClass = () => {
-    if (diff === null || diff === 0) return '';
-    return diff > 0 ? 'red' : 'green';
-  };
+  const diffStateClass = diff == null || diff === 0 ? '' : diff < 0 ? 'neg-state' : 'pos-state';
+  const rateStateClass = rate == null || rate === 0 ? '' : rate < 0 ? 'neg-state' : 'pos-state';
 
   return (
-    <div className="stats-grid">
-      <div className="stat-card">
-        <span className="stat-label">Valor Inicial</span>
-        <span className="stat-value">{formatValue(initialValue)}</span>
-        <span className="stat-unit">Ω</span>
-      </div>
-
-      <div className="stat-card">
-        <span className="stat-label">Valor Actual</span>
-        <span className="stat-value">{formatValue(currentValue)}</span>
-        <span className="stat-unit">Ω</span>
-      </div>
-
-      <div className="stat-card highlight">
-        <span className="stat-label">Cambio Total</span>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-          <span className={`stat-value ${getIndicatorValueClass()}`}>{formatValue(diff ? Math.abs(diff) : null)}</span>
-          <span className={getIndicatorClass()} style={{ fontSize: '20px', color: diff > 0 ? 'hsl(var(--accent-red))' : diff < 0 ? 'hsl(var(--accent-green))' : 'hsl(var(--text-tertiary))', animation: diff !== 0 ? 'bounce 2s infinite' : 'none' }}>
-            {getIndicator()}
+    <div className="readout" role="group" aria-label="Lectura en vivo">
+      {/* HERO · current impedance */}
+      <div className="readout-cell hero">
+        <span className="readout-label">Impedancia actual</span>
+        <span className={`readout-value numeric ${diffStateClass}`}>
+          {fmt(currentValue, 2)}
+          <span className="readout-unit" style={{ marginLeft: 8, fontFamily: 'var(--font-mono)' }}>Ω</span>
+        </span>
+        {diff != null && (
+          <span className={`readout-delta ${diff < 0 ? 'neg' : diff > 0 ? 'pos' : ''}`}>
+            {diff >= 0 ? '+' : ''}{fmt(diff, 2)} Ω
+            <span className="mute">· {pct >= 0 ? '+' : ''}{fmt(pct, 1)}%</span>
           </span>
-        </div>
-        <span className="stat-unit">{pct !== null ? `${pct.toFixed(1)} %` : '-- %'}</span>
+        )}
       </div>
 
-      <div className="stat-card">
-        <span className="stat-label">Velocidad</span>
-        <span className="stat-value" style={{ color: rate > 0 ? 'hsl(var(--accent-red))' : rate < 0 ? 'hsl(var(--accent-green))' : 'hsl(var(--text-primary))' }}>
-          {formatValue(rate)}
+      {/* Basal */}
+      <div className="readout-cell">
+        <span className="readout-label">Basal</span>
+        <span className="readout-value numeric">
+          {fmt(initialValue, 2)}
+          <span className="readout-unit" style={{ marginLeft: 6 }}>Ω</span>
         </span>
-        <span className="stat-unit">Ω/min</span>
+        <span className="readout-delta mute">Referencia inicial</span>
       </div>
 
-      <div className="stat-card">
-        <span className="stat-label">Tiempo Transcurrido</span>
-        <span className="stat-value" style={{ background: 'none', WebkitTextFillColor: 'initial', color: 'hsl(var(--text-primary))' }}>
-          {elapsedTime}
+      {/* Rate */}
+      <div className="readout-cell">
+        <span className="readout-label">Tasa</span>
+        <span className={`readout-value numeric ${rateStateClass}`}>
+          {fmt(rate, 2)}
+          <span className="readout-unit" style={{ marginLeft: 6 }}>Ω/min</span>
         </span>
-        <span className="stat-unit">min:seg</span>
+        <span className="readout-delta mute">Δ por minuto</span>
       </div>
 
-      <div className="stat-card">
-        <span className="stat-label">Eventos Marcados</span>
-        <span className="stat-value" style={{ background: 'none', WebkitTextFillColor: 'initial', color: 'hsl(var(--text-primary))' }}>
-          {eventCount}
+      {/* Time + events */}
+      <div className="readout-cell">
+        <span className="readout-label">Sesión</span>
+        <span className="readout-value numeric">{elapsedTime || '00:00'}</span>
+        <span className="readout-delta mute">
+          {eventCount} {eventCount === 1 ? 'evento' : 'eventos'}
         </span>
-        <span className="stat-unit">marcadores</span>
       </div>
     </div>
   );

@@ -2,163 +2,194 @@ import React, { useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 import { Camera } from 'lucide-react';
 
-export default function RealTimeCharts({ data, rateData, events, theme }) {
-  const mainChartRef = useRef(null);
-  const rateChartRef = useRef(null);
-  const mainChartInstance = useRef(null);
-  const rateChartInstance = useRef(null);
+/**
+ * Hero chart pair · the actual instrument readout.
+ *
+ *  Top:    impedance vs time (Z)         · signal indigo line
+ *  Bottom: rate of change (dZ/dt)        · neutral hairline
+ *
+ * Event markers: dashed signal-color lines + tiny pill IDs at top.
+ * Theme is read from a CSS var so the chart follows the design system.
+ */
+function readToken(name, fallback) {
+  const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+  return v || fallback;
+}
 
-  // Define inline plugin to draw event markers
+export default function RealTimeCharts({ data, rateData, events, theme }) {
+  const mainRef    = useRef(null);
+  const rateRef    = useRef(null);
+  const mainInst   = useRef(null);
+  const rateInst   = useRef(null);
+  const eventsRef  = useRef(events);
+
+  // Keep events updated for the plugin without recreating the chart
+  useEffect(() => { eventsRef.current = events; }, [events]);
+
+  const palette = () => ({
+    signal: readToken('--signal', 'oklch(0.640 0.180 268)'),
+    type:   readToken('--type-med', '#9ca3af'),
+    mute:   readToken('--type-mute', '#666'),
+    grid:   readToken('--hairline', 'rgba(255,255,255,0.06)'),
+    bg:     readToken('--ink-1', '#181818'),
+  });
+
+  // Plugin · event markers (dashed verticals + numeric pill)
   const eventLinesPlugin = {
     id: 'eventLines',
-    afterDraw: (chart) => {
-      if (!events || events.length === 0) return;
+    afterDraw(chart) {
+      const evts = eventsRef.current;
+      if (!evts || evts.length === 0) return;
       const { ctx, chartArea, scales: { x } } = chart;
       if (!chartArea) return;
-      
+
+      const p = palette();
       ctx.save();
-      events.forEach((evt) => {
-        const xPixel = x.getPixelForValue(evt.time);
-        if (xPixel >= chartArea.left && xPixel <= chartArea.right) {
-          // Draw dashed red line
-          ctx.beginPath();
-          ctx.setLineDash([5, 5]);
-          ctx.lineWidth = 1.5;
-          ctx.strokeStyle = 'hsl(354, 100%, 71%)'; // --accent-red
-          ctx.moveTo(xPixel, chartArea.top);
-          ctx.lineTo(xPixel, chartArea.bottom);
-          ctx.stroke();
+      evts.forEach((evt) => {
+        const xp = x.getPixelForValue(evt.time);
+        if (xp < chartArea.left || xp > chartArea.right) return;
 
-          // Draw pill label at top
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'hsl(354, 100%, 71%)';
-          const label = `#${evt.id}`;
-          const labelWidth = ctx.measureText(label).width + 8;
-          ctx.beginPath();
-          ctx.roundRect(xPixel - labelWidth / 2, chartArea.top + 4, labelWidth, 16, 4);
-          ctx.fill();
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = p.signal;
+        ctx.moveTo(xp, chartArea.top + 18);
+        ctx.lineTo(xp, chartArea.bottom);
+        ctx.stroke();
 
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 9px Inter';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(label, xPixel, chartArea.top + 12);
-        }
+        // Pill
+        ctx.setLineDash([]);
+        const label = `${evt.id.toString().padStart(2, '0')}`;
+        ctx.font = '500 10px "IBM Plex Mono", monospace';
+        const labelWidth = ctx.measureText(label).width + 10;
+        ctx.fillStyle = p.signal;
+        ctx.beginPath();
+        ctx.roundRect(xp - labelWidth / 2, chartArea.top + 2, labelWidth, 16, 3);
+        ctx.fill();
+
+        ctx.fillStyle = readToken('--signal-on', '#fff');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, xp, chartArea.top + 10);
       });
       ctx.restore();
-    }
+    },
   };
 
-  // Handle Main Impedance Chart Creation / Update
+  // Main chart (Z vs time)
   useEffect(() => {
-    if (!mainChartRef.current) return;
+    if (!mainRef.current) return;
+    const ctx = mainRef.current.getContext('2d');
 
-    const ctx = mainChartRef.current.getContext('2d');
-    
-    // Create new chart instance if it doesn't exist
-    if (!mainChartInstance.current) {
-      mainChartInstance.current = new Chart(ctx, {
+    if (!mainInst.current) {
+      const p = palette();
+      mainInst.current = new Chart(ctx, {
         type: 'line',
         data: {
           datasets: [{
-            label: 'Impedancia (Ω)',
-            data: data,
-            borderColor: '#ff8c42',
-            backgroundColor: 'rgba(255, 140, 66, 0.08)',
-            tension: 0.4,
-            borderWidth: 2.5,
+            label: 'Impedancia',
+            data,
+            borderColor: p.signal,
+            backgroundColor: 'transparent',
+            tension: 0.24,
+            borderWidth: 1.6,
             pointRadius: 0,
-            pointHoverRadius: 6,
-            pointHoverBackgroundColor: '#ff8c42',
-            pointHoverBorderColor: '#fff',
-            pointHoverBorderWidth: 2,
-            fill: true
-          }]
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: p.signal,
+            pointHoverBorderColor: readToken('--signal-on', '#fff'),
+            pointHoverBorderWidth: 1.5,
+          }],
         },
         plugins: [eventLinesPlugin],
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          animation: { duration: 0 }, // Instant updates
+          animation: { duration: 0 },
           interaction: { intersect: false, mode: 'index' },
           scales: {
             x: {
               type: 'linear',
-              title: {
-                display: true,
-                text: 'Tiempo (segundos)',
-                color: theme === 'dark' ? '#9ca3af' : '#4a5568',
-                font: { size: 12, weight: '600', family: 'Inter' }
-              },
-              ticks: { color: theme === 'dark' ? '#6b7280' : '#718096' },
-              grid: { color: theme === 'dark' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)' }
+              title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 10, weight: '500', family: 'IBM Plex Mono' } },
+              ticks: { color: p.mute, font: { size: 10, family: 'IBM Plex Mono' } },
+              grid:  { color: p.grid, drawTicks: false },
+              border: { color: p.grid },
             },
             y: {
               type: 'linear',
-              title: {
-                display: true,
-                text: 'Impedancia (Ω)',
-                color: theme === 'dark' ? '#9ca3af' : '#4a5568',
-                font: { size: 12, weight: '600', family: 'Inter' }
-              },
-              ticks: { color: theme === 'dark' ? '#6b7280' : '#718096' },
-              grid: { color: theme === 'dark' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)' }
-            }
+              title: { display: true, text: 'impedancia (Ω)', color: p.mute, font: { size: 10, weight: '500', family: 'IBM Plex Mono' } },
+              ticks: { color: p.mute, font: { size: 10, family: 'IBM Plex Mono' } },
+              grid:  { color: p.grid, drawTicks: false },
+              border: { color: p.grid },
+            },
           },
           plugins: {
             legend: { display: false },
             tooltip: {
-              backgroundColor: theme === 'dark' ? '#1a1f29' : '#ffffff',
-              titleColor: theme === 'dark' ? '#e8eaed' : '#1a202c',
-              bodyColor: theme === 'dark' ? '#9ca3af' : '#4a5568',
-              borderColor: theme === 'dark' ? '#2d3748' : '#e2e8f0',
+              backgroundColor: p.bg,
+              titleColor: readToken('--type-hi', '#fff'),
+              bodyColor: p.type,
+              borderColor: readToken('--hairline-strong', '#444'),
               borderWidth: 1,
               padding: 10,
               displayColors: false,
+              titleFont:  { family: 'IBM Plex Mono', size: 10 },
+              bodyFont:   { family: 'IBM Plex Mono', size: 11 },
               callbacks: {
-                label: (context) => `Impedancia: ${context.parsed.y.toFixed(2)} Ω`
-              }
-            }
-          }
-        }
+                title: (ctx) => `t = ${ctx[0].parsed.x.toFixed(1)} s`,
+                label: (ctx) => `Z = ${ctx.parsed.y.toFixed(2)} Ω`,
+              },
+            },
+          },
+        },
       });
     } else {
-      // Update data and options for theme change
-      mainChartInstance.current.data.datasets[0].data = data;
-      mainChartInstance.current.options.scales.x.title.color = theme === 'dark' ? '#9ca3af' : '#4a5568';
-      mainChartInstance.current.options.scales.x.ticks.color = theme === 'dark' ? '#6b7280' : '#718096';
-      mainChartInstance.current.options.scales.x.grid.color = theme === 'dark' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)';
-      mainChartInstance.current.options.scales.y.title.color = theme === 'dark' ? '#9ca3af' : '#4a5568';
-      mainChartInstance.current.options.scales.y.ticks.color = theme === 'dark' ? '#6b7280' : '#718096';
-      mainChartInstance.current.options.scales.y.grid.color = theme === 'dark' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)';
-      mainChartInstance.current.options.plugins.tooltip.backgroundColor = theme === 'dark' ? '#1a1f29' : '#ffffff';
-      mainChartInstance.current.options.plugins.tooltip.titleColor = theme === 'dark' ? '#e8eaed' : '#1a202c';
-      mainChartInstance.current.options.plugins.tooltip.bodyColor = theme === 'dark' ? '#9ca3af' : '#4a5568';
-      mainChartInstance.current.options.plugins.tooltip.borderColor = theme === 'dark' ? '#2d3748' : '#e2e8f0';
-      mainChartInstance.current.update();
+      mainInst.current.data.datasets[0].data = data;
+      mainInst.current.update('none');
     }
-  }, [data, events, theme]);
+  }, [data, theme]);
 
-  // Handle Rate of Change Chart Creation / Update
+  // Theme change → recolor (no full rebuild needed; just update tokens)
   useEffect(() => {
-    if (!rateChartRef.current) return;
+    [mainInst, rateInst].forEach((ref) => {
+      const inst = ref.current;
+      if (!inst) return;
+      const p = palette();
+      const ds = inst.data.datasets[0];
+      ds.borderColor = ds === inst.data.datasets[0] && inst === mainInst.current ? p.signal : p.type;
+      inst.options.scales.x.ticks.color = p.mute;
+      inst.options.scales.x.grid.color  = p.grid;
+      inst.options.scales.x.border.color = p.grid;
+      inst.options.scales.x.title.color = p.mute;
+      inst.options.scales.y.ticks.color = p.mute;
+      inst.options.scales.y.grid.color  = p.grid;
+      inst.options.scales.y.border.color = p.grid;
+      inst.options.scales.y.title.color = p.mute;
+      inst.options.plugins.tooltip.backgroundColor = p.bg;
+      inst.options.plugins.tooltip.bodyColor = p.type;
+      inst.options.plugins.tooltip.borderColor = readToken('--hairline-strong', '#444');
+      inst.update('none');
+    });
+  }, [theme]);
 
-    const ctx = rateChartRef.current.getContext('2d');
+  // Rate chart (dZ/dt)
+  useEffect(() => {
+    if (!rateRef.current) return;
+    const ctx = rateRef.current.getContext('2d');
 
-    if (!rateChartInstance.current) {
-      rateChartInstance.current = new Chart(ctx, {
+    if (!rateInst.current) {
+      const p = palette();
+      rateInst.current = new Chart(ctx, {
         type: 'line',
         data: {
           datasets: [{
-            label: 'Velocidad (Ω/min)',
+            label: 'Tasa',
             data: rateData,
-            borderColor: '#4ecdc4',
-            backgroundColor: 'rgba(78, 205, 196, 0.08)',
-            tension: 0.4,
-            borderWidth: 2,
+            borderColor: p.type,
+            backgroundColor: 'transparent',
+            tension: 0.2,
+            borderWidth: 1.2,
             pointRadius: 0,
-            fill: true
-          }]
+          }],
         },
         options: {
           responsive: true,
@@ -168,123 +199,95 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
           scales: {
             x: {
               type: 'linear',
-              title: {
-                display: true,
-                text: 'Tiempo (segundos)',
-                color: theme === 'dark' ? '#9ca3af' : '#4a5568',
-                font: { size: 10, weight: '600', family: 'Inter' }
-              },
-              ticks: { color: theme === 'dark' ? '#6b7280' : '#718096', font: { size: 9 } },
-              grid: { color: theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.03)' }
+              title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 9, family: 'IBM Plex Mono' } },
+              ticks: { color: p.mute, font: { size: 9, family: 'IBM Plex Mono' } },
+              grid:  { color: p.grid, drawTicks: false },
+              border: { color: p.grid },
             },
             y: {
               type: 'linear',
-              title: {
-                display: true,
-                text: 'Tasa (Ω/min)',
-                color: theme === 'dark' ? '#9ca3af' : '#4a5568',
-                font: { size: 10, weight: '600', family: 'Inter' }
-              },
-              ticks: { color: theme === 'dark' ? '#6b7280' : '#718096', font: { size: 9 } },
-              grid: { color: theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.03)' }
-            }
+              title: { display: true, text: 'Ω/min', color: p.mute, font: { size: 9, family: 'IBM Plex Mono' } },
+              ticks: { color: p.mute, font: { size: 9, family: 'IBM Plex Mono' } },
+              grid:  { color: p.grid, drawTicks: false },
+              border: { color: p.grid },
+            },
           },
           plugins: {
             legend: { display: false },
             tooltip: {
-              backgroundColor: theme === 'dark' ? '#1a1f29' : '#ffffff',
-              titleColor: theme === 'dark' ? '#e8eaed' : '#1a202c',
-              bodyColor: theme === 'dark' ? '#9ca3af' : '#4a5568',
-              borderColor: theme === 'dark' ? '#2d3748' : '#e2e8f0',
+              backgroundColor: p.bg,
+              titleColor: readToken('--type-hi', '#fff'),
+              bodyColor: p.type,
+              borderColor: readToken('--hairline-strong', '#444'),
               borderWidth: 1,
               padding: 8,
               displayColors: false,
+              titleFont: { family: 'IBM Plex Mono', size: 10 },
+              bodyFont:  { family: 'IBM Plex Mono', size: 11 },
               callbacks: {
-                label: (context) => `Tasa: ${context.parsed.y.toFixed(2)} Ω/min`
-              }
-            }
-          }
-        }
+                label: (c) => `dZ/dt = ${c.parsed.y.toFixed(2)} Ω/min`,
+              },
+            },
+          },
+        },
       });
     } else {
-      rateChartInstance.current.data.datasets[0].data = rateData;
-      rateChartInstance.current.options.scales.x.title.color = theme === 'dark' ? '#9ca3af' : '#4a5568';
-      rateChartInstance.current.options.scales.x.ticks.color = theme === 'dark' ? '#6b7280' : '#718096';
-      rateChartInstance.current.options.scales.x.grid.color = theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.03)';
-      rateChartInstance.current.options.scales.y.title.color = theme === 'dark' ? '#9ca3af' : '#4a5568';
-      rateChartInstance.current.options.scales.y.ticks.color = theme === 'dark' ? '#6b7280' : '#718096';
-      rateChartInstance.current.options.scales.y.grid.color = theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.03)';
-      rateChartInstance.current.options.plugins.tooltip.backgroundColor = theme === 'dark' ? '#1a1f29' : '#ffffff';
-      rateChartInstance.current.options.plugins.tooltip.titleColor = theme === 'dark' ? '#e8eaed' : '#1a202c';
-      rateChartInstance.current.options.plugins.tooltip.bodyColor = theme === 'dark' ? '#9ca3af' : '#4a5568';
-      rateChartInstance.current.options.plugins.tooltip.borderColor = theme === 'dark' ? '#2d3748' : '#e2e8f0';
-      rateChartInstance.current.update();
+      rateInst.current.data.datasets[0].data = rateData;
+      rateInst.current.update('none');
     }
   }, [rateData, theme]);
 
-  // Clean up chart instances on component unmount
-  useEffect(() => {
-    return () => {
-      if (mainChartInstance.current) {
-        mainChartInstance.current.destroy();
-        mainChartInstance.current = null;
-      }
-      if (rateChartInstance.current) {
-        rateChartInstance.current.destroy();
-        rateChartInstance.current = null;
-      }
-    };
+  useEffect(() => () => {
+    mainInst.current?.destroy(); mainInst.current = null;
+    rateInst.current?.destroy(); rateInst.current = null;
   }, []);
 
-  const handleExportChart = () => {
-    if (!mainChartInstance.current) return;
+  // Expose for the export modal
+  useEffect(() => {
+    window.mainChartInstance = mainInst.current;
+    return () => { window.mainChartInstance = null; };
+  }, [data, events]);
+
+  const onExport = () => {
+    if (!mainInst.current) return;
     const link = document.createElement('a');
-    link.download = `grafico_impedancia_${new Date().toISOString().slice(0, 10)}.png`;
-    link.href = mainChartInstance.current.toBase64Image();
+    link.download = `chidori_${new Date().toISOString().slice(0, 10)}.png`;
+    link.href = mainInst.current.toBase64Image();
     link.click();
   };
 
-  // Expose the main chart reference to windows/global object for jsPDF export if needed
-  useEffect(() => {
-    window.mainChartInstance = mainChartInstance.current;
-    return () => {
-      window.mainChartInstance = null;
-    };
-  }, [data, events]);
-
   return (
-    <div className="charts-grid">
-      <div className="card" style={{ marginBottom: 0 }}>
-        <div className="card-header">
+    <div className="stack-md">
+      <section className="surface" style={{ padding: '20px 22px 6px' }}>
+        <header className="section-head" style={{ marginBottom: 12 }}>
           <div>
-            <h2>Impedancia vs Tiempo</h2>
-            <span className="card-subtitle">Mapeo del módulo de impedancia vesical en tiempo real</span>
+            <h2>Impedancia · tiempo</h2>
+            <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
+              Curva en vivo · módulo de impedancia del tejido vesical
+            </span>
           </div>
-          <button 
-            onClick={handleExportChart} 
-            className="btn-icon-only" 
-            title="Exportar Gráfico"
-            style={{ borderRadius: '50%' }}
-          >
-            <Camera size={18} />
+          <button type="button" className="icon-button" onClick={onExport} aria-label="Exportar gráfico">
+            <Camera size={15} />
           </button>
+        </header>
+        <div className="chart-host">
+          <canvas ref={mainRef} />
         </div>
-        <div className="chart-wrapper large">
-          <canvas ref={mainChartRef}></canvas>
-        </div>
-      </div>
+      </section>
 
-      <div className="card" style={{ marginBottom: 0 }}>
-        <div className="card-header">
+      <section className="surface" style={{ padding: '18px 22px 6px' }}>
+        <header className="section-head" style={{ marginBottom: 10 }}>
           <div>
-            <h2>Velocidad de Cambio</h2>
-            <span className="card-subtitle">Derivada temporal de impedancia (Ω/min)</span>
+            <h2 style={{ fontSize: 'var(--t-lg)' }}>Derivada temporal</h2>
+            <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
+              dZ/dt · indica velocidad de llenado
+            </span>
           </div>
+        </header>
+        <div className="chart-host compact">
+          <canvas ref={rateRef} />
         </div>
-        <div className="chart-wrapper">
-          <canvas ref={rateChartRef}></canvas>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

@@ -1,513 +1,383 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Download, Moon, Sun, ShieldAlert, ChevronRight, Settings, Activity, Database } from 'lucide-react';
-import SettingsPanel from './components/SettingsPanel';
-import StatsGrid from './components/StatsGrid';
-import RealTimeCharts from './components/RealTimeCharts';
-import Timeline from './components/Timeline';
-import ExportModal from './components/ExportModal';
-import BladderVisual from './components/BladderVisual';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun, Settings as SettingsIcon, Cpu,
+} from 'lucide-react';
+
+import SettingsPanel    from './components/SettingsPanel';
+import StatsGrid        from './components/StatsGrid';
+import RealTimeCharts   from './components/RealTimeCharts';
+import Timeline         from './components/Timeline';
+import ExportModal      from './components/ExportModal';
+import BladderVisual    from './components/BladderVisual';
 import CalibrationWizard from './components/CalibrationWizard';
+import AlarmBanner      from './components/AlarmBanner';
+import CloudSyncBadge   from './components/CloudSyncBadge';
+import ConfirmModal     from './components/ConfirmModal';
+import Toasts           from './components/Toasts';
+import EmptyState       from './components/EmptyState';
+import ConnectionGate   from './components/ConnectionGate';
+import useCloudSync     from './components/useCloudSync';
+
 import { getSupabaseClient } from './supabaseClient';
 
+const SUPABASE_TIMESTAMP_FIELD = 'elapsed_time'; // numeric seconds, queryable
+
 export default function App() {
-  // --- Theme State ---
+  /* ── Theme ─────────────────────────────────────────────────────────── */
   const [theme, setTheme] = useState(() => localStorage.getItem('chidori-theme') || 'dark');
 
-  // --- WebSocket Connectivity Configuration ---
+  useEffect(() => {
+    document.body.classList.toggle('light-theme', theme === 'light');
+    localStorage.setItem('chidori-theme', theme);
+  }, [theme]);
+
+  /* ── WebSocket configuration ──────────────────────────────────────── */
   const [wsConfig, setWsConfig] = useState(() => {
     const saved = localStorage.getItem('chidori-ws-config');
-    return saved ? JSON.parse(saved) : {
-      protocol: 'ws://',
-      host: '192.168.0.126',
-      port: '81'
-    };
+    return saved ? JSON.parse(saved) : { protocol: 'ws://', host: 'chidori.local', port: '81' };
   });
-  const [wsStatus, setWsStatus] = useState('DISCONNECTED'); // CONNECTED, DISCONNECTED, CONNECTING
+  const [wsStatus, setWsStatus] = useState('DISCONNECTED');
   const socketRef = useRef(null);
   const reconnectIntervalRef = useRef(null);
 
-  // --- Supabase Cloud Database Configuration ---
+  /* ── Supabase configuration ───────────────────────────────────────── */
   const [supabaseConfig, setSupabaseConfig] = useState(() => {
     const saved = localStorage.getItem('chidori-supabase-config');
     return saved ? JSON.parse(saved) : { url: '', key: '' };
   });
   const [supabase, setSupabase] = useState(() => getSupabaseClient(supabaseConfig.url, supabaseConfig.key));
   const [sessionId, setSessionId] = useState(null);
+  const cloud = useCloudSync(supabase);
 
-  // --- Simulator Mode State ---
-  const [isSimulatorActive, setIsSimulatorActive] = useState(false);
+  /* ── Simulator ────────────────────────────────────────────────────── */
+  const [isSimulator, setIsSimulator] = useState(false);
   const simulatorIntervalRef = useRef(null);
   const simulatedZRef = useRef(150.0);
 
-  // --- Session State ---
-  const [measuring, setMeasuring] = useState(false);
-  const [startTime, setStartTime] = useState(null);
-  const [pausedDuration, setPausedDuration] = useState(0);
-  const [pauseStart, setPauseStart] = useState(null);
-  const [elapsedTime, setElapsedTime] = useState('00:00');
-  
-  const [data, setData] = useState([]);          // [{ x: time, y: val }]
-  const [rateData, setRateData] = useState([]);  // [{ x: time, y: rate }]
-  const [events, setEvents] = useState([]);      // [{ id, time, value, change }]
-  
+  /* ── Session state ────────────────────────────────────────────────── */
+  const [measuring, setMeasuring]       = useState(false);
+  const [startTime, setStartTime]       = useState(null);
+  const [pausedDuration, setPausedDur]  = useState(0);
+  const [pauseStart, setPauseStart]     = useState(null);
+  const [elapsedTime, setElapsedTime]   = useState('00:00');
+
+  const [data, setData]         = useState([]);
+  const [rateData, setRateData] = useState([]);
+  const [events, setEvents]     = useState([]);
+
   const [initialValue, setInitialValue] = useState(null);
   const [currentValue, setCurrentValue] = useState(null);
-  const [rate, setRate] = useState(0);
-  const [eventCount, setEventCount] = useState(0);
+  const [rate, setRate]                 = useState(0);
+  const [eventCount, setEventCount]     = useState(0);
 
-  // --- Alarm System States ---
+  /* ── Alarm ─────────────────────────────────────────────────────────── */
   const [alarmEnabled, setAlarmEnabled] = useState(false);
-  const [alarmType, setAlarmType] = useState('abs'); // abs, percent, diff
-  const [alarmAbs, setAlarmAbs] = useState('');
+  const [alarmType, setAlarmType]       = useState('abs');
+  const [alarmAbs, setAlarmAbs]         = useState('');
   const [alarmPercent, setAlarmPercent] = useState('');
-  const [alarmDiff, setAlarmDiff] = useState('');
-  const [alarmFired, setAlarmFired] = useState(false);
+  const [alarmDiff, setAlarmDiff]       = useState('');
+  const [alarmFired, setAlarmFired]     = useState(false);
 
-  // --- UI Modals & Notifications ---
+  /* ── UI state ──────────────────────────────────────────────────────── */
   const [isExportOpen, setIsExportOpen] = useState(false);
-  const [alerts, setAlerts] = useState([]); // [{ id, text, type }]
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [toasts, setToasts] = useState([]);
 
-  // Keep refs for callbacks to read fresh state without re-creating listeners
-  const stateRef = useRef({ measuring, startTime, pausedDuration, pauseStart, data, initialValue, currentValue, alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired, supabase, sessionId, eventCount });
-  
+  /* ── Refs for callbacks ────────────────────────────────────────────── */
+  const stateRef = useRef({});
   useEffect(() => {
-    stateRef.current = { measuring, startTime, pausedDuration, pauseStart, data, initialValue, currentValue, alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired, supabase, sessionId, eventCount };
-  }, [measuring, startTime, pausedDuration, pauseStart, data, initialValue, currentValue, alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired, supabase, sessionId, eventCount]);
+    stateRef.current = {
+      measuring, startTime, pausedDuration, data, initialValue, currentValue,
+      alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired,
+      supabase, sessionId, eventCount, cloud,
+    };
+  });
 
-  // --- Custom Animated Alert Toast ---
-  const triggerAlert = (text, type = 'info') => {
-    const id = Date.now();
-    setAlerts(prev => [...prev, { id, text, type }]);
-    
-    // Play alert sound if it's warning/success
-    if (type === 'warning' || type === 'success') {
-      playBeep();
-    }
+  /* ── Toast helper (info / success / warn). Alarms do NOT go through here. */
+  const toast = useCallback((text, type = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, text, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4200);
+  }, []);
 
-    setTimeout(() => {
-      setAlerts(prev => prev.filter(a => a.id !== id));
-    }, 4500);
-  };
-
-  // --- Web Audio Synthesized Notification ---
-  const playBeep = () => {
-    try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      
-      osc.type = 'sine';
-      osc.frequency.value = 820; // Highly noticeable frequency
-      
-      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.45);
-      
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime + 0.45);
-    } catch (e) {
-      console.warn('Fallo al inicializar Web Audio API:', e);
-    }
-  };
-
-  // --- Theme Toggle ---
-  useEffect(() => {
-    if (theme === 'light') {
-      document.body.classList.add('light-theme');
-    } else {
-      document.body.classList.remove('light-theme');
-    }
-    localStorage.setItem('chidori-theme', theme);
-  }, [theme]);
-
-  // --- WebSocket Connection Manager ---
-  const connectWebSocket = () => {
-    if (isSimulatorActive) return; // Skip WS if simulator is running
-
-    if (socketRef.current) {
-      socketRef.current.close();
-    }
+  /* ── WebSocket lifecycle ──────────────────────────────────────────── */
+  const connectWebSocket = useCallback(() => {
+    if (isSimulator) return;
+    if (socketRef.current) socketRef.current.close();
 
     const { protocol, host, port } = wsConfig;
     const url = `${protocol}${host}:${port}/`;
-    
     setWsStatus('CONNECTING');
-    
+
     try {
       const ws = new WebSocket(url);
       socketRef.current = ws;
-
       ws.onopen = () => {
         setWsStatus('CONNECTED');
-        triggerAlert('Conectado con el microcontrolador Chidori', 'success');
+        toast('Microcontrolador conectado', 'success');
         if (reconnectIntervalRef.current) {
           clearInterval(reconnectIntervalRef.current);
           reconnectIntervalRef.current = null;
         }
       };
-
       ws.onclose = () => {
         setWsStatus('DISCONNECTED');
-        // Start automatic reconnection interval if not already running
-        if (!reconnectIntervalRef.current && !isSimulatorActive) {
-          reconnectIntervalRef.current = setInterval(() => {
-            console.log('Intentando reconexión automática...');
-            connectWebSocket();
-          }, 5000);
+        if (!reconnectIntervalRef.current && !isSimulator) {
+          reconnectIntervalRef.current = setInterval(() => connectWebSocket(), 5000);
         }
       };
-
-      ws.onerror = (e) => {
-        console.error('WebSocket Error:', e);
-        setWsStatus('DISCONNECTED');
-      };
-
+      ws.onerror = () => setWsStatus('DISCONNECTED');
       ws.onmessage = (event) => {
         const val = parseFloat(event.data);
-        if (isNaN(val)) return;
-
-        handleIncomingData(val);
+        if (!isNaN(val)) handleIncomingData(val);
       };
-    } catch (err) {
-      console.error('Conexión fallida:', err);
+    } catch {
       setWsStatus('DISCONNECTED');
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsConfig, isSimulator]);
 
-  // Connect on Mount, cleanup on Unmount
   useEffect(() => {
     connectWebSocket();
     return () => {
       if (socketRef.current) socketRef.current.close();
       if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
     };
-  }, [wsConfig, isSimulatorActive]);
+  }, [wsConfig, isSimulator, connectWebSocket]);
 
-  // Save WS Config to Local Storage
+  /* ── Persisted-config savers ──────────────────────────────────────── */
   const handleSaveConfig = (newConfig) => {
     setWsConfig(newConfig);
     localStorage.setItem('chidori-ws-config', JSON.stringify(newConfig));
+    toast('Conexión guardada', 'success');
   };
 
-  // Save Supabase Config to Local Storage and initialize client
   const handleSaveSupabaseConfig = (newConfig) => {
     setSupabaseConfig(newConfig);
     localStorage.setItem('chidori-supabase-config', JSON.stringify(newConfig));
     const client = getSupabaseClient(newConfig.url, newConfig.key);
     setSupabase(client);
-    if (client) {
-      triggerAlert('Conexión con Supabase guardada exitosamente', 'success');
-    } else {
-      triggerAlert('Datos de Supabase borrados o inválidos', 'info');
-    }
+    if (client) toast('Credenciales de Supabase guardadas', 'success');
+    else        toast('Credenciales de Supabase removidas', 'info');
   };
 
-  // --- Clock updates ---
+  /* ── Clock ─────────────────────────────────────────────────────────── */
   useEffect(() => {
-    let interval = null;
-    if (measuring && startTime) {
-      interval = setInterval(() => {
-        const elapsed = (Date.now() - startTime - pausedDuration) / 1000;
-        const mins = Math.floor(elapsed / 60);
-        const secs = Math.floor(elapsed % 60);
-        setElapsedTime(`${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
-      }, 250);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
+    if (!measuring || !startTime) return;
+    const interval = setInterval(() => {
+      const e = (Date.now() - startTime - pausedDuration) / 1000;
+      const m = Math.floor(e / 60);
+      const s = Math.floor(e % 60);
+      setElapsedTime(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+    }, 250);
+    return () => clearInterval(interval);
   }, [measuring, startTime, pausedDuration]);
 
-  // --- Core Signal Data Handler ---
-  const handleIncomingData = async (val) => {
-    const current = stateRef.current;
-    if (!current.measuring) return;
+  /* ── Incoming data handler ────────────────────────────────────────── */
+  const handleIncomingData = (val) => {
+    const cur = stateRef.current;
+    if (!cur.measuring) return;
 
-    // Save first value as baseline reference
-    let baseline = current.initialValue;
+    let baseline = cur.initialValue;
     if (baseline === null) {
       baseline = val;
       setInitialValue(val);
     }
-
     setCurrentValue(val);
 
-    // Calculate Elapsed Time
-    const elapsed = (Date.now() - current.startTime - current.pausedDuration) / 1000;
-
+    const elapsed = (Date.now() - cur.startTime - cur.pausedDuration) / 1000;
     let computedRate = 0;
 
-    // Save raw data point
-    setData(prev => {
-      const newData = [...prev, { x: elapsed, y: val }];
-      
-      // Calculate Rate of change (derivative) using last 10 points
-      if (newData.length >= 2) {
-        const recent = newData.slice(-10);
-        const firstP = recent[0];
-        const lastP = recent[recent.length - 1];
-        const deltaX = lastP.x - firstP.x;
-        const deltaY = lastP.y - firstP.y;
-        computedRate = deltaX > 0 ? (deltaY / deltaX) * 60 : 0; // Ohm/min
-        
+    setData((prev) => {
+      const next = [...prev, { x: elapsed, y: val }];
+      if (next.length >= 2) {
+        const recent = next.slice(-10);
+        const a = recent[0];
+        const b = recent[recent.length - 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        computedRate = dx > 0 ? (dy / dx) * 60 : 0;
         setRate(computedRate);
-        setRateData(prevRates => [...prevRates, { x: elapsed, y: computedRate }]);
+        setRateData((p) => [...p, { x: elapsed, y: computedRate }]);
       } else {
-        setRateData(prevRates => [...prevRates, { x: elapsed, y: 0 }]);
+        setRateData((p) => [...p, { x: elapsed, y: 0 }]);
       }
-
-      return newData;
+      return next;
     });
 
-    // --- CLOUD DATABSE: Insert measurement in Supabase ---
-    // We insert a point in Supabase every 10 seconds to keep it high-performance
+    // Cloud insert every 10s, enqueued so failures are visible/retried
     const sampleIndex = Math.round(elapsed);
-    if (current.supabase && current.sessionId && sampleIndex % 10 === 0) {
-      try {
-        await current.supabase.from('measurements').insert({
-          session_id: current.sessionId,
-          elapsed_time: elapsed,
+    if (cur.sessionId && sampleIndex % 10 === 0) {
+      cur.cloud?.enqueue({
+        label: 'measurement',
+        run: (client) => client.from('measurements').insert({
+          session_id: cur.sessionId,
+          [SUPABASE_TIMESTAMP_FIELD]: elapsed,
           impedance: val,
-          rate: computedRate
-        });
-      } catch (err) {
-        console.error('Error insertando mediciones en Supabase:', err);
-      }
+          rate: computedRate,
+        }).throwOnError(),
+      });
     }
 
-    // Evaluate Alarm Constraints
-    if (current.alarmEnabled && !current.alarmFired) {
+    // Alarm evaluation
+    if (cur.alarmEnabled && !cur.alarmFired) {
       let trigger = false;
-      
-      if (current.alarmType === 'abs' && current.alarmAbs) {
-        const limit = parseFloat(current.alarmAbs);
-        if (val <= limit) trigger = true;
-      } else if (current.alarmType === 'percent' && current.alarmPercent) {
-        const limitPct = parseFloat(current.alarmPercent);
-        if (val <= baseline * (limitPct / 100)) trigger = true;
-      } else if (current.alarmType === 'diff' && current.alarmDiff) {
-        const limitDiff = parseFloat(current.alarmDiff);
-        if (val <= baseline - limitDiff) trigger = true;
+      if (cur.alarmType === 'abs' && cur.alarmAbs) {
+        if (val <= parseFloat(cur.alarmAbs)) trigger = true;
+      } else if (cur.alarmType === 'percent' && cur.alarmPercent) {
+        if (val <= baseline * (parseFloat(cur.alarmPercent) / 100)) trigger = true;
+      } else if (cur.alarmType === 'diff' && cur.alarmDiff) {
+        if (val <= baseline - parseFloat(cur.alarmDiff)) trigger = true;
       }
-
-      if (trigger) {
-        setAlarmFired(true);
-        triggerAlert('⚠️ Es altamente recomendable orinar (Vejiga completa)', 'warning');
-      }
+      if (trigger) setAlarmFired(true);
     }
   };
 
-  // --- Keyboard Shortcuts Listener ---
+  /* ── Keyboard shortcuts (no Ctrl+R, no Ctrl+D — those clash with browser) */
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-
-      // Spacebar: Start / Pause
-      if (e.code === 'Space') {
-        e.preventDefault();
-        toggleMeasuring();
-      }
-      // E: Mark Event
-      if (e.key.toLowerCase() === 'e') {
-        e.preventDefault();
-        handleMarkEvent();
-      }
-      // Ctrl+R / Cmd+R: Reset (prevent reload)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        handleReset();
-      }
-      // Ctrl+D / Cmd+D: Open Export Modal
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        setIsExportOpen(true);
-      }
+    const onKey = (e) => {
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.code === 'Space') { e.preventDefault(); toggleMeasuring(); }
+      else if (e.key.toLowerCase() === 'e') { e.preventDefault(); handleMarkEvent(); }
     };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measuring, startTime, pausedDuration, data, initialValue, currentValue, eventCount, wsStatus, isSimulator]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [measuring, startTime, pausedDuration, data, initialValue, currentValue, eventCount, wsStatus, isSimulatorActive]);
-
-  // --- High-Fidelity Bladder Ingestion Simulator ---
+  /* ── Simulator ─────────────────────────────────────────────────────── */
   useEffect(() => {
-    if (isSimulatorActive && measuring) {
+    if (isSimulator && measuring) {
       simulatedZRef.current = initialValue !== null ? initialValue : 150.0;
-      
       simulatorIntervalRef.current = setInterval(() => {
-        // Bladder filling reduces impedance slowly. 
-        // Decrement by a realistic step of 0.12 Ohm/sec with a slight random noise
         const noise = (Math.random() - 0.5) * 0.08;
-        const fillStep = 0.12; 
+        const fillStep = 0.12;
         const nextZ = simulatedZRef.current - fillStep + noise;
-        
         simulatedZRef.current = nextZ;
         handleIncomingData(nextZ);
       }, 1000);
-    } else {
-      if (simulatorIntervalRef.current) {
-        clearInterval(simulatorIntervalRef.current);
-        simulatorIntervalRef.current = null;
-      }
+    } else if (simulatorIntervalRef.current) {
+      clearInterval(simulatorIntervalRef.current);
+      simulatorIntervalRef.current = null;
     }
+    return () => simulatorIntervalRef.current && clearInterval(simulatorIntervalRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSimulator, measuring]);
 
-    return () => {
-      if (simulatorIntervalRef.current) clearInterval(simulatorIntervalRef.current);
-    };
-  }, [isSimulatorActive, measuring]);
-
-  // Handle Simulation Toggle
   const toggleSimulator = () => {
     if (measuring) {
-      triggerAlert('No puedes alternar el simulador mientras una medición está activa.', 'warning');
+      toast('Detenga la medición antes de alternar el simulador', 'warn');
       return;
     }
-    
-    const nextState = !isSimulatorActive;
-    setIsSimulatorActive(nextState);
-    
-    if (nextState) {
+    const next = !isSimulator;
+    setIsSimulator(next);
+    if (next) {
       setWsStatus('DISCONNECTED');
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
-      triggerAlert('Modo Simulador de Hardware Activado (Curvas Fisiológicas)', 'success');
+      if (socketRef.current) socketRef.current.close();
+      toast('Simulador activado · curva fisiológica sintética', 'info');
     } else {
-      triggerAlert('Modo Simulador Desactivado. Reconectando WebSocket...', 'info');
+      toast('Simulador desactivado · reconectando dispositivo', 'info');
       connectWebSocket();
     }
   };
 
-  // --- Control Operations ---
+  /* ── Control: start / pause ───────────────────────────────────────── */
   const toggleMeasuring = async () => {
-    const current = stateRef.current;
-    if (wsStatus !== 'CONNECTED' && !isSimulatorActive) {
-      triggerAlert('Debes estar conectado al WebSocket o activar el Simulador para controlar las mediciones', 'warning');
+    if (wsStatus !== 'CONNECTED' && !isSimulator) {
+      toast('Sin conexión. Active el simulador o configure el dispositivo.', 'warn');
       return;
     }
 
     if (!measuring) {
-      // Start or Resume
       let sTime = startTime;
       let pDur = pausedDuration;
-      let sId = sessionId;
-      
-      if (!sTime) {
-        sTime = Date.now();
-        setStartTime(sTime);
-      }
-      if (pauseStart) {
-        pDur += Date.now() - pauseStart;
-        setPausedDuration(pDur);
-        setPauseStart(null);
-      }
+      if (!sTime) { sTime = Date.now(); setStartTime(sTime); }
+      if (pauseStart) { pDur += Date.now() - pauseStart; setPausedDur(pDur); setPauseStart(null); }
 
-      // --- CLOUD DATABASE: Create a Session in Supabase ---
-      if (current.supabase && !sId) {
+      // Cloud session
+      if (supabase && !sessionId) {
         try {
-          const { data: newSession, error } = await current.supabase
+          const { data: newSession, error } = await supabase
             .from('sessions')
-            .insert({
-              patient_name: 'Paciente Temporal',
-              initial_impedance: currentValue || 150.0
-            })
+            .insert({ patient_name: 'Sesión sin identificar', initial_impedance: currentValue || 150.0 })
             .select()
             .single();
-
           if (error) throw error;
-          if (newSession) {
-            sId = newSession.id;
-            setSessionId(sId);
-            console.log('Sesión en la nube de Supabase inicializada con ID:', sId);
-          }
+          if (newSession) setSessionId(newSession.id);
         } catch (err) {
-          console.error('Error al crear sesión en Supabase:', err);
+          console.error('[session create]', err);
+          toast('No se pudo crear la sesión en la nube. Mediciones locales continúan.', 'warn');
         }
       }
 
-      if (!isSimulatorActive && socketRef.current) {
-        socketRef.current.send('START');
-      }
-
+      if (!isSimulator && socketRef.current) socketRef.current.send('START');
       setMeasuring(true);
-      triggerAlert('Adquisición de bioimpedancia iniciada', 'success');
-    } else {
-      // Pause
-      if (!isSimulatorActive && socketRef.current) {
-        socketRef.current.send('STOP');
+
+      // Request notification permission opportunistically (alarm fallback)
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
       }
+    } else {
+      if (!isSimulator && socketRef.current) socketRef.current.send('STOP');
       setMeasuring(false);
       setPauseStart(Date.now());
-      triggerAlert('Medición pausada temporalmente', 'info');
     }
   };
 
-  const handleMarkEvent = async () => {
-    const current = stateRef.current;
+  /* ── Control: mark event ──────────────────────────────────────────── */
+  const handleMarkEvent = () => {
     if (!measuring || !startTime) return;
-    
     const elapsed = (Date.now() - startTime - pausedDuration) / 1000;
     const nextCount = eventCount + 1;
     setEventCount(nextCount);
 
-    const changeVal = initialValue !== null && currentValue !== null ? currentValue - initialValue : null;
+    const changeVal = (initialValue !== null && currentValue !== null)
+      ? currentValue - initialValue
+      : null;
 
-    const newEvent = {
-      id: nextCount,
-      time: elapsed,
-      value: currentValue || 0,
-      change: changeVal
-    };
+    const newEvent = { id: nextCount, time: elapsed, value: currentValue || 0, change: changeVal };
+    setEvents((prev) => [newEvent, ...prev]);
 
-    setEvents(prev => [newEvent, ...prev]);
-
-    // --- CLOUD DATABASE: Insert Event in Supabase ---
-    if (current.supabase && current.sessionId) {
-      try {
-        await current.supabase.from('session_events').insert({
-          session_id: current.sessionId,
+    if (sessionId) {
+      cloud.enqueue({
+        label: 'event',
+        run: (client) => client.from('session_events').insert({
+          session_id: sessionId,
           event_number: nextCount,
-          elapsed_time: elapsed,
+          [SUPABASE_TIMESTAMP_FIELD]: elapsed,
           impedance: currentValue || 0,
-          impedance_change: changeVal
-        });
-      } catch (err) {
-        console.error('Error insertando evento en Supabase:', err);
-      }
+          impedance_change: changeVal,
+        }).throwOnError(),
+      });
     }
-
-    triggerAlert(`Evento #${nextCount} marcado con éxito`, 'success');
   };
 
+  /* ── Control: reset ───────────────────────────────────────────────── */
   const handleReset = () => {
-    if (window.confirm('¿Seguro que deseas reiniciar todas las mediciones de la sesión?')) {
-      if (socketRef.current && wsStatus === 'CONNECTED' && !isSimulatorActive) {
-        socketRef.current.send('RESET');
-      }
-
-      // Reset states
-      setMeasuring(false);
-      setStartTime(null);
-      setPausedDuration(0);
-      setPauseStart(null);
-      setElapsedTime('00:00');
-      setData([]);
-      setRateData([]);
-      setEvents([]);
-      setInitialValue(null);
-      setCurrentValue(null);
-      setRate(0);
-      setEventCount(0);
-      setAlarmFired(false);
-      setSessionId(null);
-      simulatedZRef.current = 150.0;
-
-      triggerAlert('Sesión reiniciada. Datos vaciados.', 'info');
+    if (socketRef.current && wsStatus === 'CONNECTED' && !isSimulator) {
+      socketRef.current.send('RESET');
     }
+    setMeasuring(false);
+    setStartTime(null);
+    setPausedDur(0);
+    setPauseStart(null);
+    setElapsedTime('00:00');
+    setData([]);
+    setRateData([]);
+    setEvents([]);
+    setInitialValue(null);
+    setCurrentValue(null);
+    setRate(0);
+    setEventCount(0);
+    setAlarmFired(false);
+    setSessionId(null);
+    simulatedZRef.current = 150.0;
+    setConfirmReset(false);
+    toast('Sesión reiniciada', 'info');
   };
 
-  // Callback from Calibration Wizard to update alarms
+  /* ── Calibration save ─────────────────────────────────────────────── */
   const handleSaveCalibration = (calib) => {
     setInitialValue(calib.zEmpty);
     setAlarmType('abs');
@@ -516,333 +386,330 @@ export default function App() {
     setAlarmFired(false);
   };
 
-  // Sync / Update patient info dynamically in Supabase when saving form
-  const handleUpdateSupabasePatient = async (patientInfo) => {
-    const current = stateRef.current;
-    if (current.supabase && current.sessionId) {
-      try {
-        await current.supabase.from('sessions').update({
-          patient_name: patientInfo.nombre,
-          patient_age: parseInt(patientInfo.edad) || null,
-          patient_gender: patientInfo.sexo,
-          patient_weight: parseFloat(patientInfo.peso) || null,
-          patient_height: parseFloat(patientInfo.altura) || null,
-          patient_iliac_circ: parseFloat(patientInfo.circ) || null,
-          menstruation_info: patientInfo.menstruacion,
-          final_impedance: currentValue,
-          elapsed_time: elapsedTime,
-          total_events: eventCount
-        }).eq('id', current.sessionId);
-        
-        console.log('Información clínica de la sesión de Supabase actualizada.');
-      } catch (e) {
-        console.error('Fallo al actualizar paciente en Supabase:', e);
-      }
+  /* ── Patient persistence (explicit, not per-keystroke) ────────────── */
+  const handleSavePatient = (patientInfo) => {
+    if (!supabase || !sessionId) {
+      toast('Configure Supabase para persistir datos del paciente', 'info');
+      return;
     }
+    cloud.enqueue({
+      label: 'patient',
+      run: (client) => client.from('sessions').update({
+        patient_name:        patientInfo.nombre || null,
+        patient_age:         parseInt(patientInfo.edad) || null,
+        patient_gender:      patientInfo.sexo || null,
+        patient_weight:      parseFloat(patientInfo.peso) || null,
+        patient_height:      parseFloat(patientInfo.altura) || null,
+        patient_iliac_circ:  parseFloat(patientInfo.circ) || null,
+        menstruation_info:   patientInfo.menstruacion || null,
+        final_impedance:     currentValue,
+        elapsed_time_str:    elapsedTime,
+        total_events:        eventCount,
+      }).eq('id', sessionId).throwOnError(),
+    });
   };
 
-  // Get current alarm threshold for visual preview
-  const getAlarmThreshold = () => {
+  /* ── Derived: alarm threshold preview for bladder visual ──────────── */
+  const thresholdPreview = (() => {
     if (initialValue === null) return 0;
-    if (alarmType === 'abs') return parseFloat(alarmAbs) || 0;
-    if (alarmType === 'percent') return initialValue * ((parseFloat(alarmPercent) || 0) / 100);
-    if (alarmType === 'diff') return initialValue - (parseFloat(alarmDiff) || 0);
+    if (alarmType === 'abs')      return parseFloat(alarmAbs) || 0;
+    if (alarmType === 'percent')  return initialValue * ((parseFloat(alarmPercent) || 0) / 100);
+    if (alarmType === 'diff')     return initialValue - (parseFloat(alarmDiff) || 0);
     return 0;
-  };
+  })();
 
-  const thresholdPreview = getAlarmThreshold();
-  const thresholdPercentage = initialValue > 0 ? (thresholdPreview / initialValue) * 100 : 0;
+  const hasAnyData = data.length > 0;
+  const primaryButtonLabel = measuring ? 'Pausar' : (startTime ? 'Reanudar' : 'Iniciar adquisición');
 
   return (
-    <div className="container">
-      {/* Toast Alert Notifications */}
-      <div style={{ position: 'fixed', top: '24px', right: '24px', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {alerts.map(a => (
-          <div 
-            key={a.id} 
-            style={{
-              background: a.type === 'warning' ? 'linear-gradient(135deg, #ff6b6b, #ee5a52)' : a.type === 'success' ? 'linear-gradient(135deg, #51cf66, #45b854)' : 'linear-gradient(135deg, #4ecdc4, #42b8b0)',
-              boxShadow: a.type === 'warning' ? '0 8px 24px rgba(255, 107, 107, 0.4)' : a.type === 'success' ? '0 8px 24px rgba(81, 207, 102, 0.4)' : '0 8px 24px rgba(78, 205, 196, 0.4)',
-              color: 'white',
-              padding: '14px 22px',
-              borderRadius: '12px',
-              fontWeight: 600,
-              fontSize: '14px',
-              animation: 'slideUp 0.3s ease-out',
-              maxWidth: '360px',
-              minWidth: '260px'
-            }}
-          >
-            {a.text}
-          </div>
-        ))}
-      </div>
+    <div className="app-shell">
+      <AlarmBanner
+        active={alarmFired}
+        message="Umbral preventivo alcanzado · la vejiga está próxima a su capacidad calibrada"
+        hint="Sugiera al paciente que orine. La alarma seguirá activa hasta que se reconozca."
+        onAcknowledge={() => setAlarmFired(false)}
+      />
 
-      {/* Header */}
-      <header className="header">
-        <div className="logo">
-          <div className="logo-icon">⚡</div>
-          <h1>Chidori</h1>
+      {/* ───── HEADER ─────────────────────────────────────────────── */}
+      <header className="app-header">
+        <div className="brand">
+          <span className="brand-mark">Chidori</span>
+          <span className="brand-tag">Bioimpedancia vesical · v2</span>
         </div>
-        <div className="header-actions">
-          {/* Simulator Toggle Button */}
-          <button 
-            onClick={toggleSimulator} 
-            className={`btn ${isSimulatorActive ? 'btn-accent' : 'btn-ghost'}`}
-            style={{ padding: '8px 16px', fontSize: '12px', border: '1px solid hsl(var(--border-color))' }}
-          >
-            <Activity size={14} className={isSimulatorActive ? 'spin' : ''} style={{ animation: isSimulatorActive ? 'pulse 1.5s infinite' : 'none' }} />
-            {isSimulatorActive ? 'Modo Simulador: ON' : 'Simular Hardware'}
+
+        <div className="app-actions">
+          {/* Live status pill */}
+          <span className={`pill ${
+            isSimulator ? 'pill-syncing'
+            : wsStatus === 'CONNECTED' ? 'pill-live'
+            : wsStatus === 'CONNECTING' ? 'pill-syncing'
+            : 'pill-alarm'
+          }`}>
+            <span className="pill-dot" />
+            {isSimulator ? 'Simulador'
+              : wsStatus === 'CONNECTED' ? (measuring ? 'Grabando' : 'En línea')
+              : wsStatus === 'CONNECTING' ? 'Reintentando'
+              : 'Sin enlace'}
+          </span>
+
+          <CloudSyncBadge
+            state={cloud.state}
+            lastSyncAt={cloud.lastSyncAt}
+            queueSize={cloud.queueSize}
+            onRetry={cloud.retry}
+          />
+
+          <button type="button" className="icon-button" onClick={toggleSimulator} title="Alternar simulador">
+            <Cpu size={15} />
           </button>
-          
-          <button 
-            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')} 
-            className="btn-icon-only" 
-            title="Cambiar Tema"
-            style={{ borderRadius: '50%' }}
+
+          <button type="button" className="icon-button" onClick={() => setIsSettingsOpen(true)} title="Configuración">
+            <SettingsIcon size={15} />
+          </button>
+
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            title="Cambiar tema"
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </div>
       </header>
 
-      <main>
-        {/* Settings & Connectivity (WS & Supabase) */}
-        <SettingsPanel 
-          wsConfig={wsConfig} 
-          onSaveConfig={handleSaveConfig} 
-          wsStatus={wsStatus} 
-          onReconnect={connectWebSocket} 
-          supabaseConfig={supabaseConfig}
-          onSaveSupabaseConfig={handleSaveSupabaseConfig}
+      {/* ───── MAIN ───────────────────────────────────────────────── */}
+      <main className="app-main">
+        <ConnectionGate
+          wsStatus={wsStatus}
+          isSimulator={isSimulator}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onReconnect={connectWebSocket}
         />
 
-        {/* Control Card */}
-        <div className="card">
-          <div className="card-header">
+        {/* CONTROL BAR (hero) */}
+        <section className="surface" style={{ padding: '16px 22px' }}>
+          <div className="row-between" style={{ gap: 16, flexWrap: 'wrap' }}>
             <div>
-              <h2>Control de Adquisición</h2>
-              <span className="card-subtitle">Gestiona la adquisición de impedancia y marcado de eventos de llenado</span>
+              <span className="section-label">Control</span>
+              <h3 style={{ fontSize: 'var(--t-lg)', marginTop: 2 }}>
+                Adquisición de bioimpedancia
+              </h3>
+            </div>
+            <div className="row" style={{ gap: 10 }}>
+              <button
+                type="button"
+                className={`button button-lg ${measuring ? '' : 'button-primary'}`}
+                onClick={toggleMeasuring}
+              >
+                {measuring ? <Pause size={16} /> : <Play size={16} />}
+                {primaryButtonLabel}
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleMarkEvent}
+                disabled={!measuring}
+                title="Marcar evento (E)"
+              >
+                <Bookmark size={15} />
+                Marcar
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => setConfirmReset(true)}
+                disabled={!startTime && data.length === 0}
+              >
+                <RotateCcw size={14} />
+                Reiniciar
+              </button>
+              <button type="button" className="button button-ghost" onClick={() => setIsExportOpen(true)}>
+                <Download size={14} />
+                Exportar
+              </button>
             </div>
           </div>
+        </section>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '4px' }}>
-            <button 
-              onClick={toggleMeasuring} 
-              className={`btn ${measuring ? 'btn-secondary' : 'btn-primary'}`}
-              style={{ flex: 2, minWidth: '220px' }}
-            >
-              {measuring ? <Pause size={18} /> : <Play size={18} />}
-              {measuring ? 'Pausar Mediciones' : 'Iniciar Mediciones'}
-            </button>
-
-            <button 
-              onClick={handleMarkEvent} 
-              className="btn btn-tertiary"
-              style={{ flex: 1, minWidth: '180px' }}
-              disabled={!measuring}
-            >
-              <span>📍</span>
-              Marcar Evento [E]
-            </button>
-
-            <button 
-              onClick={handleReset} 
-              className="btn"
-              style={{ background: 'hsl(var(--bg-tertiary))', border: '1px solid hsl(var(--border-color))', color: 'hsl(var(--text-primary))', flex: 1, minWidth: '130px' }}
-            >
-              <RotateCcw size={16} />
-              Reiniciar
-            </button>
-
-            <button 
-              onClick={() => setIsExportOpen(true)} 
-              className="btn btn-accent"
-              style={{ flex: 1, minWidth: '130px' }}
-            >
-              <Download size={16} />
-              Exportar...
-            </button>
-          </div>
-        </div>
-
-        {/* Dashboard Grid */}
-        <StatsGrid 
-          initialValue={initialValue}
-          currentValue={currentValue}
-          elapsedTime={elapsedTime}
-          eventCount={eventCount}
-          rate={rate}
-        />
-
-        {/* Option A & C Dynamic Medical Widgets Block */}
-        <div className="grid-3" style={{ marginBottom: '20px' }}>
-          <BladderVisual 
-            initialValue={initialValue} 
-            currentValue={currentValue} 
-            alarmThreshold={thresholdPreview} 
+        {/* If no data yet, present the empty state instead of "—" placeholders */}
+        {!hasAnyData && !measuring ? (
+          <EmptyState
+            wsStatus={wsStatus}
+            isSimulator={isSimulator}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onToggleSimulator={toggleSimulator}
           />
-          
-          <Timeline events={events} />
-          
-          <CalibrationWizard 
-            currentValue={currentValue}
-            onSaveCalibration={handleSaveCalibration}
-            onShowAlert={triggerAlert}
-          />
-        </div>
+        ) : (
+          <>
+            <StatsGrid
+              initialValue={initialValue}
+              currentValue={currentValue}
+              elapsedTime={elapsedTime}
+              eventCount={eventCount}
+              rate={rate}
+            />
 
-        {/* Charts Grid */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '20px' }}>
-          <RealTimeCharts 
-            data={data}
-            rateData={rateData}
-            events={events}
-            theme={theme}
-          />
-          
-          {/* Advanced Alarm configuration card */}
-          <div className="card">
-            <div className="card-header">
-              <div>
-                <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShieldAlert size={20} style={{ color: 'hsl(var(--accent-orange))' }} />
-                  Configuración de Alarma Vesical
-                </h2>
-                <span className="card-subtitle">Establece límites preventivos de atenuación vesical</span>
+            {/* Hero chart pair · the actual instrument */}
+            <RealTimeCharts data={data} rateData={rateData} events={events} theme={theme} />
+
+            {/* Secondary widgets row */}
+            <div className="split">
+              <BladderVisual
+                initialValue={initialValue}
+                currentValue={currentValue}
+                alarmThreshold={thresholdPreview}
+              />
+              <div className="stack-md">
+                <Timeline events={events} />
+                <CalibrationWizard
+                  currentValue={currentValue}
+                  onSaveCalibration={handleSaveCalibration}
+                  onShowAlert={toast}
+                />
               </div>
             </div>
 
-            <div className="alarm-content" style={{ padding: 0 }}>
-              <div className="alarm-row">
-                <span className="alarm-toggle-label">Activar alertas preventivas</span>
-                <label className="switch">
-                  <input 
-                    type="checkbox" 
-                    checked={alarmEnabled} 
-                    onChange={(e) => setAlarmEnabled(e.target.checked)} 
+            {/* Alarm configuration */}
+            <section className="surface surface-pad">
+              <header className="section-head" style={{ marginBottom: 18 }}>
+                <div>
+                  <h2>Umbral de alarma</h2>
+                  <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
+                    Condición que dispara el aviso preventivo durante la sesión
+                  </span>
+                </div>
+                <label className="switch" title="Activar / desactivar alarma">
+                  <input
+                    type="checkbox"
+                    checked={alarmEnabled}
+                    onChange={(e) => setAlarmEnabled(e.target.checked)}
                   />
-                  <span className="slider"></span>
+                  <span className="switch-track" />
                 </label>
-              </div>
+              </header>
 
-              <div className="alarm-options" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                
-                <div className={`alarm-card-option ${alarmEnabled && alarmType === 'abs' ? 'active' : ''}`}>
-                  <label className="radio-row">
-                    <input 
-                      type="radio" 
-                      name="alarmType" 
-                      value="abs" 
-                      checked={alarmType === 'abs'} 
-                      onChange={() => setAlarmType('abs')}
+              <div className="stack-md">
+                <div className="segment" role="radiogroup" aria-label="Tipo de umbral">
+                  {[
+                    { v: 'abs',     label: 'Valor absoluto' },
+                    { v: 'percent', label: '% del basal' },
+                    { v: 'diff',    label: 'Δ respecto al basal' },
+                  ].map(({ v, label }) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`segment-item ${alarmType === v ? 'active' : ''}`}
+                      onClick={() => setAlarmType(v)}
                       disabled={!alarmEnabled}
-                      style={{ display: 'none' }}
-                    />
-                    <span className="custom-radio"></span>
-                    <span>Valor Absoluto de Impedancia</span>
-                  </label>
-                  <input 
-                    type="number" 
-                    className="input-field" 
-                    placeholder="Ej. 120.5 Ω"
-                    value={alarmAbs}
-                    onChange={(e) => setAlarmAbs(e.target.value)}
-                    disabled={!alarmEnabled || alarmType !== 'abs'}
-                  />
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
 
-                <div className={`alarm-card-option ${alarmEnabled && alarmType === 'percent' ? 'active' : ''}`}>
-                  <label className="radio-row">
-                    <input 
-                      type="radio" 
-                      name="alarmType" 
-                      value="percent" 
-                      checked={alarmType === 'percent'} 
-                      onChange={() => setAlarmType('percent')}
+                {alarmType === 'abs' && (
+                  <div className="field">
+                    <label className="field-label" htmlFor="th-abs">Impedancia mínima permitida</label>
+                    <input
+                      id="th-abs"
+                      className="input"
+                      type="number"
+                      placeholder="120.5"
+                      value={alarmAbs}
+                      onChange={(e) => setAlarmAbs(e.target.value)}
                       disabled={!alarmEnabled}
-                      style={{ display: 'none' }}
                     />
-                    <span className="custom-radio"></span>
-                    <span>Porcentaje del Valor Inicial</span>
-                  </label>
-                  <input 
-                    type="number" 
-                    className="input-field" 
-                    placeholder="0 - 100 %"
-                    min="0"
-                    max="100"
-                    value={alarmPercent}
-                    onChange={(e) => setAlarmPercent(e.target.value)}
-                    disabled={!alarmEnabled || alarmType !== 'percent'}
-                  />
-                </div>
-
-                <div className={`alarm-card-option ${alarmEnabled && alarmType === 'diff' ? 'active' : ''}`}>
-                  <label className="radio-row">
-                    <input 
-                      type="radio" 
-                      name="alarmType" 
-                      value="diff" 
-                      checked={alarmType === 'diff'} 
-                      onChange={() => setAlarmType('diff')}
-                      disabled={!alarmEnabled}
-                      style={{ display: 'none' }}
-                    />
-                    <span className="custom-radio"></span>
-                    <span>Diferencia Respecto al Inicial</span>
-                  </label>
-                  <input 
-                    type="number" 
-                    className="input-field" 
-                    placeholder="Diferencia en Ω"
-                    value={alarmDiff}
-                    onChange={(e) => setAlarmDiff(e.target.value)}
-                    disabled={!alarmEnabled || alarmType !== 'diff'}
-                  />
-                </div>
-
-              </div>
-
-              {alarmEnabled && initialValue !== null && (
-                <div className="alarm-preview" style={{ marginTop: '16px', animation: 'fadeIn 0.3s ease-out' }}>
-                  <div className="alarm-preview-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--text-secondary))' }}>
-                    <span>Zona segura (100%): <strong>{initialValue.toFixed(1)} Ω</strong></span>
-                    <span>Límite preventivo: <strong>{thresholdPreview.toFixed(1)} Ω</strong></span>
+                    <span className="field-hint">
+                      La alarma dispara cuando Z desciende por debajo de este valor en ohmios.
+                    </span>
                   </div>
-                  <div className="alarm-preview-bar" style={{ height: '14px', background: 'linear-gradient(90deg, hsl(var(--accent-red) / 0.3) 0%, hsl(var(--accent-green) / 0.3) 100%)', position: 'relative', borderRadius: '7px', marginTop: '6px', overflow: 'hidden' }}>
-                    <div 
-                      className="alarm-threshold" 
-                      style={{ 
-                        position: 'absolute', 
-                        left: `${Math.max(0, Math.min(100, thresholdPercentage))}%`, 
-                        top: 0, 
-                        bottom: 0, 
-                        width: '3px', 
-                        background: 'white',
-                        boxShadow: '0 0 6px white'
-                      }}
-                    ></div>
+                )}
+
+                {alarmType === 'percent' && (
+                  <div className="field">
+                    <label className="field-label" htmlFor="th-pct">% del valor basal</label>
+                    <input
+                      id="th-pct"
+                      className="input"
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="85"
+                      value={alarmPercent}
+                      onChange={(e) => setAlarmPercent(e.target.value)}
+                      disabled={!alarmEnabled}
+                    />
+                    <span className="field-hint">
+                      La alarma dispara cuando Z desciende a este porcentaje del valor basal
+                      registrado al iniciar la sesión.
+                    </span>
                   </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+                )}
+
+                {alarmType === 'diff' && (
+                  <div className="field">
+                    <label className="field-label" htmlFor="th-diff">Caída en ohmios</label>
+                    <input
+                      id="th-diff"
+                      className="input"
+                      type="number"
+                      placeholder="35"
+                      value={alarmDiff}
+                      onChange={(e) => setAlarmDiff(e.target.value)}
+                      disabled={!alarmEnabled}
+                    />
+                    <span className="field-hint">
+                      La alarma dispara cuando Z desciende esta cantidad respecto al basal.
+                    </span>
+                  </div>
+                )}
+
+                {alarmEnabled && initialValue !== null && (
+                  <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                    <span>Basal</span>
+                    <span>Umbral calculado</span>
+                    <span>Margen restante</span>
+                    <strong className="numeric">{initialValue.toFixed(2)} Ω</strong>
+                    <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
+                    <strong className="numeric">
+                      {currentValue != null
+                        ? `${(currentValue - thresholdPreview).toFixed(2)} Ω`
+                        : '—'}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </main>
 
-      {/* Keyboard Shortcuts Footer */}
-      <footer className="shortcuts-footer">
-        <span>Accesos rápidos: </span>
-        <span className="shortcut-badge">Espacio</span> Iniciar/Pausar | 
-        <span className="shortcut-badge">E</span> Marcar Evento | 
-        <span className="shortcut-badge">Ctrl + R</span> Reiniciar | 
-        <span className="shortcut-badge">Ctrl + D</span> Exportar
+      {/* ───── FOOTER ─────────────────────────────────────────────── */}
+      <footer className="app-footer">
+        <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
+          <span><span className="kbd">Espacio</span> Iniciar / Pausar</span>
+          <span><span className="kbd">E</span> Marcar evento</span>
+        </div>
+        <span>Chidori · Instrumento clínico de bioimpedancia · 2026</span>
       </footer>
 
-      {/* Export & Patient Info Modal */}
-      <ExportModal 
-        isOpen={isExportOpen} 
+      {/* ───── PORTALS ────────────────────────────────────────────── */}
+      <Toasts items={toasts} />
+
+      <SettingsPanel
+        open={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        wsConfig={wsConfig}
+        onSaveConfig={handleSaveConfig}
+        wsStatus={wsStatus}
+        onReconnect={connectWebSocket}
+        supabaseConfig={supabaseConfig}
+        onSaveSupabaseConfig={handleSaveSupabaseConfig}
+      />
+
+      <ExportModal
+        isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         data={data}
         rateData={rateData}
@@ -851,8 +718,28 @@ export default function App() {
         currentValue={currentValue}
         elapsedTime={elapsedTime}
         eventCount={eventCount}
-        onShowAlert={triggerAlert}
-        onSavePatient={handleUpdateSupabasePatient}
+        onShowAlert={toast}
+        onSavePatient={handleSavePatient}
+      />
+
+      <ConfirmModal
+        open={confirmReset}
+        title="Reiniciar la sesión"
+        body={
+          <>
+            <p style={{ marginBottom: 10 }}>
+              Esta acción borra los datos en memoria y cierra la sesión actual. Si tiene
+              Supabase configurado, los datos ya enviados a la nube quedan archivados allí.
+            </p>
+            <p>
+              Mantenga presionado el botón para confirmar.
+            </p>
+          </>
+        }
+        actionLabel="Mantener para reiniciar"
+        onCancel={() => setConfirmReset(false)}
+        onConfirm={handleReset}
+        holdMs={1500}
       />
     </div>
   );

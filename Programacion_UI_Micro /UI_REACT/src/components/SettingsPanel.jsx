@@ -1,30 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { Sliders, RefreshCw, Save, Database, Wifi } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, RefreshCw, Save } from 'lucide-react';
 
-export default function SettingsPanel({ 
-  wsConfig, 
-  onSaveConfig, 
-  wsStatus, 
+/**
+ * Settings drawer · WebSocket connection + Supabase credentials.
+ * Lives behind a drawer toggle in the header. No longer competes with
+ * the dashboard for vertical real estate.
+ */
+export default function SettingsPanel({
+  open,
+  onClose,
+  wsConfig,
+  onSaveConfig,
+  wsStatus,
   onReconnect,
   supabaseConfig,
-  onSaveSupabaseConfig
+  onSaveSupabaseConfig,
 }) {
-  // WebSocket config states
-  const [host, setHost] = useState(wsConfig.host);
-  const [port, setPort] = useState(wsConfig.port);
   const [protocol, setProtocol] = useState(wsConfig.protocol);
-  
-  // Supabase config states
-  const [sbUrl, setSbUrl] = useState(supabaseConfig?.url || '');
-  const [sbKey, setSbKey] = useState(supabaseConfig?.key || '');
-
-  const [isSaved, setIsSaved] = useState(false);
-  const [isSbSaved, setIsSbSaved] = useState(false);
+  const [host, setHost]         = useState(wsConfig.host);
+  const [port, setPort]         = useState(wsConfig.port);
+  const [sbUrl, setSbUrl]       = useState(supabaseConfig?.url || '');
+  const [sbKey, setSbKey]       = useState(supabaseConfig?.key || '');
 
   useEffect(() => {
+    setProtocol(wsConfig.protocol);
     setHost(wsConfig.host);
     setPort(wsConfig.port);
-    setProtocol(wsConfig.protocol);
   }, [wsConfig]);
 
   useEffect(() => {
@@ -32,200 +33,161 @@ export default function SettingsPanel({
     setSbKey(supabaseConfig?.key || '');
   }, [supabaseConfig]);
 
+  // Esc closes
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const wsStatusLabel = {
+    CONNECTED:    { className: 'pill pill-live',    text: 'Conectado' },
+    CONNECTING:   { className: 'pill pill-syncing', text: 'Reintentando' },
+    DISCONNECTED: { className: 'pill pill-alarm',   text: 'Desconectado' },
+  }[wsStatus] || { className: 'pill pill-off', text: 'Desconocido' };
+
   const handleWsSubmit = (e) => {
     e.preventDefault();
-    onSaveConfig({ host, port, protocol });
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2000);
+    onSaveConfig({ protocol, host, port });
   };
 
   const handleSbSubmit = (e) => {
     e.preventDefault();
     onSaveSupabaseConfig({ url: sbUrl, key: sbKey });
-    setIsSbSaved(true);
-    setTimeout(() => setIsSbSaved(false), 2000);
-  };
-
-  const getStatusText = () => {
-    switch (wsStatus) {
-      case 'CONNECTED': return 'Conectado';
-      case 'DISCONNECTED': return 'Desconectado';
-      case 'CONNECTING': return 'Reconectando...';
-      default: return 'Desconocido';
-    }
-  };
-
-  const getStatusClass = () => {
-    switch (wsStatus) {
-      case 'CONNECTED': return 'status-badge connected';
-      case 'DISCONNECTED': return 'status-badge disconnected';
-      case 'CONNECTING': return 'status-badge reconnecting';
-      default: return 'status-badge';
-    }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '20px' }}>
-      
-      {/* 1. WebSocket configuration Card */}
-      <div className="card" style={{ marginBottom: 0 }}>
-        <div className="card-header">
-          <div>
-            <h2>Conectividad de Chidori</h2>
-            <span className="card-subtitle">Administra la dirección y puerto del microcontrolador local</span>
-          </div>
-          <div className={getStatusClass()}>
-            <span className="status-dot"></span>
-            {getStatusText()}
-          </div>
+    <>
+      <div className="drawer-veil" onClick={onClose} />
+      <aside className="drawer-panel" role="dialog" aria-label="Configuración">
+        <div className="drawer-head">
+          <h2>Configuración</h2>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar">
+            <X size={16} />
+          </button>
         </div>
 
-        <form onSubmit={handleWsSubmit} className="alarm-content" style={{ padding: 0 }}>
-          <div className="alarm-options" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-            
-            <div className="alarm-card-option">
-              <label className="form-group" style={{ margin: 0 }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', textTransform: 'uppercase', marginBottom: '6px' }}>Protocolo</span>
-                <select 
-                  className="input-field" 
-                  value={protocol} 
-                  onChange={(e) => setProtocol(e.target.value)}
-                >
-                  <option value="ws://">ws:// (Sin cifrar - Local)</option>
-                  <option value="wss://">wss:// (Cifrado - Remoto)</option>
-                </select>
-              </label>
-              <span style={{ fontSize: '10px', color: 'hsl(var(--text-tertiary))' }}>
-                Vercel requiere HTTPS/WSS, pero para IPs de red local usa ws://
+        <div className="drawer-body">
+          {/* --- WebSocket --- */}
+          <form className="drawer-section" onSubmit={handleWsSubmit}>
+            <div className="drawer-section-head">
+              <h3 style={{ fontSize: 'var(--t-lg)' }}>Microcontrolador</h3>
+              <span className={wsStatusLabel.className}>
+                <span className="pill-dot" />
+                {wsStatusLabel.text}
               </span>
             </div>
 
-            <div className="alarm-card-option">
-              <label className="form-group" style={{ margin: 0 }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', textTransform: 'uppercase', marginBottom: '6px' }}>IP / Hostname</span>
-                <input 
-                  type="text" 
-                  className="input-field" 
-                  placeholder="Ej. chidori.local o 192.168.0.126"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  required
-                />
-              </label>
-              <span style={{ fontSize: '10px', color: 'hsl(var(--text-tertiary))' }}>
-                Ingresa el host mDNS (chidori.local) o la IP asignada por el router.
+            <div className="field">
+              <label className="field-label" htmlFor="proto">Protocolo</label>
+              <select id="proto" className="input" value={protocol} onChange={(e) => setProtocol(e.target.value)}>
+                <option value="ws://">ws:// (red local)</option>
+                <option value="wss://">wss:// (TLS, requerido en hosts HTTPS)</option>
+              </select>
+              <span className="field-hint">
+                Vercel sirve por HTTPS y bloquea ws://. Use wss:// con un proxy seguro, o
+                acceda al frontend localmente vía http://localhost para usar ws://.
               </span>
             </div>
 
-            <div className="alarm-card-option">
-              <label className="form-group" style={{ margin: 0 }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', textTransform: 'uppercase', marginBottom: '6px' }}>Puerto</span>
-                <input 
-                  type="number" 
-                  className="input-field" 
-                  placeholder="Ej. 81"
-                  value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  required
-                />
-              </label>
-              <span style={{ fontSize: '10px', color: 'hsl(var(--text-tertiary))' }}>
-                El puerto predeterminado del WebSocket del micro es 81.
+            <div className="field">
+              <label className="field-label" htmlFor="host">Dirección</label>
+              <input
+                id="host"
+                className="input"
+                type="text"
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+                placeholder="chidori.local"
+                required
+              />
+              <span className="field-hint">
+                Hostname mDNS publicado por el firmware (chidori.local) o IP de red local.
               </span>
             </div>
 
-          </div>
+            <div className="field">
+              <label className="field-label" htmlFor="port">Puerto</label>
+              <input
+                id="port"
+                className="input"
+                type="number"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                placeholder="81"
+                required
+              />
+              <span className="field-hint">Puerto WebSocket. El firmware usa 81 por defecto.</span>
+            </div>
 
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '12px' }}>
-            <button 
-              type="button" 
-              onClick={onReconnect} 
-              className="btn btn-tertiary"
-              style={{ padding: '10px 16px', background: 'transparent', color: 'hsl(var(--text-primary))', border: '1px solid hsl(var(--border-color))', boxShadow: 'none' }}
-              disabled={wsStatus === 'CONNECTING'}
-            >
-              <RefreshCw size={16} className={wsStatus === 'CONNECTING' ? 'spin' : ''} style={{ animation: wsStatus === 'CONNECTING' ? 'spin 1.5s linear infinite' : 'none' }} />
-              Reconectar
-            </button>
-            
-            <button 
-              type="submit" 
-              className="btn btn-primary"
-              style={{ padding: '10px 20px' }}
-            >
-              <Save size={16} />
-              {isSaved ? 'Guardado ✓' : 'Guardar WebSocket'}
-            </button>
-          </div>
-        </form>
-      </div>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button type="button" className="button button-ghost" onClick={onReconnect} disabled={wsStatus === 'CONNECTING'}>
+                <RefreshCw size={14} className={wsStatus === 'CONNECTING' ? 'rotating' : ''} />
+                Reconectar
+              </button>
+              <button type="submit" className="button button-primary">
+                <Save size={14} />
+                Guardar
+              </button>
+            </div>
+          </form>
 
-      {/* 2. Supabase Integration Card */}
-      <div className="card" style={{ marginBottom: 0 }}>
-        <div className="card-header">
-          <div>
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Database size={20} style={{ color: 'hsl(var(--accent-purple))' }} />
-              Base de Datos Cloud (Supabase)
-            </h2>
-            <span className="card-subtitle">Guarda mediciones largas (hasta 4hs) de forma segura y privada</span>
-          </div>
-          <div className={`status-badge ${supabaseConfig?.url && supabaseConfig?.key ? 'connected' : 'disconnected'}`}>
-            <span className="status-dot"></span>
-            {supabaseConfig?.url && supabaseConfig?.key ? 'Configurado' : 'Sin Conexión'}
-          </div>
+          <hr className="hairline" />
+
+          {/* --- Supabase --- */}
+          <form className="drawer-section" onSubmit={handleSbSubmit}>
+            <div className="drawer-section-head">
+              <h3 style={{ fontSize: 'var(--t-lg)' }}>Persistencia en la nube</h3>
+              <span className={`pill ${supabaseConfig?.url && supabaseConfig?.key ? 'pill-confirm' : 'pill-off'}`}>
+                <span className="pill-dot" />
+                {supabaseConfig?.url && supabaseConfig?.key ? 'Configurado' : 'No configurado'}
+              </span>
+            </div>
+
+            <span className="field-hint">
+              Opcional. Guarda sesiones largas en Supabase para análisis posterior. Si lo
+              omite, las mediciones siguen funcionando localmente (sin histórico en la nube).
+            </span>
+
+            <div className="field">
+              <label className="field-label" htmlFor="sburl">Project URL</label>
+              <input
+                id="sburl"
+                className="input"
+                type="url"
+                value={sbUrl}
+                onChange={(e) => setSbUrl(e.target.value)}
+                placeholder="https://xxxx.supabase.co"
+              />
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="sbkey">Anon / Public Key</label>
+              <input
+                id="sbkey"
+                className="input"
+                type="password"
+                value={sbKey}
+                onChange={(e) => setSbKey(e.target.value)}
+                placeholder="eyJhbGciOi…"
+              />
+              <span className="field-hint">
+                Clave anónima pública (anon). Se almacena localmente en su navegador.
+              </span>
+            </div>
+
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button type="submit" className="button button-primary">
+                <Save size={14} />
+                Guardar credenciales
+              </button>
+            </div>
+          </form>
         </div>
-
-        <form onSubmit={handleSbSubmit} className="alarm-content" style={{ padding: 0 }}>
-          <div className="alarm-options" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-            
-            <div className="alarm-card-option">
-              <label className="form-group" style={{ margin: 0 }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', textTransform: 'uppercase', marginBottom: '6px' }}>Supabase Project URL</span>
-                <input 
-                  type="url" 
-                  className="input-field" 
-                  placeholder="https://xyz.supabase.co"
-                  value={sbUrl}
-                  onChange={(e) => setSbUrl(e.target.value)}
-                />
-              </label>
-              <span style={{ fontSize: '10px', color: 'hsl(var(--text-tertiary))' }}>
-                Tu URL del proyecto disponible en Supabase settings / API.
-              </span>
-            </div>
-
-            <div className="alarm-card-option">
-              <label className="form-group" style={{ margin: 0 }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', textTransform: 'uppercase', marginBottom: '6px' }}>Supabase Anon/Public Key</span>
-                <input 
-                  type="password" 
-                  className="input-field" 
-                  placeholder="eyJhbGciOi..."
-                  value={sbKey}
-                  onChange={(e) => setSbKey(e.target.value)}
-                />
-              </label>
-              <span style={{ fontSize: '10px', color: 'hsl(var(--text-tertiary))' }}>
-                Clave pública anónima (anon public) guardada localmente en tu cliente.
-              </span>
-            </div>
-
-          </div>
-
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '12px' }}>
-            <button 
-              type="submit" 
-              className="btn btn-accent"
-              style={{ padding: '10px 20px' }}
-            >
-              <Save size={16} />
-              {isSbSaved ? 'Guardado ✓' : 'Guardar Supabase'}
-            </button>
-          </div>
-        </form>
-      </div>
-
-    </div>
+      </aside>
+    </>
   );
 }
