@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import {
   Shield, LogOut, X, UserCheck, UserX, RefreshCw, Search, ChevronRight,
-  Activity, Pencil, Trash2, Download, FileText, Table, FileType2, Save,
+  Activity, Pencil, Trash2, Download, FileText, Table, FileType2, Save, Menu,
 } from 'lucide-react';
 import { supabase, emailToUsername } from '../supabaseClient';
 import ConfirmModal from '../components/ConfirmModal';
 import ShimmerSkeleton from '../components/ShimmerSkeleton';
+import MobileMenu, { MobileMenuItem, MobileMenuSection } from '../components/MobileMenu';
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
 
 const sessionLayoutId = (id) => `session-card-${id}`;
@@ -25,6 +26,7 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
   const [error, setError] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
   const [filter, setFilter] = useState('');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     setBusy(true); setError(null);
@@ -152,15 +154,54 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
             <Activity size={14} />
             Tomar mediciones
           </button>
-          <span className="pill pill-confirm">
+          <span className="pill pill-confirm keep-mobile">
             <span className="pill-dot" />
             {profile?.display_name || 'sa'}
           </span>
           <button type="button" className="icon-button" onClick={onSignOut} title="Cerrar sesión">
             <LogOut size={15} />
           </button>
+
+          {/* Hamburguesa · solo visible en mobile */}
+          <button
+            type="button"
+            className="mobile-toggle"
+            onClick={() => setIsMobileMenuOpen(true)}
+            aria-label="Abrir menú"
+          >
+            <Menu size={18} />
+          </button>
         </div>
       </header>
+
+      <MobileMenu
+        open={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        header={
+          <div>
+            <span className="brand-mark">Chidori</span>
+            <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--signal)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+              Administrador
+            </div>
+          </div>
+        }
+      >
+        <MobileMenuSection>Vista</MobileMenuSection>
+        <MobileMenuItem
+          icon={Activity}
+          label="Tomar mediciones"
+          hint="Cambiar a la vista de medición"
+          onClick={() => { setIsMobileMenuOpen(false); onSwitchToDashboard(); }}
+        />
+
+        <MobileMenuSection>Cuenta</MobileMenuSection>
+        <MobileMenuItem
+          icon={LogOut}
+          label="Cerrar sesión"
+          danger
+          onClick={() => { setIsMobileMenuOpen(false); onSignOut(); }}
+        />
+      </MobileMenu>
 
       <main className="app-main">
         <div className="segment">

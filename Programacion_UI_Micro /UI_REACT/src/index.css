@@ -1581,3 +1581,339 @@ code {
     transform: revert;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * MOBILE · responsive layer
+ *
+ * Breakpoints:
+ *   ≤ 720px · phones · header colapsa a hamburguesa, stats verticales
+ *   ≤ 980px · tablets · 2 columnas, drawers full-width
+ *
+ * Filosofía: la app ya era responsive a 720/980 — esta capa refina
+ * touch targets, oculta acciones secundarias detrás del MobileMenu y
+ * adapta listas a card-stack en lugar de grid horizontal.
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ─── Hamburguesa visible solo en mobile ──────────────────────────── */
+.mobile-toggle {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .mobile-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--type-hi);
+    cursor: pointer;
+  }
+  .mobile-toggle:active {
+    transform: scale(0.94);
+    transition: transform 60ms var(--ease-quart);
+  }
+
+  /* En mobile escondemos las acciones secundarias del header.
+   * El MobileMenu las muestra adentro del drawer. */
+  .app-actions > *:not(.mobile-toggle):not(.pill-live):not(.pill-syncing):not(.pill-alarm):not(.pill-off) {
+    display: none;
+  }
+  /* También escondemos pills "ambient" para no saturar el header en mobile.
+   * Solo se muestra el pill de estado principal vía .keep-mobile. */
+  .app-actions .pill:not(.keep-mobile) {
+    display: none;
+  }
+}
+
+/* ─── HEADER · padding y tipografía ajustados ───────────────────── */
+@media (max-width: 720px) {
+  .app-header {
+    padding: 12px 16px;
+  }
+  .brand-mark {
+    font-size: var(--t-xl);
+  }
+  .brand-mark::before {
+    width: 6px; height: 6px;
+    margin-right: 8px;
+  }
+  .brand-tag {
+    display: none;        /* el tag descriptivo se omite en mobile */
+  }
+}
+
+/* ─── MAIN · padding y gaps reducidos ─────────────────────────────── */
+@media (max-width: 720px) {
+  .app-main {
+    padding: 16px 14px 60px;
+    gap: 18px;
+  }
+}
+
+/* ─── CONTROL bar · botones más cómodos al tacto ──────────────────── */
+@media (max-width: 720px) {
+  /* La row de control pasa a stack · primary action full-width arriba */
+  .section.control-bar,
+  .surface .row-between {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .button {
+    min-height: 44px;     /* WCAG touch target */
+    padding: 12px 16px;
+  }
+  .button-lg {
+    padding: 14px 20px;
+    font-size: var(--t-md);
+    width: 100%;          /* iniciar/pausar full-width */
+  }
+  .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ─── READOUT · stack en 2x2 con menos altura mínima ──────────────── */
+@media (max-width: 720px) {
+  .readout {
+    grid-template-columns: 1fr 1fr;
+  }
+  .readout-cell {
+    padding: 14px 16px;
+    min-height: 90px;
+  }
+  .readout-cell.hero {
+    grid-column: 1 / -1;  /* hero ocupa fila completa */
+    padding: 16px 18px;
+    min-height: 104px;
+  }
+  .readout-cell.hero .readout-value {
+    font-size: var(--t-3xl);   /* en mobile el hero baja un escalón */
+  }
+}
+
+/* ─── CHART · altura adaptada ─────────────────────────────────────── */
+@media (max-width: 720px) {
+  .chart-host {
+    height: 280px;
+    padding: 12px 4px 4px;
+  }
+  .chart-host.compact {
+    height: 180px;
+  }
+}
+
+/* ─── BLADDER + TIMELINE + WIZARD · stack vertical ────────────────── */
+@media (max-width: 760px) {
+  .vessel-wrap {
+    justify-items: center;
+  }
+  .vessel {
+    width: 116px;
+    height: 158px;
+  }
+}
+
+/* ─── ALARM CONFIG · campos full width ───────────────────────────── */
+@media (max-width: 720px) {
+  .step-summary {
+    grid-template-columns: 1fr !important;
+    gap: 6px 0;
+    text-align: left;
+  }
+  .segment {
+    flex-direction: column;   /* en mobile, segments stack vertical */
+  }
+  .segment-item {
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .segment-item:last-child {
+    border-bottom: 0;
+  }
+}
+
+/* ─── ADMIN list · sessions row a card vertical ───────────────────── */
+@media (max-width: 720px) {
+  .admin-row {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto !important;
+    gap: 10px !important;
+    padding: 16px !important;
+  }
+  /* La chevron al final se oculta · el tap entero es el affordance */
+  .admin-row > svg:last-child {
+    display: none;
+  }
+  /* Cada bloque "key/value" se etiqueta con la label arriba */
+  .admin-row > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+}
+
+/* ─── MODAL · ocupa más viewport en mobile ────────────────────────── */
+@media (max-width: 720px) {
+  .modal-veil {
+    padding: 8px;
+    align-items: flex-end;       /* sheet-style en mobile */
+  }
+  .modal-card,
+  .modal-card.modal-wide {
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+  }
+  .modal-head {
+    padding: 16px 18px;
+  }
+  .modal-body {
+    padding: 18px;
+  }
+  .modal-foot {
+    padding: 14px 18px;
+    flex-wrap: wrap;
+  }
+}
+
+/* ─── EMPTY STATE · steps en stack ────────────────────────────────── */
+@media (max-width: 720px) {
+  .empty-state {
+    padding: 36px 22px;
+  }
+  .empty-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── DRAWER · full width en mobile ───────────────────────────────── */
+@media (max-width: 720px) {
+  .drawer-panel {
+    width: 100vw;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ * MobileMenu · estilos
+ * ════════════════════════════════════════════════════════════════════ */
+.mobile-menu-veil,
+.mobile-menu-panel {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .mobile-menu-veil {
+    display: block;
+  }
+  .mobile-menu-panel {
+    display: flex;
+    width: 100vw;
+  }
+}
+
+.mobile-menu-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  overflow-y: auto;
+}
+
+.mobile-menu-section-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--type-mute);
+  padding: 18px 26px 8px;
+  border-top: 1px solid var(--hairline);
+  margin-top: 4px;
+}
+
+.mobile-menu-section-label:first-child {
+  border-top: 0;
+  margin-top: 0;
+}
+
+.mobile-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 26px;
+  border: 0;
+  background: transparent;
+  color: var(--type-hi);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--t-sm);
+  transition: background var(--dur-fast) var(--ease-quart);
+}
+
+.mobile-menu-item:active {
+  background: var(--ink-2);
+}
+
+.mobile-menu-item.is-danger {
+  color: var(--alarm);
+}
+
+.mobile-menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  background: var(--ink-2);
+  border: 1px solid var(--hairline);
+  color: var(--type-med);
+  flex-shrink: 0;
+}
+
+.mobile-menu-item.is-danger .mobile-menu-item-icon {
+  color: var(--alarm);
+  background: var(--alarm-soft);
+  border-color: var(--alarm-line);
+}
+
+.mobile-menu-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-menu-item-label {
+  font-weight: 500;
+}
+
+.mobile-menu-item-hint {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--type-mute);
+}
+
+.mobile-menu-item-accessory {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* ─── FOOTER · stack vertical en mobile ──────────────────────────── */
+@media (max-width: 720px) {
+  .app-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 14px 16px;
+  }
+}

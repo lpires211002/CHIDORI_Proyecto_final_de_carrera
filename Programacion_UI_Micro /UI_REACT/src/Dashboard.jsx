@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun,
-  Settings as SettingsIcon, Cpu, LogOut, Shield,
+  Settings as SettingsIcon, Cpu, LogOut, Shield, Menu,
 } from 'lucide-react';
 
 import SettingsPanel     from './components/SettingsPanel';
+import MobileMenu, { MobileMenuItem, MobileMenuSection } from './components/MobileMenu';
 import StatsGrid         from './components/StatsGrid';
 import RealTimeCharts    from './components/RealTimeCharts';
 import Timeline          from './components/Timeline';
@@ -91,6 +92,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   /* ── UI ────────────────────────────────────────────────────────────── */
   const [isExportOpen, setIsExportOpen]     = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [confirmReset, setConfirmReset]     = useState(false);
   const [toasts, setToasts]                 = useState([]);
 
@@ -493,7 +495,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             </button>
           )}
 
-          <span className={`pill ${
+          <span className={`pill keep-mobile ${
             isSimulator ? 'pill-syncing'
             : wsStatus === 'CONNECTED' ? 'pill-live'
             : wsStatus === 'CONNECTING' ? 'pill-syncing'
@@ -538,6 +540,16 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
           <button type="button" className="icon-button" onClick={onSignOut} title="Cerrar sesión">
             <LogOut size={15} />
+          </button>
+
+          {/* Hamburguesa · solo visible en mobile (CSS controla) */}
+          <button
+            type="button"
+            className="mobile-toggle"
+            onClick={() => setIsMobileMenuOpen(true)}
+            aria-label="Abrir menú"
+          >
+            <Menu size={18} />
           </button>
         </div>
       </header>
@@ -708,6 +720,58 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       </footer>
 
       <Toasts items={toasts} />
+
+      {/* Mobile menu · render condicional, CSS lo muestra solo en <720px */}
+      <MobileMenu
+        open={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        header={
+          <div>
+            <span className="brand-mark">Chidori</span>
+            <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--type-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+              {displayName}
+            </div>
+          </div>
+        }
+      >
+        <MobileMenuSection>Sesión</MobileMenuSection>
+        {isAdmin && onSwitchToAdmin && (
+          <MobileMenuItem
+            icon={Shield}
+            label="Panel de administración"
+            hint="Volver a la vista admin"
+            onClick={() => { setIsMobileMenuOpen(false); onSwitchToAdmin(); }}
+          />
+        )}
+        <MobileMenuItem
+          icon={Cpu}
+          label={isSimulator ? 'Desactivar simulador' : 'Activar simulador'}
+          hint="Curva fisiológica sintética"
+          onClick={() => { setIsMobileMenuOpen(false); toggleSimulator(); }}
+        />
+
+        <MobileMenuSection>Aplicación</MobileMenuSection>
+        <MobileMenuItem
+          icon={SettingsIcon}
+          label="Configuración"
+          hint="Microcontrolador y red"
+          onClick={() => { setIsMobileMenuOpen(false); setIsSettingsOpen(true); }}
+        />
+        <MobileMenuItem
+          icon={theme === 'dark' ? Sun : Moon}
+          label={`Tema ${theme === 'dark' ? 'claro' : 'oscuro'}`}
+          hint={theme === 'dark' ? 'Más legible con luz ambiente' : 'Más cómodo en quirófano'}
+          onClick={() => { setIsMobileMenuOpen(false); setTheme((t) => (t === 'dark' ? 'light' : 'dark')); }}
+        />
+
+        <MobileMenuSection>Cuenta</MobileMenuSection>
+        <MobileMenuItem
+          icon={LogOut}
+          label="Cerrar sesión"
+          danger
+          onClick={() => { setIsMobileMenuOpen(false); onSignOut(); }}
+        />
+      </MobileMenu>
 
       <SettingsPanel
         open={isSettingsOpen}
