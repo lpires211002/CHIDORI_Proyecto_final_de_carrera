@@ -65,15 +65,31 @@ export default function ExportModal({
     catch { return null; }
   };
 
-  const savePatient = () => {
-    if (!saveToDb) return;
-    if (!onSavePatient) return;
-    onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion });
-    onShowAlert('Datos del paciente guardados en la nube', 'success');
+  const [committing, setCommitting] = useState(false);
+
+  /**
+   * Persistir en la nube ANTES de descargar el archivo. Si falla, abortamos
+   * el export para que el clínico decida (puede apagar el switch y reintentar).
+   * Retorna true si todo OK, false si el commit falló.
+   */
+  const savePatientIfNeeded = async () => {
+    if (!saveToDb) return true;
+    if (!onSavePatient) return true;
+    try {
+      setCommitting(true);
+      await onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion });
+      return true;
+    } catch {
+      // El handler en Dashboard ya muestra el toast de error
+      return false;
+    } finally {
+      setCommitting(false);
+    }
   };
 
-  const handleExportPDF = () => {
-    savePatient();
+  const handleExportPDF = async () => {
+    const ok = await savePatientIfNeeded();
+    if (!ok) return;
     exportPDF({
       patient:      buildPatient(),
       stats:        buildStats(),
@@ -85,15 +101,17 @@ export default function ExportModal({
     onClose();
   };
 
-  const handleExportCSV = () => {
-    savePatient();
+  const handleExportCSV = async () => {
+    const ok = await savePatientIfNeeded();
+    if (!ok) return;
     exportCSV({ measurements: buildMeasurements() });
     onShowAlert('Datos exportados en CSV', 'success');
     onClose();
   };
 
-  const handleExportTXT = () => {
-    savePatient();
+  const handleExportTXT = async () => {
+    const ok = await savePatientIfNeeded();
+    if (!ok) return;
     exportTXT({
       patient:      buildPatient(),
       stats:        buildStats(),
@@ -102,6 +120,11 @@ export default function ExportModal({
     });
     onShowAlert('Archivo de texto generado', 'success');
     onClose();
+  };
+
+  const handleSavePatientOnly = async () => {
+    const ok = await savePatientIfNeeded();
+    if (ok) onClose();
   };
 
   return (
@@ -119,23 +142,25 @@ export default function ExportModal({
             Formato del reporte
           </span>
           <div className="readout" style={{ marginBottom: 24 }}>
-            <button type="button" className="readout-cell" onClick={handleExportPDF} style={{ cursor: 'pointer', textAlign: 'left', border: 0 }}>
+            <button type="button" className="readout-cell" onClick={handleExportPDF} disabled={committing} style={{ cursor: committing ? 'progress' : 'pointer', textAlign: 'left', border: 0 }}>
               <span className="readout-label"><FileText size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />PDF</span>
               <span className="readout-value" style={{ fontSize: 'var(--t-lg)' }}>Reporte clínico</span>
               <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>Paciente + estadísticas + curva embebida</span>
             </button>
-            <button type="button" className="readout-cell" onClick={handleExportCSV} style={{ cursor: 'pointer', textAlign: 'left', border: 0 }}>
+            <button type="button" className="readout-cell" onClick={handleExportCSV} disabled={committing} style={{ cursor: committing ? 'progress' : 'pointer', textAlign: 'left', border: 0 }}>
               <span className="readout-label"><Table size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />CSV</span>
               <span className="readout-value" style={{ fontSize: 'var(--t-lg)' }}>Datos crudos</span>
               <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>Compatible con Excel / Pandas</span>
             </button>
-            <button type="button" className="readout-cell" onClick={handleExportTXT} style={{ cursor: 'pointer', textAlign: 'left', border: 0 }}>
+            <button type="button" className="readout-cell" onClick={handleExportTXT} disabled={committing} style={{ cursor: committing ? 'progress' : 'pointer', textAlign: 'left', border: 0 }}>
               <span className="readout-label"><FileType2 size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />TXT</span>
               <span className="readout-value" style={{ fontSize: 'var(--t-lg)' }}>Texto plano</span>
               <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>Encabezado + tabla legible</span>
             </button>
             <span className="readout-cell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--type-mute)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
-              {(data || []).length} puntos · {(events || []).length} eventos
+              {committing
+                ? 'Guardando en la nube…'
+                : `${(data || []).length} puntos · ${(events || []).length} eventos`}
             </span>
           </div>
 
@@ -171,7 +196,7 @@ export default function ExportModal({
             Información clínica del paciente (opcional)
           </span>
 
-          <form onSubmit={(e) => { e.preventDefault(); savePatient(); }} className="stack-md">
+          <form onSubmit={(e) => { e.preventDefault(); handleSavePatientOnly(); }} className="stack-md">
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
               <div className="field">
                 <label className="field-label" htmlFor="ex-nombre">Nombre</label>
@@ -225,10 +250,10 @@ export default function ExportModal({
               <button
                 type="submit"
                 className="button button-ghost"
-                disabled={!saveToDb}
+                disabled={!saveToDb || committing}
                 title={saveToDb ? 'Persistir datos del paciente en la nube' : 'Activá “Guardar en la base de datos” para habilitar'}
               >
-                Guardar paciente
+                {committing ? 'Guardando…' : 'Guardar paciente'}
               </button>
             </div>
           </form>

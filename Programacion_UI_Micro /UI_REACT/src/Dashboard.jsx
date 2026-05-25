@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun,
   Settings as SettingsIcon, Cpu, LogOut, Shield,
@@ -45,8 +45,19 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const socketRef = useRef(null);
   const reconnectIntervalRef = useRef(null);
 
-  /* ── Cloud sync (Supabase) ────────────────────────────────────────── */
-  const [sessionId, setSessionId] = useState(null);
+  /* ── Cloud sync (Supabase) ────────────────────────────────────────────
+   * NUEVO MODELO · "commit explícito":
+   *   - Nada se guarda en Supabase mientras la sesión está activa.
+   *   - Todas las mediciones y eventos viven en memoria local.
+   *   - Cuando el clínico hace click en "Guardar paciente" o exporta con
+   *     el switch "Guardar en BBDD" en ON, recién ahí se hace un único
+   *     batch commit (sesión + measurements + events + datos del paciente).
+   *   - persistedSessionId queda asignado tras el commit exitoso. Si se
+   *     vuelve a "Guardar paciente" después, solo se hace UPDATE sobre esa
+   *     sesión (no se duplican mediciones).
+   * Esto evita guardar mediciones erróneas o sesiones de prueba.
+   * ─────────────────────────────────────────────────────────────────── */
+  const [persistedSessionId, setPersistedSessionId] = useState(null);
   const cloud = useCloudSync(supabase);
 
   /* ── Simulator ────────────────────────────────────────────────────── */
@@ -89,7 +100,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     stateRef.current = {
       measuring, startTime, pausedDuration, data, initialValue, currentValue,
       alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired, alarmArmed,
-      sessionId, eventCount, cloud,
+      persistedSessionId, eventCount, cloud,
     };
   });
 
@@ -192,19 +203,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       return next;
     });
 
-    // Cloud insert every ~10 s
-    const sampleIndex = Math.round(elapsed);
-    if (cur.sessionId && sampleIndex % 10 === 0) {
-      cur.cloud?.enqueue({
-        label: 'measurement',
-        run: (client) => client.from('measurements').insert({
-          session_id: cur.sessionId,
-          elapsed_time: elapsed,
-          impedance: val,
-          rate: computedRate,
-        }).throwOnError(),
-      });
-    }
+    // NOTA · ya no insertamos en Supabase aquí. Todo queda en memoria
+    // hasta que el clínico confirme el guardado desde el ExportModal.
 
     // Edge-triggered alarm
     if (cur.alarmEnabled) {
@@ -288,24 +288,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       if (!sTime) { sTime = Date.now(); setStartTime(sTime); }
       if (pauseStart) { pDur += Date.now() - pauseStart; setPausedDur(pDur); setPauseStart(null); }
 
-      if (!sessionId) {
-        try {
-          const { data: newSession, error } = await supabase
-            .from('sessions')
-            .insert({
-              user_id:           userId,
-              patient_name:      'Sesión sin identificar',
-              initial_impedance: currentValue || 150.0,
-            })
-            .select()
-            .single();
-          if (error) throw error;
-          if (newSession) setSessionId(newSession.id);
-        } catch (err) {
-          console.error('[session create]', err);
-          toast('No se pudo crear la sesión en la nube. Mediciones locales continúan.', 'warn');
-        }
-      }
+      // NO se crea sesión en la nube acá. La creación es explícita y
+      // sucede solo cuando el clínico confirma desde el ExportModal.
 
       if (!isSimulator && socketRef.current) socketRef.current.send('START');
       setMeasuring(true);
@@ -329,19 +313,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       ? currentValue - initialValue
       : null;
     setEvents((prev) => [{ id: nextCount, time: elapsed, value: currentValue || 0, change: changeVal }, ...prev]);
-
-    if (sessionId) {
-      cloud.enqueue({
-        label: 'event',
-        run: (client) => client.from('session_events').insert({
-          session_id: sessionId,
-          event_number: nextCount,
-          elapsed_time: elapsed,
-          impedance: currentValue || 0,
-          impedance_change: changeVal,
-        }).throwOnError(),
-      });
-    }
+    // El evento se persiste recién en el batch commit del ExportModal.
   };
 
   const handleReset = () => {
@@ -362,7 +334,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setEventCount(0);
     setAlarmFired(false);
     setAlarmArmed(true);
-    setSessionId(null);
+    setPersistedSessionId(null);
     simulatedZRef.current = 150.0;
     setConfirmReset(false);
     toast('Sesión reiniciada', 'info');
@@ -377,26 +349,98 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setAlarmArmed(true);
   };
 
-  const handleSavePatient = (patientInfo) => {
-    if (!sessionId) {
-      toast('Iniciá una sesión antes de guardar datos del paciente', 'info');
+  /**
+   * Commit explícito · crea la sesión + inserta TODAS las mediciones y eventos
+   * acumulados en memoria, además de los datos del paciente. Idempotente:
+   * si ya hay una persistedSessionId, hace UPDATE de la sesión sin reinsertar
+   * mediciones (eso queda como snapshot del momento del primer guardado).
+   */
+  const handleSavePatient = async (patientInfo) => {
+    if (data.length === 0) {
+      toast('No hay mediciones para guardar', 'warn');
+      throw new Error('no measurements');
+    }
+
+    const patientPayload = {
+      patient_name:       patientInfo.nombre || null,
+      patient_age:        patientInfo.edad === '' || patientInfo.edad == null ? null : parseInt(patientInfo.edad),
+      patient_gender:     patientInfo.sexo || null,
+      patient_weight:     patientInfo.peso === '' || patientInfo.peso == null ? null : parseFloat(patientInfo.peso),
+      patient_height:     patientInfo.altura === '' || patientInfo.altura == null ? null : parseFloat(patientInfo.altura),
+      patient_iliac_circ: patientInfo.circ === '' || patientInfo.circ == null ? null : parseFloat(patientInfo.circ),
+      menstruation_info:  patientInfo.menstruacion || null,
+    };
+
+    // Sesión ya commiteada: solo update del paciente + stats finales
+    if (persistedSessionId) {
+      cloud.enqueue({
+        label: 'patient-update',
+        run: (client) => client.from('sessions').update({
+          ...patientPayload,
+          final_impedance: currentValue,
+          elapsed_time_str: elapsedTime,
+          total_events: eventCount,
+        }).eq('id', persistedSessionId).throwOnError(),
+      });
       return;
     }
-    cloud.enqueue({
-      label: 'patient',
-      run: (client) => client.from('sessions').update({
-        patient_name:       patientInfo.nombre || null,
-        patient_age:        parseInt(patientInfo.edad) || null,
-        patient_gender:     patientInfo.sexo || null,
-        patient_weight:     parseFloat(patientInfo.peso) || null,
-        patient_height:     parseFloat(patientInfo.altura) || null,
-        patient_iliac_circ: parseFloat(patientInfo.circ) || null,
-        menstruation_info:  patientInfo.menstruacion || null,
-        final_impedance:    currentValue,
-        elapsed_time_str:   elapsedTime,
-        total_events:       eventCount,
-      }).eq('id', sessionId).throwOnError(),
-    });
+
+    // Primera vez: full batch commit
+    try {
+      // 1 · Crear la sesión
+      const { data: newSession, error: sErr } = await supabase
+        .from('sessions')
+        .insert({
+          user_id:           userId,
+          ...patientPayload,
+          initial_impedance: initialValue,
+          final_impedance:   currentValue,
+          elapsed_time_str:  elapsedTime,
+          total_events:      eventCount,
+        })
+        .select()
+        .single();
+      if (sErr) throw sErr;
+
+      const sId = newSession.id;
+
+      // 2 · Insertar mediciones en chunks (Postgres tiene límites por payload)
+      const measRows = data.map((p, i) => ({
+        session_id:   sId,
+        elapsed_time: p.x,
+        impedance:    p.y,
+        rate:         rateData[i]?.y ?? 0,
+      }));
+      const CHUNK = 500;
+      for (let i = 0; i < measRows.length; i += CHUNK) {
+        const slice = measRows.slice(i, i + CHUNK);
+        const { error: mErr } = await supabase.from('measurements').insert(slice);
+        if (mErr) throw mErr;
+      }
+
+      // 3 · Insertar eventos (suelen ser pocos, en una sola query)
+      if (events.length > 0) {
+        const evRows = events.map((e) => ({
+          session_id:        sId,
+          event_number:      e.id,
+          elapsed_time:      e.time,
+          impedance:         e.value,
+          impedance_change:  e.change,
+        }));
+        const { error: eErr } = await supabase.from('session_events').insert(evRows);
+        if (eErr) throw eErr;
+      }
+
+      setPersistedSessionId(sId);
+      toast(
+        `Sesión guardada en la nube · ${measRows.length} mediciones, ${events.length} eventos`,
+        'success'
+      );
+    } catch (err) {
+      console.error('[batch commit]', err);
+      toast('No se pudo guardar la sesión en la nube. Reintentá o exportá solo local.', 'warn');
+      throw err;
+    }
   };
 
   const thresholdPreview = (() => {
@@ -409,6 +453,15 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
   const hasAnyData = data.length > 0;
   const primaryButtonLabel = measuring ? 'Pausar' : (startTime ? 'Reanudar' : 'Iniciar adquisición');
+
+  // Estado mostrado en el CloudSyncBadge. Se sobreescribe a 'pending'
+  // cuando hay mediciones en memoria sin commitear todavía.
+  const cloudDisplayState = useMemo(() => {
+    if (cloud.state === 'busy' || cloud.state === 'warn') return cloud.state;
+    if (cloud.state === 'off') return 'off';
+    if (data.length > 0 && !persistedSessionId) return 'pending';
+    return cloud.state;
+  }, [cloud.state, data.length, persistedSessionId]);
 
   return (
     <div className="app-shell">
@@ -454,9 +507,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           </span>
 
           <CloudSyncBadge
-            state={cloud.state}
+            state={cloudDisplayState}
             lastSyncAt={cloud.lastSyncAt}
             queueSize={cloud.queueSize}
+            pendingCount={data.length}
             onRetry={cloud.retry}
           />
 

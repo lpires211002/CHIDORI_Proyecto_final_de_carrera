@@ -953,10 +953,17 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   justify-content: center;
 }
 
-.sync-badge.is-ok    { color: var(--confirm); border-color: oklch(from var(--confirm) l c h / 0.32); }
-.sync-badge.is-warn  { color: var(--alarm);   border-color: var(--alarm-line); }
-.sync-badge.is-off   { color: var(--type-mute); }
-.sync-badge.is-busy  { color: var(--signal);  border-color: var(--signal-line); }
+.sync-badge.is-ok      { color: var(--confirm); border-color: oklch(from var(--confirm) l c h / 0.32); }
+.sync-badge.is-warn    { color: var(--alarm);   border-color: var(--alarm-line); }
+.sync-badge.is-off     { color: var(--type-mute); }
+.sync-badge.is-busy    { color: var(--signal);  border-color: var(--signal-line); }
+/* Pending: amber-ish · datos en memoria sin guardar todavía. Hue 60
+ * mantiene la familia warm sin entrar en territorio "alarma". */
+.sync-badge.is-pending {
+  color: oklch(0.760 0.140 70);
+  border-color: oklch(0.760 0.140 70 / 0.35);
+  background: oklch(0.760 0.140 70 / 0.06);
+}
 
 /* ──────────────────────────────────────────────────────────────────────
  * MODAL · custom (no native confirm)

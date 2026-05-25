@@ -1,16 +1,17 @@
 import React from 'react';
-import { Cloud, CloudOff, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CloudOff, RefreshCw, CheckCircle2, AlertTriangle, Save } from 'lucide-react';
 
 /**
- * Always-visible cloud sync state. Replaces the silent console.error pattern.
+ * Always-visible cloud sync state.
  *
  * Possible states:
- *   off    — Supabase not configured
- *   ok     — last write succeeded (shows time since)
- *   busy   — write in flight
- *   warn   — last write failed, retry queued
+ *   off      — Supabase not configured (or user not allowed)
+ *   pending  — data in memory but not yet committed (clinician hasn't pressed Export)
+ *   ok       — last write succeeded (shows time since)
+ *   busy     — write in flight
+ *   warn     — last write failed, retry queued
  */
-export default function CloudSyncBadge({ state, lastSyncAt, queueSize, onRetry }) {
+export default function CloudSyncBadge({ state, lastSyncAt, queueSize, pendingCount, onRetry }) {
   const fmtAgo = () => {
     if (!lastSyncAt) return '—';
     const s = Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000));
@@ -25,6 +26,18 @@ export default function CloudSyncBadge({ state, lastSyncAt, queueSize, onRetry }
       <span className="sync-badge is-off" title="Supabase no configurado">
         <span className="sync-icon"><CloudOff size={13} /></span>
         Nube · off
+      </span>
+    );
+  }
+
+  if (state === 'pending') {
+    return (
+      <span
+        className="sync-badge is-pending"
+        title="Hay mediciones en memoria que aún no se guardaron. Confírmelas desde el modal de exportar."
+      >
+        <span className="sync-icon"><Save size={13} /></span>
+        Sin guardar{pendingCount ? ` · ${pendingCount} pts` : ''}
       </span>
     );
   }
