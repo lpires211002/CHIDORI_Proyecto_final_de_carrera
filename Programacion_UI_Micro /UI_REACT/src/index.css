@@ -1375,6 +1375,30 @@ code {
   color: var(--type-hi);
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+ * SHIMMER · skeleton placeholder con highlight deslizante.
+ * Solo se mueve background-position (GPU-friendly).
+ * ───────────────────────────────────────────────────────────────────── */
+.shimmer {
+  position: relative;
+  background:
+    linear-gradient(
+      90deg,
+      var(--ink-2) 0%,
+      var(--ink-3) 35%,
+      var(--ink-2) 70%
+    );
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  animation: shimmer 1.6s var(--ease-in-out-emil) infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -120% 0;
+  }
+}
+
 /* admin rows hover state · plus stagger on initial mount */
 .admin-row {
   transition: background var(--dur-fast) var(--ease-quart);

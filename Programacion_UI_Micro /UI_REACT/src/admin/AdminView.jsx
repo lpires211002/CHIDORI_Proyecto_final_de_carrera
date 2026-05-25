@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { supabase, emailToUsername } from '../supabaseClient';
 import ConfirmModal from '../components/ConfirmModal';
+import ShimmerSkeleton from '../components/ShimmerSkeleton';
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
 
 /**
@@ -243,7 +244,22 @@ function AccountsPanel({ accounts, busy, onReload, onApprove, onRevoke }) {
       </div>
 
       <div className="surface" style={{ overflow: 'hidden' }}>
-        {accounts.length === 0 && !busy && (
+        {busy && accounts.length === 0 && (
+          <div style={{ padding: '14px 18px' }}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--hairline)' }}>
+                <div style={{ flex: 1 }}>
+                  <ShimmerSkeleton width="40%" height={14} />
+                  <div style={{ height: 6 }} />
+                  <ShimmerSkeleton width="55%" height={11} />
+                </div>
+                <ShimmerSkeleton width={70} height={22} style={{ borderRadius: 999 }} />
+                <ShimmerSkeleton width={86} height={28} />
+              </div>
+            ))}
+          </div>
+        )}
+        {!busy && accounts.length === 0 && (
           <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--type-mute)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
             Sin cuentas todavía.
           </div>
@@ -333,7 +349,43 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
       </div>
 
       <div className="surface" style={{ overflow: 'hidden' }}>
-        {sessions.length === 0 && !busy && (
+        {busy && sessions.length === 0 && (
+          <div style={{ padding: '14px 18px' }}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{
+                display: 'grid',
+                gridTemplateColumns: '1.6fr 1.4fr 1fr 1fr 16px',
+                gap: 14,
+                alignItems: 'center',
+                padding: '14px 0',
+                borderBottom: '1px solid var(--hairline)',
+              }}>
+                <div>
+                  <ShimmerSkeleton width="65%" height={14} />
+                  <div style={{ height: 6 }} />
+                  <ShimmerSkeleton width="45%" height={11} />
+                </div>
+                <div>
+                  <ShimmerSkeleton width="35%" height={11} />
+                  <div style={{ height: 6 }} />
+                  <ShimmerSkeleton width="60%" height={13} />
+                </div>
+                <div>
+                  <ShimmerSkeleton width="45%" height={11} />
+                  <div style={{ height: 6 }} />
+                  <ShimmerSkeleton width="70%" height={13} />
+                </div>
+                <div>
+                  <ShimmerSkeleton width="50%" height={11} />
+                  <div style={{ height: 6 }} />
+                  <ShimmerSkeleton width="60%" height={13} />
+                </div>
+                <ShimmerSkeleton width={16} height={16} />
+              </div>
+            ))}
+          </div>
+        )}
+        {!busy && sessions.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--type-mute)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
             No hay sesiones que coincidan.
           </div>
@@ -701,7 +753,11 @@ function MeasurementsTable({ busy, measurements, fmt }) {
     <div>
       <span className="section-label">Mediciones ({measurements.length})</span>
       <div className="surface" style={{ marginTop: 8, maxHeight: 280, overflowY: 'auto' }}>
-        {busy && <div style={{ padding: 20, color: 'var(--type-mute)' }}>Cargando…</div>}
+        {busy && (
+          <div style={{ padding: '14px 18px' }}>
+            <ShimmerSkeleton rows={5} height={12} gap={10} />
+          </div>
+        )}
         {!busy && measurements.length === 0 && (
           <div style={{ padding: 20, color: 'var(--type-mute)', fontSize: 'var(--t-xs)' }}>
             Sin mediciones registradas.
