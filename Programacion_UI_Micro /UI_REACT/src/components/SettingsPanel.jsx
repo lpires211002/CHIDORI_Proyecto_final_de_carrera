@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { X, RefreshCw, Save } from 'lucide-react';
 
 /**
- * Settings drawer · WebSocket connection + Supabase credentials.
- * Lives behind a drawer toggle in the header. No longer competes with
- * the dashboard for vertical real estate.
+ * Settings drawer · WebSocket connection.
+ * La persistencia en la nube ahora está hardcodeada (auth con Supabase),
+ * por lo que este panel solo gestiona la conexión al microcontrolador.
  */
 export default function SettingsPanel({
   open,
@@ -13,14 +13,10 @@ export default function SettingsPanel({
   onSaveConfig,
   wsStatus,
   onReconnect,
-  supabaseConfig,
-  onSaveSupabaseConfig,
 }) {
   const [protocol, setProtocol] = useState(wsConfig.protocol);
   const [host, setHost]         = useState(wsConfig.host);
   const [port, setPort]         = useState(wsConfig.port);
-  const [sbUrl, setSbUrl]       = useState(supabaseConfig?.url || '');
-  const [sbKey, setSbKey]       = useState(supabaseConfig?.key || '');
 
   useEffect(() => {
     setProtocol(wsConfig.protocol);
@@ -28,12 +24,6 @@ export default function SettingsPanel({
     setPort(wsConfig.port);
   }, [wsConfig]);
 
-  useEffect(() => {
-    setSbUrl(supabaseConfig?.url || '');
-    setSbKey(supabaseConfig?.key || '');
-  }, [supabaseConfig]);
-
-  // Esc closes
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
@@ -49,14 +39,9 @@ export default function SettingsPanel({
     DISCONNECTED: { className: 'pill pill-alarm',   text: 'Desconectado' },
   }[wsStatus] || { className: 'pill pill-off', text: 'Desconocido' };
 
-  const handleWsSubmit = (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     onSaveConfig({ protocol, host, port });
-  };
-
-  const handleSbSubmit = (e) => {
-    e.preventDefault();
-    onSaveSupabaseConfig({ url: sbUrl, key: sbKey });
   };
 
   return (
@@ -71,8 +56,7 @@ export default function SettingsPanel({
         </div>
 
         <div className="drawer-body">
-          {/* --- WebSocket --- */}
-          <form className="drawer-section" onSubmit={handleWsSubmit}>
+          <form className="drawer-section" onSubmit={handleSubmit}>
             <div className="drawer-section-head">
               <h3 style={{ fontSize: 'var(--t-lg)' }}>Microcontrolador</h3>
               <span className={wsStatusLabel.className}>
@@ -137,55 +121,18 @@ export default function SettingsPanel({
 
           <hr className="hairline" />
 
-          {/* --- Supabase --- */}
-          <form className="drawer-section" onSubmit={handleSbSubmit}>
-            <div className="drawer-section-head">
-              <h3 style={{ fontSize: 'var(--t-lg)' }}>Persistencia en la nube</h3>
-              <span className={`pill ${supabaseConfig?.url && supabaseConfig?.key ? 'pill-confirm' : 'pill-off'}`}>
-                <span className="pill-dot" />
-                {supabaseConfig?.url && supabaseConfig?.key ? 'Configurado' : 'No configurado'}
-              </span>
-            </div>
-
+          <div className="drawer-section">
+            <h3 style={{ fontSize: 'var(--t-lg)' }}>Persistencia en la nube</h3>
             <span className="field-hint">
-              Opcional. Guarda sesiones largas en Supabase para análisis posterior. Si lo
-              omite, las mediciones siguen funcionando localmente (sin histórico en la nube).
+              Las sesiones se guardan automáticamente en la base de datos oficial de
+              Chidori. La autenticación gestiona qué usuario es dueño de cada sesión.
+              No requiere configuración adicional.
             </span>
-
-            <div className="field">
-              <label className="field-label" htmlFor="sburl">Project URL</label>
-              <input
-                id="sburl"
-                className="input"
-                type="url"
-                value={sbUrl}
-                onChange={(e) => setSbUrl(e.target.value)}
-                placeholder="https://xxxx.supabase.co"
-              />
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="sbkey">Anon / Public Key</label>
-              <input
-                id="sbkey"
-                className="input"
-                type="password"
-                value={sbKey}
-                onChange={(e) => setSbKey(e.target.value)}
-                placeholder="eyJhbGciOi…"
-              />
-              <span className="field-hint">
-                Clave anónima pública (anon). Se almacena localmente en su navegador.
-              </span>
-            </div>
-
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <button type="submit" className="button button-primary">
-                <Save size={14} />
-                Guardar credenciales
-              </button>
-            </div>
-          </form>
+            <span className="pill pill-confirm" style={{ alignSelf: 'flex-start' }}>
+              <span className="pill-dot" />
+              Conectado a Supabase
+            </span>
+          </div>
         </div>
       </aside>
     </>
