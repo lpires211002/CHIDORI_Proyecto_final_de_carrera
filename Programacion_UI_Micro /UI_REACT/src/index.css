@@ -617,6 +617,19 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
 .readout-value.neg-state { color: var(--signal); }
 .readout-value.pos-state { color: var(--alarm); }
 
+/* Sparkline strip dentro de una celda · ocupa el ancho disponible y no afecta layout */
+.readout-spark {
+  margin-top: 10px;
+  width: 100%;
+  color: var(--type-mute);
+  pointer-events: none;
+}
+.readout-cell.hero .readout-spark {
+  margin-top: 14px;
+  color: var(--type-med);
+}
+.readout-spark svg { width: 100%; height: auto; max-height: 40px; }
+
 /* ──────────────────────────────────────────────────────────────────────
  * BLADDER VESSEL (replaces glassmorphic beaker)
  * Deterministic SVG. No waves, no glow, no pulse-on-fill.
@@ -1011,6 +1024,18 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
     opacity: 0;
     transform: scale(0.97);
   }
+}
+
+/* Morphing dialog · framer-motion controla la transición vía layoutId,
+ * así que sacamos el CSS transition para que no haya doble animación.
+ * Tampoco usamos @starting-style: el morph viene de la fila, no del centro. */
+.modal-card.morph-card {
+  transition: none;
+}
+.modal-card.morph-card,
+.modal-card.morph-card * {
+  /* Evita el "flash" del @starting-style cuando framer toma control. */
+  animation: none;
 }
 
 .modal-head {

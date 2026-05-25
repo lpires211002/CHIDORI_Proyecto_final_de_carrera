@@ -1,14 +1,20 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import NumberTicker from './NumberTicker';
+import Sparkline from './Sparkline';
+
+const SPARK_WINDOW = 40;
 
 /**
  * Readout strip · hierarchical, hero + 3 satellites.
  *
- *   [ HERO · Z actual ]  [ Z basal ]  [ Tasa ]  [ Sesión ]
+ *   [ HERO · Z actual + sparkline ]  [ Z basal ]  [ Tasa + sparkline ]  [ Sesión ]
  *
  * Cada valor numérico usa NumberTicker con spring physics. Los dígitos
  * cambian con un roll suave + blur durante el "stretch" para mascarar
  * el cross-fade entre números (truco de Emil Kowalski).
+ *
+ * Sparklines: reusan el buffer de RealTimeCharts (props zHistory/rateHistory)
+ * y cortan a las últimas SPARK_WINDOW muestras — sin estado propio.
  */
 export default function StatsGrid({
   initialValue,
@@ -16,7 +22,17 @@ export default function StatsGrid({
   elapsedTime,
   eventCount,
   rate,
+  zHistory,
+  rateHistory,
 }) {
+  const zSpark = useMemo(
+    () => (Array.isArray(zHistory) ? zHistory.slice(-SPARK_WINDOW) : []),
+    [zHistory],
+  );
+  const rateSpark = useMemo(
+    () => (Array.isArray(rateHistory) ? rateHistory.slice(-SPARK_WINDOW) : []),
+    [rateHistory],
+  );
   const diff = (initialValue != null && currentValue != null)
     ? currentValue - initialValue
     : null;
@@ -46,6 +62,9 @@ export default function StatsGrid({
             </span>
           </span>
         )}
+        <div className="readout-spark">
+          <Sparkline data={zSpark} width={220} height={36} state={diff < 0 ? 'neg' : diff > 0 ? 'pos' : null} />
+        </div>
       </div>
 
       {/* Basal · cambia poco, spring más rígido */}
@@ -66,6 +85,9 @@ export default function StatsGrid({
           <span className="readout-unit" style={{ marginLeft: 6 }}>Ω/min</span>
         </span>
         <span className="readout-delta mute">Δ por minuto</span>
+        <div className="readout-spark">
+          <Sparkline data={rateSpark} width={140} height={28} state={rate < 0 ? 'neg' : rate > 0 ? 'pos' : null} />
+        </div>
       </div>
 
       {/* Time + events · ticker sobre el contador */}

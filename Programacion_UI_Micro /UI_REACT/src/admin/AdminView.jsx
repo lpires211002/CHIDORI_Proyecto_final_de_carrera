@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import {
   Shield, LogOut, X, UserCheck, UserX, RefreshCw, Search, ChevronRight,
   Activity, Pencil, Trash2, Download, FileText, Table, FileType2, Save,
@@ -7,6 +8,8 @@ import { supabase, emailToUsername } from '../supabaseClient';
 import ConfirmModal from '../components/ConfirmModal';
 import ShimmerSkeleton from '../components/ShimmerSkeleton';
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
+
+const sessionLayoutId = (id) => `session-card-${id}`;
 
 /**
  * AdminView · vista del superadmin.
@@ -184,6 +187,10 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
         )}
 
         {tab === 'sessions' && (
+          // LayoutGroup aísla los layoutIds del morphing dialog para que no
+          // crucen con otros motion components de la página.
+          <LayoutGroup id="admin-sessions">
+
           <SessionsPanel
             sessions={filteredSessions}
             busy={busy}
@@ -191,7 +198,21 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
             setFilter={setFilter}
             onReload={loadSessions}
             setSelectedSession={setSelectedSession}
+            morphingId={selectedSession?.id || null}
           />
+
+          <AnimatePresence>
+            {selectedSession && (
+              <SessionDetailModal
+                key={selectedSession.id}
+                session={selectedSession}
+                onClose={() => setSelectedSession(null)}
+                onSessionUpdated={refreshSession}
+                onSessionDeleted={deleteSession}
+              />
+            )}
+          </AnimatePresence>
+          </LayoutGroup>
         )}
 
         {tab === 'accounts' && (
@@ -210,14 +231,6 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
         <span>Chidori 2026</span>
       </footer>
 
-      {selectedSession && (
-        <SessionDetailModal
-          session={selectedSession}
-          onClose={() => setSelectedSession(null)}
-          onSessionUpdated={refreshSession}
-          onSessionDeleted={deleteSession}
-        />
-      )}
     </div>
   );
 }
@@ -317,7 +330,7 @@ function AccountsPanel({ accounts, busy, onReload, onApprove, onRevoke }) {
 
 /* ──────────────────────────────────────────────────────────────────── */
 
-function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelectedSession }) {
+function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelectedSession, morphingId }) {
   return (
     <section className="stack-md">
       <div className="row-between" style={{ gap: 14, flexWrap: 'wrap' }}>
@@ -390,12 +403,20 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
             No hay sesiones que coincidan.
           </div>
         )}
-        {sessions.map((s) => (
-          <button
+        {sessions.map((s) => {
+          const isMorphing = morphingId === s.id;
+          return (
+          <motion.button
             key={s.id}
+            layoutId={sessionLayoutId(s.id)}
             type="button"
             onClick={() => setSelectedSession(s)}
             className="admin-row"
+            // Mientras esta fila está morpheando hacia el modal,
+            // la hacemos invisible al render pero conservamos su espacio
+            // — el modal "es" esta misma caja, así que no debe haber 2.
+            animate={{ opacity: isMorphing ? 0 : 1 }}
+            transition={{ duration: 0.15 }}
             style={{
               width: '100%',
               display: 'grid',
@@ -407,6 +428,8 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
               background: 'transparent',
               cursor: 'pointer',
               textAlign: 'left',
+              borderRadius: 0,
+              pointerEvents: isMorphing ? 'none' : 'auto',
             }}
           >
             <div>
@@ -436,8 +459,8 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
               </div>
             </div>
             <ChevronRight size={16} style={{ color: 'var(--type-mute)' }} />
-          </button>
-        ))}
+          </motion.button>
+        );})}
       </div>
     </section>
   );
@@ -588,8 +611,21 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
 
   return (
     <>
-      <div className="modal-veil" onClick={onClose}>
-        <div className="modal-card modal-wide" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 820 }}>
+      <motion.div
+        className="modal-veil"
+        onClick={onClose}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
+      >
+        <motion.div
+          layoutId={sessionLayoutId(session.id)}
+          className="modal-card modal-wide morph-card"
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: 820 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+        >
           <div className="modal-head" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
               <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -721,8 +757,8 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
               />
             )}
           </div>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
 
       <ConfirmModal
         open={askDelete}

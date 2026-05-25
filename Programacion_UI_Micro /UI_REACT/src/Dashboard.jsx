@@ -596,6 +596,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               elapsedTime={elapsedTime}
               eventCount={eventCount}
               rate={rate}
+              zHistory={data}
+              rateHistory={rateData}
             />
 
             <RealTimeCharts data={data} rateData={rateData} events={events} theme={theme} />
