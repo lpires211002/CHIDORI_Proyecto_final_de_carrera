@@ -40,18 +40,36 @@ export default function AdminView({ profile, onSignOut }) {
     setBusy(true);
     setError(null);
     try {
-      const { data, error: err } = await supabase
+      // 1) Traemos las sesiones (la FK a profiles no es directa, así que joineamos en cliente)
+      const { data: sessRows, error: err1 } = await supabase
         .from('sessions')
         .select(`
           id, created_at, patient_name, patient_age, patient_gender,
           initial_impedance, final_impedance, elapsed_time_str, total_events,
-          user_id,
-          owner:profiles!sessions_user_id_fkey ( display_name, email )
+          user_id
         `)
         .order('created_at', { ascending: false })
         .limit(200);
-      if (err) throw err;
-      setSessions(data || []);
+      if (err1) throw err1;
+
+      // 2) Traemos los profiles correspondientes en una sola consulta
+      const ownerIds = [...new Set((sessRows || []).map((s) => s.user_id).filter(Boolean))];
+      let ownersById = new Map();
+      if (ownerIds.length > 0) {
+        const { data: profRows, error: err2 } = await supabase
+          .from('profiles')
+          .select('id, display_name, email')
+          .in('id', ownerIds);
+        if (err2) throw err2;
+        ownersById = new Map((profRows || []).map((p) => [p.id, p]));
+      }
+
+      // 3) Compose
+      const merged = (sessRows || []).map((s) => ({
+        ...s,
+        owner: s.user_id ? ownersById.get(s.user_id) || null : null,
+      }));
+      setSessions(merged);
     } catch (e) {
       setError(e.message || 'No se pudieron leer las sesiones.');
     } finally {
