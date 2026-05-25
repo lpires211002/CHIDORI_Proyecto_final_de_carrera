@@ -51,12 +51,20 @@
   --r-md: 6px;
   --r-lg: 10px;
 
-  /* Motion · ease-out-quart, never bounce */
-  --ease-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  --ease-quint: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-fast: 140ms;
-  --dur-base: 220ms;
-  --dur-slow: 360ms;
+  /* Motion · curated curves, never bounce.
+   * Each curve has a specific use case (Emil Kowalski's framework). */
+  --ease-quart:       cubic-bezier(0.25, 1, 0.5, 1);     /* general ease-out */
+  --ease-quint:       cubic-bezier(0.22, 1, 0.36, 1);    /* slower exits */
+  --ease-out-strong:  cubic-bezier(0.16, 1, 0.3, 1);     /* punchy entries (modals, focus) */
+  --ease-drawer:      cubic-bezier(0.32, 0.72, 0, 1);    /* iOS drawer feel */
+  --ease-in-out-emil: cubic-bezier(0.77, 0, 0.175, 1);   /* on-screen movement */
+
+  --dur-press:  160ms;   /* button press feedback */
+  --dur-fast:   140ms;
+  --dur-tip:    180ms;   /* tooltips */
+  --dur-base:   220ms;   /* dropdowns, hover */
+  --dur-modal:  280ms;   /* modal entries */
+  --dur-slow:   360ms;   /* drawer */
 
   /* Typography */
   --font-display: 'Fraunces', 'Source Serif 4', Georgia, serif;
@@ -340,13 +348,21 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   border-radius: var(--r-sm);
   transition: background var(--dur-fast) var(--ease-quart),
               border-color var(--dur-fast) var(--ease-quart),
-              color var(--dur-fast) var(--ease-quart);
+              color var(--dur-fast) var(--ease-quart),
+              transform var(--dur-press) var(--ease-quart);
   white-space: nowrap;
+  will-change: transform;
 }
 
 .button:hover:not(:disabled) {
   background: var(--ink-3);
   border-color: var(--type-low);
+}
+
+/* Press feedback · Emil Kowalski's "must feel responsive" rule */
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 60ms;
 }
 
 .button:focus-visible {
@@ -397,12 +413,22 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   color: var(--type-med);
   transition: background var(--dur-fast) var(--ease-quart),
               border-color var(--dur-fast) var(--ease-quart),
-              color var(--dur-fast) var(--ease-quart);
+              color var(--dur-fast) var(--ease-quart),
+              transform var(--dur-press) var(--ease-quart);
+  will-change: transform;
 }
 .icon-button:hover {
   background: var(--ink-2);
   color: var(--type-hi);
   border-color: var(--hairline-strong);
+}
+.icon-button:active {
+  transform: scale(0.94);
+  transition-duration: 60ms;
+}
+.icon-button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
 }
 
 .input {
@@ -477,9 +503,11 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   border-color: var(--signal-line);
   color: var(--signal);
 }
+/* Live indicator: static halo + slow breath. No scale-pulse (AI tell). */
 .pill-live .pill-dot {
   background: var(--signal);
-  animation: live-pulse 2s var(--ease-quart) infinite;
+  box-shadow: 0 0 0 3px oklch(from var(--signal) l c h / 0.15);
+  animation: breath 3.2s var(--ease-quart) infinite;
 }
 
 .pill-off {
@@ -488,13 +516,14 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
 }
 .pill-off .pill-dot { background: var(--type-mute); }
 
+/* Syncing: faster, more urgent breath because state is in-flight */
 .pill-syncing {
   border-color: var(--signal-line);
   color: var(--signal);
 }
 .pill-syncing .pill-dot {
   background: var(--signal);
-  animation: live-pulse 1.2s var(--ease-quart) infinite;
+  animation: breath 1.4s var(--ease-quart) infinite;
 }
 
 .pill-confirm {
@@ -509,9 +538,11 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
 }
 .pill-alarm .pill-dot { background: var(--alarm); }
 
-@keyframes live-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.35; }
+/* Breath: opacity-only, no scale. Subtle enough to indicate "alive" without
+ * shouting. Used for sync/live pills, never for cosmetic accents. */
+@keyframes breath {
+  0%, 100% { opacity: 1;    }
+  50%      { opacity: 0.55; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -930,6 +961,8 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
 /* ──────────────────────────────────────────────────────────────────────
  * MODAL · custom (no native confirm)
  * ───────────────────────────────────────────────────────────────────── */
+/* Modal · transition-based so it can be interrupted (no keyframes).
+ * @starting-style replaces the "data-mounted" useEffect dance. */
 .modal-veil {
   position: fixed;
   inset: 0;
@@ -939,12 +972,12 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   justify-content: center;
   z-index: 100;
   padding: 18px;
-  animation: veil-in var(--dur-base) var(--ease-quart);
+  opacity: 1;
+  transition: opacity var(--dur-base) var(--ease-quart);
 }
 
-@keyframes veil-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+@starting-style {
+  .modal-veil { opacity: 0; }
 }
 
 .modal-card {
@@ -956,14 +989,21 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   border: 1px solid var(--hairline-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-3);
-  animation: card-in var(--dur-slow) var(--ease-quint);
+  /* Modal stays centered: transform-origin: center is correct here.
+   * Start from 0.97 (never 0 — Emil's rule) + opacity. */
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity var(--dur-modal) var(--ease-out-strong),
+              transform var(--dur-modal) var(--ease-out-strong);
 }
 
 .modal-card.modal-wide { max-width: 720px; }
 
-@keyframes card-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+@starting-style {
+  .modal-card {
+    opacity: 0;
+    transform: scale(0.97);
+  }
 }
 
 .modal-head {
@@ -1104,9 +1144,15 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   inset: 0;
   background: oklch(0 0 0 / 0.40);
   z-index: 90;
-  animation: veil-in var(--dur-base) var(--ease-quart);
+  opacity: 1;
+  transition: opacity var(--dur-base) var(--ease-quart);
 }
 
+@starting-style {
+  .drawer-veil { opacity: 0; }
+}
+
+/* Drawer · iOS curve (Ionic) for that natural panel-slide feel */
 .drawer-panel {
   position: fixed;
   top: 0;
@@ -1117,14 +1163,20 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   border-left: 1px solid var(--hairline);
   z-index: 91;
   overflow-y: auto;
-  animation: drawer-in var(--dur-slow) var(--ease-quint);
   display: flex;
   flex-direction: column;
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform var(--dur-slow) var(--ease-drawer),
+              opacity   var(--dur-slow) var(--ease-drawer);
+  will-change: transform;
 }
 
-@keyframes drawer-in {
-  from { transform: translateX(28px); opacity: 0.6; }
-  to   { transform: translateX(0);    opacity: 1; }
+@starting-style {
+  .drawer-panel {
+    transform: translateX(100%);
+    opacity: 0.6;
+  }
 }
 
 .drawer-head {
@@ -1185,16 +1237,22 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  animation: toast-in var(--dur-slow) var(--ease-quart);
+  opacity: 1;
+  transform: translateY(0);
+  /* transitions, not keyframes — rapid toasts won't restart from zero */
+  transition: opacity var(--dur-base) var(--ease-quart),
+              transform var(--dur-base) var(--ease-quart);
 }
 
 .toast.t-info    { border-left: 2px solid var(--signal); }
 .toast.t-success { border-left: 2px solid var(--confirm); }
 .toast.t-warn    { border-left: 2px solid var(--alarm); }
 
-@keyframes toast-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
+@starting-style {
+  .toast {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -1310,13 +1368,160 @@ code {
   color: var(--type-hi);
 }
 
-/* admin rows hover state */
+/* admin rows hover state · plus stagger on initial mount */
 .admin-row {
   transition: background var(--dur-fast) var(--ease-quart);
+  opacity: 1;
+  transform: translateY(0);
 }
 .admin-row:hover {
   background: var(--ink-2);
 }
 .admin-row:last-child {
   border-bottom: 0 !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * VIEW TRANSITIONS · top-level crossfade between auth/dashboard/admin
+ * Only Chromium-based for now (Safari TP supports it too). Graceful no-op
+ * elsewhere — the swap just happens instantly without a transition.
+ * ───────────────────────────────────────────────────────────────────── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 240ms;
+  animation-timing-function: var(--ease-out-strong);
+}
+
+::view-transition-old(root) {
+  animation-name: vt-out;
+}
+
+::view-transition-new(root) {
+  animation-name: vt-in;
+}
+
+@keyframes vt-out {
+  to { opacity: 0; }
+}
+
+@keyframes vt-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * STAGGER · listas de filas reveladas en cascada en el mount inicial.
+ * Usa nth-child + animation-delay. Solo en mount; los updates posteriores
+ * no re-disparan la animación porque las clases ya están aplicadas y
+ * el navegador cachea el frame final.
+ * ───────────────────────────────────────────────────────────────────── */
+@keyframes row-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.admin-row,
+.timeline-row,
+.empty-step {
+  animation: row-rise var(--dur-base) var(--ease-out-strong) both;
+}
+
+.admin-row:nth-child(1),
+.timeline-row:nth-child(1),
+.empty-step:nth-child(1) { animation-delay: 0ms; }
+.admin-row:nth-child(2),
+.timeline-row:nth-child(2),
+.empty-step:nth-child(2) { animation-delay: 40ms; }
+.admin-row:nth-child(3),
+.timeline-row:nth-child(3),
+.empty-step:nth-child(3) { animation-delay: 80ms; }
+.admin-row:nth-child(4),
+.timeline-row:nth-child(4) { animation-delay: 120ms; }
+.admin-row:nth-child(5),
+.timeline-row:nth-child(5) { animation-delay: 160ms; }
+.admin-row:nth-child(6),
+.timeline-row:nth-child(6) { animation-delay: 200ms; }
+.admin-row:nth-child(7),
+.timeline-row:nth-child(7) { animation-delay: 240ms; }
+.admin-row:nth-child(8),
+.timeline-row:nth-child(8) { animation-delay: 280ms; }
+/* Past 8 items, drop the delay so long lists don't feel sluggish */
+.admin-row:nth-child(n + 9),
+.timeline-row:nth-child(n + 9) { animation-delay: 320ms; }
+
+/* ──────────────────────────────────────────────────────────────────────
+ * SEGMENT SWITCHER · active background uses transform + opacity transition
+ * so the indicator feels slid into place instead of color-blinked.
+ * ───────────────────────────────────────────────────────────────────── */
+.segment-item {
+  position: relative;
+  z-index: 1;
+}
+.segment-item.active {
+  background: var(--signal-soft);
+  color: var(--signal);
+  /* extra weight for confidence */
+  font-weight: 600;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * READOUT NUMBERS · subtle crossfade when a value changes.
+ * We don't bind to data updates directly — instead, give the body a
+ * smooth color/opacity transition for state changes on the value.
+ * ───────────────────────────────────────────────────────────────────── */
+.readout-value {
+  transition: color var(--dur-base) var(--ease-quart);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * REDUCED MOTION · accessibility · keep opacity for comprehension,
+ * remove motion. Per Emil's framework + WCAG.
+ * ───────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 60ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Preserve essential signals: alarm strobe + breath of live pills
+   * should still convey state, but at minimum intensity. */
+  .alarm-banner,
+  .alarm-banner-dot {
+    animation: none !important;
+    background: var(--alarm-soft) !important;
+  }
+  .pill-live .pill-dot,
+  .pill-syncing .pill-dot {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  /* View transitions become instant (good — no flash on root swap) */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * HOVER GATE · disable hover-state animations on touch devices to
+ * prevent false positives on tap.
+ * ───────────────────────────────────────────────────────────────────── */
+@media (hover: none) or (pointer: coarse) {
+  .button:hover:not(:disabled),
+  .icon-button:hover,
+  .admin-row:hover {
+    background: revert;
+    border-color: revert;
+    transform: revert;
+  }
 }

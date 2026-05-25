@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import useAuth          from './auth/useAuth';
-import AuthSplash       from './auth/AuthSplash';
-import LoginScreen      from './auth/LoginScreen';
-import PendingApproval  from './auth/PendingApproval';
-import AdminView        from './admin/AdminView';
-import Dashboard        from './Dashboard';
+import useAuth             from './auth/useAuth';
+import AuthSplash          from './auth/AuthSplash';
+import LoginScreen         from './auth/LoginScreen';
+import PendingApproval     from './auth/PendingApproval';
+import AdminView           from './admin/AdminView';
+import Dashboard           from './Dashboard';
+import { withViewTransition } from './lib/viewTransition';
 
 /**
  * App · auth gate + admin mode router.
@@ -31,9 +32,15 @@ export default function App() {
   );
 
   const switchAdminMode = (mode) => {
-    setAdminMode(mode);
-    localStorage.setItem('chidori-admin-mode', mode);
+    // View Transitions API: crossfade entre AdminView y Dashboard
+    withViewTransition(() => {
+      setAdminMode(mode);
+      localStorage.setItem('chidori-admin-mode', mode);
+    });
   };
+
+  // Wrap onSignOut para que también dispare crossfade hacia LoginScreen
+  const wrappedSignOut = () => withViewTransition(() => signOut());
 
   if (status === 'loading') return <AuthSplash />;
 
@@ -64,7 +71,7 @@ export default function App() {
       return (
         <AdminView
           profile={profile}
-          onSignOut={signOut}
+          onSignOut={wrappedSignOut}
           onSwitchToDashboard={() => switchAdminMode('dashboard')}
         />
       );
@@ -73,7 +80,7 @@ export default function App() {
       <Dashboard
         session={session}
         profile={profile}
-        onSignOut={signOut}
+        onSignOut={wrappedSignOut}
         isAdmin
         onSwitchToAdmin={() => switchAdminMode('panel')}
       />
@@ -81,5 +88,5 @@ export default function App() {
   }
 
   // Clínico: solo dashboard
-  return <Dashboard session={session} profile={profile} onSignOut={signOut} />;
+  return <Dashboard session={session} profile={profile} onSignOut={wrappedSignOut} />;
 }
