@@ -30,6 +30,7 @@ export default function ExportModal({
   const [circ, setCirc]                 = useState('');
   const [menstruacion, setMenstruacion] = useState('');
   const [saveToDb, setSaveToDb]         = useState(true);
+  const [committing, setCommitting]     = useState(false);
 
   if (!isOpen) return null;
 
@@ -64,8 +65,6 @@ export default function ExportModal({
     try { return window.mainChartInstance?.toBase64Image() || null; }
     catch { return null; }
   };
-
-  const [committing, setCommitting] = useState(false);
 
   /**
    * Persistir en la nube ANTES de descargar el archivo. Si falla, abortamos
