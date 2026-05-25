@@ -31,6 +31,8 @@ export default function ExportModal({
   const [altura, setAltura]             = useState('');
   const [circ, setCirc]                 = useState('');
   const [menstruacion, setMenstruacion] = useState('');
+  // Controla si los exports también persisten en Supabase. Default true.
+  const [saveToDb, setSaveToDb]         = useState(true);
 
   if (!isOpen) return null;
 
@@ -48,9 +50,10 @@ export default function ExportModal({
   };
 
   const savePatient = () => {
+    if (!saveToDb) return; // checkbox desactivado: export solo local
     if (!onSavePatient) return;
     onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion });
-    onShowAlert('Datos del paciente guardados', 'success');
+    onShowAlert('Datos del paciente guardados en la nube', 'success');
   };
 
   const handleExportPDF = async () => {
@@ -232,6 +235,38 @@ export default function ExportModal({
             </span>
           </div>
 
+          {/* Toggle · guardar en la nube */}
+          <div
+            className="surface"
+            style={{
+              padding: '14px 18px',
+              marginBottom: 22,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ color: 'var(--type-hi)', fontSize: 'var(--t-sm)', fontWeight: 500 }}>
+                Guardar en la base de datos
+              </div>
+              <div className="mute" style={{ fontSize: 'var(--t-xs)', marginTop: 2, lineHeight: 1.5 }}>
+                {saveToDb
+                  ? 'Los datos del paciente se persisten en Supabase junto con la sesión y las mediciones.'
+                  : 'Solo se exporta el archivo local. La sesión queda en Supabase como “sin identificar”.'}
+              </div>
+            </div>
+            <label className="switch" title="Guardar datos del paciente en la nube">
+              <input
+                type="checkbox"
+                checked={saveToDb}
+                onChange={(e) => setSaveToDb(e.target.checked)}
+              />
+              <span className="switch-track" />
+            </label>
+          </div>
+
           <span className="section-label" style={{ display: 'block', marginBottom: 12 }}>
             Información clínica del paciente (opcional)
           </span>
@@ -287,7 +322,14 @@ export default function ExportModal({
             )}
 
             <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <button type="submit" className="button button-ghost">Guardar paciente</button>
+              <button
+                type="submit"
+                className="button button-ghost"
+                disabled={!saveToDb}
+                title={saveToDb ? 'Persistir datos del paciente en la nube' : 'Activá “Guardar en la base de datos” para habilitar'}
+              >
+                Guardar paciente
+              </button>
             </div>
           </form>
         </div>
