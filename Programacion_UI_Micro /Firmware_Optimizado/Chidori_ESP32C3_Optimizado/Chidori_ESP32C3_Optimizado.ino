@@ -257,6 +257,11 @@ void Inicializar_WIFI() {
   Serial.println("\n✅ WiFi conectado");
   Serial.print("IP: "); Serial.println(WiFi.localIP());
 
+  // Desactivar power save para streaming en tiempo real
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  Serial.println("✅ WiFi power save OFF · TX a máxima potencia");
+
   if (MDNS.begin("chidori")) {
     Serial.println("✅ mDNS iniciado → ws://chidori.local:81");
     MDNS.addService("ws", "tcp", 81);

@@ -310,6 +310,17 @@ void Inicializar_WiFiManager() {
   Serial.print("   IP:   ");  Serial.println(WiFi.localIP());
   Serial.print("   RSSI: ");  Serial.print(WiFi.RSSI()); Serial.println(" dBm");
 
+  // ★ CRÍTICO · desactivar WiFi Power Save
+  // Por default ESP32 entra en WIFI_PS_MIN_MODEM que acumula paquetes y los
+  // envía en ráfagas cada 100ms-10s (depende del DTIM del router). Para
+  // streaming en tiempo real necesitamos modem siempre activo.
+  // Trade-off: ~20mA más de consumo (irrelevante para uso con USB).
+  WiFi.setSleep(false);
+  Serial.println("✅ WiFi power save DESACTIVADO (latencia mínima)");
+
+  // Potencia TX al máximo para compensar RSSI bajo si lo hay
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
   if (MDNS.begin(MDNS_HOSTNAME)) {
     MDNS.addService("ws", "tcp", 81);
     Serial.print("✅ mDNS iniciado → ws://"); Serial.print(MDNS_HOSTNAME); Serial.println(".local:81");
