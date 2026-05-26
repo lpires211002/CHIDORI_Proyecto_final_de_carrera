@@ -378,25 +378,50 @@ void Inicializar_AD9833() {
   Serial.println("✅ AD9833 inicializado a 50 kHz (seno)");
 }
 
+/* Envía una palabra de 16 bits al AD9833.
+ * Usamos dos transfers de 8 bits para garantizar MSB-first independiente
+ * del endianness del SoC (ESP32-C3 es RISC-V little-endian). */
 void ad9833Write(uint16_t data) {
   digitalWrite(PIN_FSYNC, LOW);
-  SPI.transfer16(data);
+  delayMicroseconds(1);                  // tCSS · setup time CS-to-SCK
+  SPI.transfer((uint8_t)(data >> 8));    // MSB primero (D15-D8)
+  SPI.transfer((uint8_t)(data & 0xFF));  // LSB después (D7-D0)
   digitalWrite(PIN_FSYNC, HIGH);
-  delayMicroseconds(1);
+  delayMicroseconds(2);                  // tCSH · hold time + recovery
 }
 
+/* Calcula el freqWord para la frecuencia pedida.
+ * IMPORTANTE: NO reescribe el control register para no salir del modo
+ * RESET durante el setup. Eso lo hace ad9833Begin() al final. */
 void ad9833SetFrequency(double freqHz) {
   uint32_t freqWord = (uint32_t)((freqHz * (1UL << 28)) / MCLK);
-  ad9833Write(CMD_B28);
-  ad9833Write(REG_FREQ0 | (freqWord & 0x3FFF));
-  ad9833Write(REG_FREQ0 | ((freqWord >> 14) & 0x3FFF));
+  // Escribimos LSB primero, MSB después (orden requerido cuando B28=1)
+  ad9833Write(REG_FREQ0 | (uint16_t)(freqWord        & 0x3FFF));
+  ad9833Write(REG_FREQ0 | (uint16_t)((freqWord >> 14) & 0x3FFF));
 }
 
+/* Secuencia oficial de init según AD9833 datasheet / AN-1070:
+ *   1. Control: B28=1, RESET=1  (mantiene salida en cero durante setup)
+ *   2. FREQ0 LSB
+ *   3. FREQ0 MSB
+ *   4. PHASE0 (opcional)
+ *   5. Control: B28=1, RESET=0  (recién aquí arranca la senoidal)
+ */
 void ad9833Begin(double freqHz) {
-  ad9833Write(CMD_RESET);
+  // 1. Mantener RESET activo durante toda la configuración
+  ad9833Write(CMD_RESET);                  // 0x2100 · B28=1, RESET=1
+  delayMicroseconds(5);
+
+  // 2-3. Cargar la frecuencia (2 escrituras consecutivas a FREQ0)
   ad9833SetFrequency(freqHz);
-  ad9833Write(REG_PHASE0);
-  ad9833Write(CMD_EXIT_RESET_SINE);
+
+  // 4. Fase 0 (no estrictamente necesaria pero deja un estado conocido)
+  ad9833Write(REG_PHASE0 | 0x0000);
+
+  delayMicroseconds(5);
+
+  // 5. Liberar RESET → empieza a generar la senoidal
+  ad9833Write(CMD_EXIT_RESET_SINE);        // 0x2000 · B28=1, RESET=0, modo seno
 }
 
 /* ================= WEBSOCKET ================= */

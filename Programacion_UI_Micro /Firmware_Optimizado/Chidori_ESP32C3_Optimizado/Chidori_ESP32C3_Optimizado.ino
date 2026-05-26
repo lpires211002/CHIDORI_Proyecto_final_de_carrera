@@ -280,25 +280,32 @@ void Inicializar_AD9833() {
 }
 
 /* ================= AD9833 ================= */
+/* Dos transfers de 8 bits para MSB-first garantizado en ESP32-C3 RISC-V */
 void ad9833Write(uint16_t data) {
   digitalWrite(PIN_FSYNC, LOW);
-  SPI.transfer16(data);
+  delayMicroseconds(1);
+  SPI.transfer((uint8_t)(data >> 8));
+  SPI.transfer((uint8_t)(data & 0xFF));
   digitalWrite(PIN_FSYNC, HIGH);
-  delayMicroseconds(1);    // requerido por datasheet
+  delayMicroseconds(2);
 }
 
+/* NO toca el control register · solo escribe FREQ0 LSB+MSB */
 void ad9833SetFrequency(double freqHz) {
   uint32_t freqWord = (uint32_t)((freqHz * (1UL << 28)) / MCLK);
-  ad9833Write(CMD_B28);
-  ad9833Write(REG_FREQ0 | (freqWord & 0x3FFF));
-  ad9833Write(REG_FREQ0 | ((freqWord >> 14) & 0x3FFF));
+  ad9833Write(REG_FREQ0 | (uint16_t)(freqWord        & 0x3FFF));
+  ad9833Write(REG_FREQ0 | (uint16_t)((freqWord >> 14) & 0x3FFF));
 }
 
+/* Secuencia oficial AD9833 (datasheet + AN-1070):
+ *   RESET=1 → FREQ LSB → FREQ MSB → PHASE → RESET=0  */
 void ad9833Begin(double freqHz) {
-  ad9833Write(CMD_RESET);
+  ad9833Write(CMD_RESET);                // RESET=1, B28=1
+  delayMicroseconds(5);
   ad9833SetFrequency(freqHz);
-  ad9833Write(REG_PHASE0);
-  ad9833Write(CMD_EXIT_RESET_SINE);
+  ad9833Write(REG_PHASE0 | 0x0000);
+  delayMicroseconds(5);
+  ad9833Write(CMD_EXIT_RESET_SINE);      // RESET=0 · arranca la senoidal
 }
 
 /* ================= WEBSOCKET ================= */
