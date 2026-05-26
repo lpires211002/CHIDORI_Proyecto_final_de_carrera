@@ -85,8 +85,12 @@
 #define FREQ                50000.0
 #define SAMPLE_INTERVAL_US  1428
 #define AVG_SAMPLES         256
-#define TX_INTERVAL_MS      1000
+#define TX_INTERVAL_MS      500     // ★ Cadencia de envío al frontend (más fluido)
 #define CANT_MUESTRAS       10
+// No enviar datos al frontend hasta que el moving average tenga al menos
+// N muestras, para evitar que el primer valor (transitorio inestable)
+// quede como referencia inicial del paciente.
+#define WARMUP_MUESTRAS     5
 
 /* ================= ALARMA ================= */
 #define UMBRAL             -1.5
@@ -425,10 +429,21 @@ void adquirir_y_promediar() {
   Calcular_promedio(Z);
   Chidori.Z = average_Z;
 
+  // ── WARMUP GATE ──────────────────────────────────────────────────
+  // No transmitimos ni calibramos referencia hasta tener suficientes
+  // muestras en el moving average. Las primeras lecturas son ruido
+  // transitorio y no deben quedar como Z_ref del paciente.
+  if (size_m < WARMUP_MUESTRAS) {
+    Serial.print("[warmup] muestra "); Serial.print(size_m);
+    Serial.print("/"); Serial.print(WARMUP_MUESTRAS);
+    Serial.print(" · Z parcial = "); Serial.println(Chidori.Z, 3);
+    return;
+  }
+
   if (First_Measure) {
     Chidori.Ref   = Chidori.Z;
     First_Measure = false;
-    Serial.print("⭐ Z_ref calibrada: "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
+    Serial.print("⭐ Z_ref calibrada (post-warmup): "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
   }
 
   if (millis() - last_tx_ms >= TX_INTERVAL_MS) {

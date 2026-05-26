@@ -174,14 +174,32 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   }, [measuring, startTime, pausedDuration]);
 
   /* ── Data handler ──────────────────────────────────────────────────── */
+  /**
+   * Warmup window · descartar el primer dato no es suficiente porque puede
+   * llegar uno bajo seguido de uno alto. Tomamos la MEDIANA de las primeras
+   * BASELINE_WINDOW lecturas para que outliers no contaminen la referencia.
+   * Esto es defensa secundaria: el firmware ya hace su propio warmup gate.
+   */
+  const BASELINE_WINDOW = 5;
+  const baselineSamplesRef = useRef([]);
+
   const handleIncomingData = (val) => {
     const cur = stateRef.current;
     if (!cur.measuring) return;
 
     let baseline = cur.initialValue;
     if (baseline === null) {
-      baseline = val;
-      setInitialValue(val);
+      baselineSamplesRef.current.push(val);
+      if (baselineSamplesRef.current.length >= BASELINE_WINDOW) {
+        // Mediana de las primeras N: robusto contra outliers
+        const sorted = [...baselineSamplesRef.current].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        baseline = median;
+        setInitialValue(median);
+      } else {
+        // Aún no tenemos suficiente · ignoramos esta lectura para gráficos también
+        return;
+      }
     }
     setCurrentValue(val);
 
@@ -331,6 +349,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setRateData([]);
     setEvents([]);
     setInitialValue(null);
+    baselineSamplesRef.current = [];
     setCurrentValue(null);
     setRate(0);
     setEventCount(0);

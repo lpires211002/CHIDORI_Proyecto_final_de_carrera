@@ -68,7 +68,10 @@
 #define FREQ                50000.0  // Frecuencia de inyección (50 kHz)
 #define SAMPLE_INTERVAL_US  1428     // Muestreo ADC a ~700 Hz (1e6 / 700)
 #define AVG_SAMPLES         256      // Promediador por bloque (256 muestras crudas → 1 Z)
-#define TX_INTERVAL_MS      1000     // ⚙️  Cadencia de envío al frontend (configurable)
+#define TX_INTERVAL_MS      500      // ⚙️  Cadencia de envío al frontend (configurable)
+// Warmup: no enviar al frontend hasta tener N muestras en el moving avg,
+// para evitar transitorios inestables como referencia inicial.
+#define WARMUP_MUESTRAS     5
 #define CANT_MUESTRAS       10       // Tamaño del moving-average sobre Z
 
 /* ================= PARÁMETROS DE ALARMA ================= */
@@ -346,11 +349,19 @@ void adquirir_y_promediar() {
   Calcular_promedio(Z);
   Chidori.Z = average_Z;
 
-  // Primera medición tras el inicio → capturo baseline
+  // ---- WARMUP GATE: descartar transitorios iniciales ----
+  if (size_m < WARMUP_MUESTRAS) {
+    Serial.print("[warmup] muestra "); Serial.print(size_m);
+    Serial.print("/"); Serial.print(WARMUP_MUESTRAS);
+    Serial.print(" · Z parcial = "); Serial.println(Chidori.Z, 3);
+    return;
+  }
+
+  // Primera medición tras el warmup → capturo baseline ESTABLE
   if (First_Measure) {
     Chidori.Ref   = Chidori.Z;
     First_Measure = false;
-    Serial.print("⭐ Z_ref calibrada: "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
+    Serial.print("⭐ Z_ref calibrada (post-warmup): "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
   }
 
   // ---- Transmisión al frontend con cadencia configurable ----
