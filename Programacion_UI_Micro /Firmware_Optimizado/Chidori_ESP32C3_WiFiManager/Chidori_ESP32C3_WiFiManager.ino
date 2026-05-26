@@ -145,7 +145,13 @@ const int DEBOUNCE_CUENTAS = 5;
 bool First_Measure = true;
 uint8_t Alarm_counter = MUESTRAS_ALARMA;
 
-/* ================= MÁQUINA DE ESTADOS ================= */
+/* ================= MÁQUINA DE ESTADOS =================
+ * NOTA · La alarma se evalúa ÚNICAMENTE en el frontend, donde el clínico
+ * configura el threshold y el tipo (abs / % / Δ). El firmware actúa como
+ * sensor "dumb": solo mide y transmite. El estado ALARMA queda como
+ * compatibilidad pero NO se entra por umbral interno — solo si el frontend
+ * envía un comando explícito (futuro: BUZZER_ON).
+ */
 typedef enum { INACTIVO, MIDIENDO, ALARMA } state_t;
 
 typedef struct {
@@ -228,14 +234,9 @@ void loop() {
       break;
 
     case MIDIENDO:
-      if (!First_Measure && dB(Chidori.Z, Chidori.Ref) < UMBRAL) {
-        if (--Alarm_counter == 0) {
-          Serial.println(">> ALARMA disparada");
-          Chidori.estado = ALARMA;
-        }
-      } else {
-        Alarm_counter = MUESTRAS_ALARMA;
-      }
+      // Sin evaluación de alarma local · el frontend decide si dispara
+      // alerta según el threshold que el clínico haya configurado.
+      digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
         botonConfirmado = false;
         Serial.println(">> INACTIVO (Por boton)");
@@ -245,11 +246,14 @@ void loop() {
       break;
 
     case ALARMA:
-      digitalWrite(BUZZER, HIGH);
+      // Estado mantenido por compatibilidad. Hoy NO se entra
+      // automáticamente — solo si se agrega un comando WS futuro
+      // tipo "BUZZER_ON". Por ahora, el buzzer queda apagado.
+      digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
         botonConfirmado = false;
         digitalWrite(BUZZER, LOW);
-        Serial.println(">> INACTIVO (Alarma silenciada por boton)");
+        Serial.println(">> INACTIVO (Por boton)");
         Chidori.estado = INACTIVO;
         First_Measure  = true;
       }

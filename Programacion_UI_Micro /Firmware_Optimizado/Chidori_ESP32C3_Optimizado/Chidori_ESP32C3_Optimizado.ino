@@ -206,16 +206,9 @@ void loop() {
       break;
 
     case MIDIENDO:
-      // Evaluamos atenuación contra el baseline (solo si ya tenemos referencia)
-      if (!First_Measure && dB(Chidori.Z, Chidori.Ref) < UMBRAL) {
-        if (--Alarm_counter == 0) {
-          Serial.println(">> ALARMA disparada");
-          Chidori.estado = ALARMA;
-        }
-      } else {
-        Alarm_counter = MUESTRAS_ALARMA;   // requiere muestras CONSECUTIVAS
-      }
-
+      // Sin evaluación de alarma local · el frontend decide si dispara
+      // alerta según el threshold que el clínico haya configurado.
+      digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
         botonConfirmado = false;
         Serial.println(">> INACTIVO (Por boton)");
@@ -225,11 +218,12 @@ void loop() {
       break;
 
     case ALARMA:
-      digitalWrite(BUZZER, HIGH);
+      // Estado mantenido por compatibilidad pero no se entra automáticamente.
+      // Buzzer apagado; futuro: comando WS "BUZZER_ON" controlado por el frontend.
+      digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
         botonConfirmado = false;
-        digitalWrite(BUZZER, LOW);
-        Serial.println(">> INACTIVO (Alarma silenciada por boton)");
+        Serial.println(">> INACTIVO (Por boton)");
         Chidori.estado = INACTIVO;
         First_Measure  = true;
       }
