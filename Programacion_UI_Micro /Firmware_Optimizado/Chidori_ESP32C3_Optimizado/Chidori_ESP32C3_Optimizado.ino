@@ -251,10 +251,11 @@ void Inicializar_WIFI() {
   Serial.println("\n✅ WiFi conectado");
   Serial.print("IP: "); Serial.println(WiFi.localIP());
 
-  // Desactivar power save para streaming en tiempo real
+  // Desactivar power save para streaming en tiempo real (paquetes uno a uno,
+  // no en ráfagas). No tocamos TxPower porque el default alcanza y picos de
+  // corriente con TxPower MAX pueden disparar brown-out del USB CDC.
   WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  Serial.println("✅ WiFi power save OFF · TX a máxima potencia");
+  Serial.println("✅ WiFi power save OFF (latencia mínima)");
 
   if (MDNS.begin("chidori")) {
     Serial.println("✅ mDNS iniciado → ws://chidori.local:81");

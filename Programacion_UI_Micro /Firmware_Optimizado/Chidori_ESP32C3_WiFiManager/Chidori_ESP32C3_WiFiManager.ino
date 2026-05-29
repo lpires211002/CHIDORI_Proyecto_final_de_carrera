@@ -322,8 +322,10 @@ void Inicializar_WiFiManager() {
   WiFi.setSleep(false);
   Serial.println("✅ WiFi power save DESACTIVADO (latencia mínima)");
 
-  // Potencia TX al máximo para compensar RSSI bajo si lo hay
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  // NOTA: NO seteamos TxPower al máximo · eso causa picos de corriente
+  // (>200mA pico) que pueden disparar brown-out con cables USB marginales
+  // y resetear el USB CDC ("not connected" cada vez que reconectás).
+  // El default del core (~11-15 dBm) alcanza para RSSI hasta -75 dBm.
 
   if (MDNS.begin(MDNS_HOSTNAME)) {
     MDNS.addService("ws", "tcp", 81);
