@@ -108,7 +108,9 @@ constexpr double   MCLK                = 25e6;
 /* ================= WiFi / PORTAL ================= */
 // Nombre del Access Point que aparece cuando el ESP necesita configuración
 const char* PORTAL_SSID     = "Chidori-Setup";
-const char* PORTAL_PASSWORD = "";                  // "" = AP abierto (sin password)
+// macOS rechaza redes abiertas por seguridad; con password (WPA2) conecta sin
+// problemas. La password se le da al clínico/admin junto con instrucciones.
+const char* PORTAL_PASSWORD = "chidori123";        // min 8 chars · WPA2
 // Hostname mDNS publicado en la red local. Resoluble como chidori.local
 const char* MDNS_HOSTNAME   = "chidori";
 // Tiempo máximo (segundos) que el portal espera al usuario antes de
