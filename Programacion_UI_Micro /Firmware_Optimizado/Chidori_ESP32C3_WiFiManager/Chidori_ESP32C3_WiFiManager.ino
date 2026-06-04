@@ -84,8 +84,12 @@
 /* ================= MUESTREO ================= */
 #define FREQ                50000.0
 #define SAMPLE_INTERVAL_US  1428
-#define AVG_SAMPLES         256
-#define TX_INTERVAL_MS      500     // ★ Cadencia de envío al frontend (más fluido)
+// AVG_SAMPLES 128 @ 700 Hz = ~183 ms por valor de Z. Con la señal tan estable
+// que vimos (±0.05 Ω con 256), bajar a 128 mantiene calidad de sobra y duplica
+// la velocidad. Si querés aún más fluido bajalo a 64; si querés menos ruido
+// (paciente con movimiento) subilo a 256.
+#define AVG_SAMPLES         128
+#define TX_INTERVAL_MS      250     // ★ Cadencia de envío al frontend · ~4 Hz
 #define CANT_MUESTRAS       10
 // No enviar datos al frontend hasta que el moving average tenga al menos
 // N muestras, para evitar que el primer valor (transitorio inestable)

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Skill(impeccable:impeccable)",
+      "Skill(impeccable:impeccable:*)",
+      "Bash(node .claude/skills/impeccable/scripts/load-context.mjs)",
+      "Bash(node /Users/lucapires/.claude/plugins/cache/impeccable/impeccable/3.0.0/.claude/skills/impeccable/scripts/load-context.mjs)",
+      "Bash(npx --yes impeccable --json src/)",
+      "Bash(npm run *)",
+      "Bash(git restore *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(claude mcp *)",
+      "Bash(npx vite *)",
+      "Bash(git pull *)"
+    ]
+  }
+}
