@@ -1,16 +1,37 @@
 /* =====================  PROYECTO CHIDORI ========================*/
-/* ===== ESP32-C3 SUPER MINI · CON PORTAL DE CONFIGURACIÓN WiFi ====*/
+/* ===== ESP32-C3 SUPER MINI · WiFiManager · EDICIÓN ROBUSTA ======*/
 //
-// Variante del firmware optimizado que añade auto-configuración WiFi
-// mediante WiFiManager (portal cautivo). Las credenciales NO viven más
-// en el código fuente: se ingresan una vez desde el navegador del
-// celular y quedan persistidas en el flash del ESP32-C3.
+// Reescritura orientada a confiabilidad de transmisión en tiempo real.
+// Cambios clave respecto a la versión anterior:
+//
+//   1. AD9833 se inicializa ANTES del WiFi (alimentación limpia, igual
+//      que el sketch de prueba "soloAD" que siempre anda) y se
+//      RE-inicializa en cada START → la senoidal nunca queda colgada.
+//   2. Heartbeat WebSocket (ping/pong) → los clientes fantasma que
+//      dejan los refresh del navegador se eliminan solos. Sin esto,
+//      broadcastTXT se frena llamando a sockets muertos.
+//   3. Reconexión WiFi EN RUNTIME, no bloqueante, con backoff. La
+//      versión anterior solo conectaba en el boot: si el router se
+//      caía después, el equipo quedaba offline para siempre.
+//   4. TX power fijado en 8.5 dBm. El ESP32-C3 Super Mini tiene un
+//      defecto conocido de matching de antena: a potencia default la
+//      señal es errática y el AP "Chidori-Setup" cuesta encontrarlo.
+//      8.5 dBm es el fix documentado por la comunidad y además evita
+//      el brown-out por picos de corriente con cables USB marginales.
+//   5. Scheduler de muestreo sin ráfagas: si el loop se atrasa (WiFi
+//      reconectando, etc.) se re-sincroniza en vez de disparar N
+//      muestras juntas.
+//   6. Cero String en el camino crítico → sin fragmentación de heap
+//      en sesiones largas.
+//   7. Diagnóstico: línea de estado cada 10 s por serial (RSSI, heap,
+//      clientes WS) y comando WS "STATUS".
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
 // ║                                                              ║
 // ║  Boards Manager:    esp32 by Espressif Systems ≥ 3.0.0       ║
 // ║  Library Manager:   WiFiManager by tzapu      ≥ 2.0.17       ║
+// ║                     WebSockets by Markus Sattler ≥ 2.4.0     ║
 // ║                                                              ║
 // ║  Board:                ESP32C3 Dev Module                    ║
 // ║  USB CDC On Boot:      ENABLED                               ║
@@ -19,45 +40,37 @@
 // ║  Partition Scheme:     Default 4MB with spiffs               ║
 // ╚══════════════════════════════════════════════════════════════╝
 //
-// FLUJO DE WiFi (primera vez):
-//   1. Encender el dispositivo.
-//   2. Desde el celular, conectarse a la red WiFi llamada
-//      "Chidori-Setup" (sin contraseña por defecto).
-//   3. Esperar a que se abra automáticamente el portal cautivo.
-//      Si no abre, visitar manualmente http://192.168.4.1
-//   4. Click "Configure WiFi" → seleccionar la red de la casa o
-//      del consultorio, tipear la contraseña, Save.
-//   5. El ESP guarda las credenciales en flash y se reinicia.
-//   6. A partir de ahora arranca conectado a esa red.
+// FLUJO WiFi (primera vez):
+//   1. Encender → conectarse desde el celular a "Chidori-Setup"
+//      (password: chidori123).
+//   2. Portal cautivo abre solo; si no, ir a http://192.168.4.1
+//   3. Configure WiFi → elegir red → Save. El ESP guarda y conecta.
 //
-// FLUJO DE WiFi (siguientes booteos):
-//   1. Encender. Conecta solo a la última red configurada en ~3s.
-//   2. Si falla 3 veces seguidas (red caída, contraseña cambiada,
-//      etc.) levanta otra vez el portal "Chidori-Setup".
+// FLUJO WiFi (booteos siguientes):
+//   Conecta solo a la red guardada. Si la red se cae DESPUÉS de
+//   conectar, reintenta solo (backoff 5→30 s) sin frenar la medición.
+//   Si nunca logra conectar en el boot, levanta el portal de nuevo.
 //
-// RESET MANUAL DE CREDENCIALES (factory reset):
-//   - Mantener apretado el botón mientras se enciende el dispositivo,
-//     por 5 segundos. El firmware borra el flash WiFi y reinicia
-//     en modo portal.
+// FACTORY RESET WiFi: mantener el botón apretado 5 s al encender.
 //
-// Asignación de pines (verificada contra esquemático KiCAD):
-//   GPIO 0  → ADC (Vout, salida del detector Schottky)
-//   GPIO 4  → SPI SCK   (clk del AD9833)
-//   GPIO 5  → BUZZER    (alarm)
-//   GPIO 6  → SPI MOSI  (data del AD9833)
-//   GPIO 7  → SPI FSYNC (fnc del AD9833)
-//   GPIO 20 → BOTÓN     (SW2, pull-down externo 2.2k → activo en HIGH)
+// Pines (verificados contra esquemático KiCAD):
+//   GPIO 0  → ADC (Vout, detector Schottky)
+//   GPIO 4  → SPI SCK   (clk AD9833)
+//   GPIO 5  → BUZZER
+//   GPIO 6  → SPI MOSI  (data AD9833)
+//   GPIO 7  → SPI FSYNC (fnc AD9833)
+//   GPIO 20 → BOTÓN     (SW2, pull-down externo 2.2k → activo HIGH)
 // ─────────────────────────────────────────────────────────────────
 
 #include <WiFi.h>
-#include <WiFiManager.h>          // ★ NUEVO · portal de configuración
+#include <WiFiManager.h>
 #include <ESPmDNS.h>
 #include <WebSocketsServer.h>
 #include <SPI.h>
 #include <stdint.h>
 #include <math.h>
 
-/* ================= ASIGNACIÓN DE PINES (esquemático) ================= */
+/* ================= PINES ================= */
 #define BUZZER       5
 #define BUTTON      20
 #define ADC_PIN      0
@@ -78,54 +91,45 @@
 #define VREF                3.3
 #define RESOLUCION          4095
 #define ADC(x)              ((x) * VREF / (RESOLUCION))
-
 #define Amp2Vpp(x)          ((x) * 2.0)
 
 /* ================= MUESTREO ================= */
-#define FREQ                50000.0
-#define SAMPLE_INTERVAL_US  1428
-// AVG_SAMPLES 128 @ 700 Hz = ~183 ms por valor de Z. Con la señal tan estable
-// que vimos (±0.05 Ω con 256), bajar a 128 mantiene calidad de sobra y duplica
-// la velocidad. Si querés aún más fluido bajalo a 64; si querés menos ruido
-// (paciente con movimiento) subilo a 256.
-#define AVG_SAMPLES         128
-#define TX_INTERVAL_MS      250     // ★ Cadencia de envío al frontend · ~4 Hz
-#define CANT_MUESTRAS       10
-// No enviar datos al frontend hasta que el moving average tenga al menos
-// N muestras, para evitar que el primer valor (transitorio inestable)
-// quede como referencia inicial del paciente.
-#define WARMUP_MUESTRAS     5
-
-/* ================= ALARMA ================= */
-#define UMBRAL             -1.5
-#define MUESTRAS_ALARMA     5
-#define dB(Z, Zref)         (20.0 * log10((Z) / (Zref)))
+#define FREQ                50000.0   // frecuencia de inyección AD9833
+#define SAMPLE_INTERVAL_US  1428      // ~700 Hz
+#define AVG_SAMPLES         128       // 128 @ 700 Hz ≈ 183 ms por Z
+#define TX_INTERVAL_MS      250       // ~4 Hz hacia el frontend
+#define CANT_MUESTRAS       10        // moving average sobre Z
+#define WARMUP_MUESTRAS     5         // no transmitir hasta estabilizar
+// Si el scheduler se atrasa más de esto, re-sincroniza (evita ráfagas)
+#define MAX_LAG_INTERVALS   4
 
 /* ================= AD9833 ================= */
 constexpr uint16_t CMD_RESET           = 0x2100;
 constexpr uint16_t CMD_EXIT_RESET_SINE = 0x2000;
-constexpr uint16_t CMD_B28             = 0x2000;
 constexpr uint16_t REG_FREQ0           = 0x4000;
 constexpr uint16_t REG_PHASE0          = 0xC000;
 constexpr double   MCLK                = 25e6;
 
 /* ================= WiFi / PORTAL ================= */
-// Nombre del Access Point que aparece cuando el ESP necesita configuración
-const char* PORTAL_SSID     = "Chidori-Setup";
-// macOS rechaza redes abiertas por seguridad; con password (WPA2) conecta sin
-// problemas. La password se le da al clínico/admin junto con instrucciones.
-const char* PORTAL_PASSWORD = "chidori123";        // min 8 chars · WPA2
-// Hostname mDNS publicado en la red local. Resoluble como chidori.local
-const char* MDNS_HOSTNAME   = "chidori";
-// Tiempo máximo (segundos) que el portal espera al usuario antes de
-// reiniciar e intentar conectar de nuevo
-const uint16_t PORTAL_TIMEOUT_S = 180;
-// Tiempo máximo (segundos) que tarda en cada intento de conexión a la
-// red guardada antes de levantar el portal de nuevo
-const uint16_t CONNECT_TIMEOUT_S = 15;
-// Cuántos segundos hay que mantener apretado el botón al boot para
-// disparar el factory reset de las credenciales WiFi
-const uint16_t FACTORY_RESET_HOLD_MS = 5000;
+const char*    PORTAL_SSID            = "Chidori-Setup";
+const char*    PORTAL_PASSWORD        = "chidori123";   // WPA2, min 8 chars
+const char*    MDNS_HOSTNAME          = "chidori";
+const uint16_t PORTAL_TIMEOUT_S       = 180;
+const uint16_t CONNECT_TIMEOUT_S      = 15;
+const uint16_t FACTORY_RESET_HOLD_MS  = 5000;
+
+// Reconexión runtime: backoff entre reintentos
+const uint32_t WIFI_RETRY_MIN_MS      = 5000;
+const uint32_t WIFI_RETRY_MAX_MS      = 30000;
+// Si está INACTIVO y lleva más de esto sin WiFi → reboot preventivo
+// (nunca se reinicia en medio de una medición)
+const uint32_t WIFI_DEAD_REBOOT_MS    = 180000;
+
+// Heartbeat WS: ping cada 15 s, espera pong 3 s, 2 fallos = desconectar.
+// ESTO es lo que elimina los clientes fantasma de los page-refresh.
+const uint32_t WS_PING_INTERVAL_MS    = 15000;
+const uint32_t WS_PONG_TIMEOUT_MS     = 3000;
+const uint8_t  WS_PONG_RETRIES        = 2;
 
 WebSocketsServer webSocket(81);
 
@@ -140,6 +144,7 @@ float GANANCIA_RECEPTOR;
 unsigned long t_debounce     = 0;
 unsigned long last_sample_us = 0;
 unsigned long last_tx_ms     = 0;
+unsigned long last_status_ms = 0;
 
 uint32_t adc_sum   = 0;
 uint16_t adc_count = 0;
@@ -149,15 +154,17 @@ int  debounceCount   = 0;
 const int DEBOUNCE_CUENTAS = 5;
 
 bool First_Measure = true;
-uint8_t Alarm_counter = MUESTRAS_ALARMA;
+
+/* ── Estado WiFi runtime (manejado por eventos + loop) ── */
+volatile bool wifiUp            = false;  // seteado por eventos WiFi
+volatile bool wifiNeedsServices = false;  // re-arrancar mDNS tras reconectar
+uint32_t      wifiRetryDelayMs  = WIFI_RETRY_MIN_MS;
+unsigned long wifiNextRetryMs   = 0;
+unsigned long wifiDownSinceMs   = 0;
 
 /* ================= MÁQUINA DE ESTADOS =================
- * NOTA · La alarma se evalúa ÚNICAMENTE en el frontend, donde el clínico
- * configura el threshold y el tipo (abs / % / Δ). El firmware actúa como
- * sensor "dumb": solo mide y transmite. El estado ALARMA queda como
- * compatibilidad pero NO se entra por umbral interno — solo si el frontend
- * envía un comando explícito (futuro: BUZZER_ON).
- */
+ * La alarma se evalúa ÚNICAMENTE en el frontend. El firmware es un
+ * sensor "dumb": mide y transmite. ALARMA queda por compatibilidad. */
 typedef enum { INACTIVO, MIDIENDO, ALARMA } state_t;
 
 typedef struct {
@@ -169,49 +176,63 @@ typedef struct {
 sensor_t Chidori;
 
 /* ================= PROTOTIPOS ================= */
-void Inicializar_WiFiManager();
-void checkFactoryResetButton();
 void Inicializar_AD9833();
 void ad9833Write(uint16_t data);
 void ad9833SetFrequency(double freqHz);
 void ad9833Begin(double freqHz);
+void Inicializar_WiFiManager();
+void onWiFiEvent(WiFiEvent_t event);
+void wifiWatchdog();
+void startNetworkServices();
+void checkFactoryResetButton();
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
 void adquirir_y_promediar();
 void Calcular_promedio(float Z);
 void checkButton();
 void resetMedicion();
+void startMeasurement(const char* origen);
+void stopMeasurement(const char* origen);
+void statusTick();
 
 /* ================= SETUP ================= */
 void setup() {
   Serial.begin(115200);
   delay(150);
-  Serial.println("\n=== ESP32-C3 CHIDORI · WiFiManager edition ===");
+  Serial.println("\n=== ESP32-C3 CHIDORI · WiFiManager ROBUSTO ===");
 
   pinMode(BUZZER, OUTPUT);
-  pinMode(BUTTON, INPUT);            // pull-down externo de 2.2k en PCB
+  pinMode(BUTTON, INPUT);            // pull-down externo 2.2k en PCB
   digitalWrite(BUZZER, LOW);
 
-  // Si el botón está apretado al boot, ofrecer factory reset
   checkFactoryResetButton();
 
-  // Cálculos derivados
+  // Constantes derivadas
   CORRIENTE_INYECTADA = VPP * GANANCIA_GENERADOR / R1;
   GANANCIA_RECEPTOR   = GANANCIA_HIGH_PASS * GANANCIA_LOW_PASS * GANANCIA_INA;
   Serial.print("I_inyectada (pp) = "); Serial.print(CORRIENTE_INYECTADA * 1000, 4); Serial.println(" mA");
-  Serial.print("Ganancia receptor total = ");          Serial.println(GANANCIA_RECEPTOR);
+  Serial.print("Ganancia receptor = ");  Serial.println(GANANCIA_RECEPTOR);
 
   Chidori.estado = INACTIVO;
   Chidori.Z      = 0.0f;
   Chidori.Ref    = 0.0f;
 
-  // ★ NUEVO · WiFi con portal de configuración
-  Inicializar_WiFiManager();
+  // ADC: atenuación 11 dB explícita (rango completo 0–3.3 V aprox.)
+  analogSetPinAttenuation(ADC_PIN, ADC_11db);
+
+  // ★ AD9833 PRIMERO, con el WiFi todavía apagado.
+  // Reproduce el entorno del sketch "soloAD" (alimentación sin los picos
+  // de corriente de la radio) → init SPI confiable siempre.
   Inicializar_AD9833();
+
+  // Recién ahora la radio
+  Inicializar_WiFiManager();
 }
 
 /* ================= LOOP PRINCIPAL ================= */
 void loop() {
   webSocket.loop();
+  wifiWatchdog();
+  statusTick();
 
   // Antirrebote del botón cada 10 ms
   if (millis() - t_debounce >= 10) {
@@ -219,78 +240,87 @@ void loop() {
     checkButton();
   }
 
-  // Muestreo ADC a 700 Hz solo si estamos midiendo
+  // Muestreo ADC a ~700 Hz solo midiendo
   if (Chidori.estado == MIDIENDO) {
-    if (micros() - last_sample_us >= SAMPLE_INTERVAL_US) {
-      last_sample_us += SAMPLE_INTERVAL_US;
+    unsigned long now_us = micros();
+    if (now_us - last_sample_us >= SAMPLE_INTERVAL_US) {
+      // Si nos atrasamos mucho (reconexión WiFi, etc.) re-sincronizamos
+      // en vez de disparar una ráfaga de muestras para "ponernos al día".
+      if (now_us - last_sample_us > (unsigned long)SAMPLE_INTERVAL_US * MAX_LAG_INTERVALS) {
+        last_sample_us = now_us;
+      } else {
+        last_sample_us += SAMPLE_INTERVAL_US;
+      }
       adquirir_y_promediar();
     }
   }
 
   switch (Chidori.estado) {
     case INACTIVO:
-      digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
         botonConfirmado = false;
-        Serial.println(">> MIDIENDO (Por boton)");
-        resetMedicion();
-        Chidori.estado = MIDIENDO;
-        last_sample_us = micros();
+        startMeasurement("boton");
       }
       break;
 
     case MIDIENDO:
-      // Sin evaluación de alarma local · el frontend decide si dispara
-      // alerta según el threshold que el clínico haya configurado.
-      digitalWrite(BUZZER, LOW);
       if (botonConfirmado) {
         botonConfirmado = false;
-        Serial.println(">> INACTIVO (Por boton)");
-        Chidori.estado = INACTIVO;
-        First_Measure  = true;
+        stopMeasurement("boton");
       }
       break;
 
-    case ALARMA:
-      // Estado mantenido por compatibilidad. Hoy NO se entra
-      // automáticamente — solo si se agrega un comando WS futuro
-      // tipo "BUZZER_ON". Por ahora, el buzzer queda apagado.
-      digitalWrite(BUZZER, LOW);
+    case ALARMA:   // compatibilidad · hoy no se entra automáticamente
       if (botonConfirmado) {
         botonConfirmado = false;
-        digitalWrite(BUZZER, LOW);
-        Serial.println(">> INACTIVO (Por boton)");
-        Chidori.estado = INACTIVO;
-        First_Measure  = true;
+        stopMeasurement("boton");
       }
       break;
   }
 }
 
 /* ─────────────────────────────────────────────────────────────────────
- *  WiFi via portal cautivo (WiFiManager)
- *
- *  - autoConnect() intenta conectar a las credenciales guardadas en flash.
- *  - Si nunca se configuró o falla la conexión, levanta el AP del portal
- *    y bloquea hasta que el usuario configure (con un timeout de 3 min).
- *  - Si pasados los 3 min nadie configura, reinicia el dispositivo para
- *    reintentar (útil ante cortes momentáneos sin que quede atascado).
+ *  START / STOP centralizados
+ *  START re-inicializa el AD9833: si por cualquier glitch dejó de
+ *  generar, cada medición arranca con la senoidal garantizada.
+ *  Costo: 6 escrituras SPI (~µs), imperceptible.
+ * ───────────────────────────────────────────────────────────────────── */
+void startMeasurement(const char* origen) {
+  ad9833Begin(FREQ);                  // ★ re-init defensivo del generador
+  resetMedicion();
+  Chidori.estado = MIDIENDO;
+  last_sample_us = micros();
+  Serial.print(">> MIDIENDO (por "); Serial.print(origen); Serial.println(")");
+}
+
+void stopMeasurement(const char* origen) {
+  Chidori.estado = INACTIVO;
+  digitalWrite(BUZZER, LOW);
+  First_Measure  = true;
+  Serial.print(">> INACTIVO (por "); Serial.print(origen); Serial.println(")");
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ *  WiFi: boot con WiFiManager + reconexión runtime por eventos
  * ───────────────────────────────────────────────────────────────────── */
 void Inicializar_WiFiManager() {
-  WiFiManager wm;
+  WiFi.mode(WIFI_STA);
 
-  // Comportamiento del portal
+  // Eventos: detectan caída/recuperación del WiFi en runtime
+  WiFi.onEvent(onWiFiEvent);
+
+  WiFiManager wm;
   wm.setConfigPortalTimeout(PORTAL_TIMEOUT_S);
   wm.setConnectTimeout(CONNECT_TIMEOUT_S);
+  wm.setConnectRetries(3);
+  wm.setCleanConnect(true);          // desconecta antes de conectar (más confiable)
   wm.setHostname(MDNS_HOSTNAME);
 
-  // Limpieza visual del portal
   wm.setTitle("Chidori · Configuración WiFi");
-  wm.setShowInfoErase(true);          // botón "Erase WiFi config"
-  wm.setBreakAfterConfig(true);       // tras guardar, devolver control al sketch
+  wm.setShowInfoErase(true);
+  wm.setBreakAfterConfig(true);
   wm.setDarkMode(true);
 
-  // Texto explicativo encima del scan de redes
   const char* CUSTOM_HTML =
     "<p style='font-family:system-ui;font-size:13px;color:#666;line-height:1.5;margin:14px 0;'>"
     "Seleccioná la red WiFi a la que querés que se conecte el dispositivo Chidori. "
@@ -298,56 +328,146 @@ void Inicializar_WiFiManager() {
     "</p>";
   wm.setCustomHeadElement(CUSTOM_HTML);
 
+  // ★ Cuando levanta el AP del portal, bajar TX power a 8.5 dBm.
+  // El C3 Super Mini tiene mal matching de antena: a potencia default
+  // el AP "Chidori-Setup" se ve intermitente o directamente no aparece.
+  wm.setAPCallback([](WiFiManager* w) {
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    Serial.println("⚙ Portal activo · TX power 8.5 dBm (fix antena C3)");
+    Serial.print  ("  Conectarse a \""); Serial.print(PORTAL_SSID);
+    Serial.println("\" y abrir http://192.168.4.1");
+  });
+
   Serial.println("Conectando WiFi…");
   Serial.print("  AP de respaldo: "); Serial.println(PORTAL_SSID);
 
-  bool connected;
-  if (strlen(PORTAL_PASSWORD) > 0) {
-    connected = wm.autoConnect(PORTAL_SSID, PORTAL_PASSWORD);
-  } else {
-    connected = wm.autoConnect(PORTAL_SSID);
-  }
+  bool connected = (strlen(PORTAL_PASSWORD) > 0)
+                     ? wm.autoConnect(PORTAL_SSID, PORTAL_PASSWORD)
+                     : wm.autoConnect(PORTAL_SSID);
 
   if (!connected) {
-    Serial.println("❌ No se pudo conectar ni configurar dentro del timeout.");
-    Serial.println("   Reiniciando para reintentar…");
+    Serial.println("❌ Sin conexión ni configuración dentro del timeout. Reiniciando…");
     delay(2000);
     ESP.restart();
   }
+
+  // ★ TX power 8.5 dBm también en modo estación:
+  //   - estabiliza el link (defecto de antena del C3 Super Mini)
+  //   - evita picos >200 mA que disparan brown-out del USB CDC
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
+  // ★ Power save OFF: sin esto el modem acumula paquetes y los manda en
+  // ráfagas según el DTIM del router → el lag que veíamos en el dashboard.
+  WiFi.setSleep(false);
+
+  // Auto-reconexión del driver + nuestro watchdog con backoff
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
 
   Serial.println("✅ WiFi conectado");
   Serial.print("   SSID: ");  Serial.println(WiFi.SSID());
   Serial.print("   IP:   ");  Serial.println(WiFi.localIP());
   Serial.print("   RSSI: ");  Serial.print(WiFi.RSSI()); Serial.println(" dBm");
+  Serial.println("   TX power 8.5 dBm · power save OFF");
 
-  // ★ CRÍTICO · desactivar WiFi Power Save
-  // Por default ESP32 entra en WIFI_PS_MIN_MODEM que acumula paquetes y los
-  // envía en ráfagas cada 100ms-10s (depende del DTIM del router). Para
-  // streaming en tiempo real necesitamos modem siempre activo.
-  // Trade-off: ~20mA más de consumo (irrelevante para uso con USB).
-  WiFi.setSleep(false);
-  Serial.println("✅ WiFi power save DESACTIVADO (latencia mínima)");
+  wifiUp            = true;
+  wifiNeedsServices = false;   // el GOT_IP del boot ya quedó atendido acá
+  startNetworkServices();
+}
 
-  // NOTA: NO seteamos TxPower al máximo · eso causa picos de corriente
-  // (>200mA pico) que pueden disparar brown-out con cables USB marginales
-  // y resetear el USB CDC ("not connected" cada vez que reconectás).
-  // El default del core (~11-15 dBm) alcanza para RSSI hasta -75 dBm.
-
+/* mDNS + WebSocket server. Se llama al boot y tras cada reconexión. */
+void startNetworkServices() {
+  MDNS.end();
   if (MDNS.begin(MDNS_HOSTNAME)) {
     MDNS.addService("ws", "tcp", 81);
-    Serial.print("✅ mDNS iniciado → ws://"); Serial.print(MDNS_HOSTNAME); Serial.println(".local:81");
+    Serial.print("✅ mDNS → ws://"); Serial.print(MDNS_HOSTNAME); Serial.println(".local:81");
+    Serial.print("   (si .local falla, usar la IP directa: ");
+    Serial.print(WiFi.localIP()); Serial.println(":81)");
   } else {
-    Serial.println("❌ Error al iniciar mDNS (chidori.local no resoluble)");
+    Serial.println("⚠ mDNS no inició · usar la IP directa");
   }
 
-  webSocket.begin();
-  webSocket.onEvent(webSocketEvent);
+  static bool wsStarted = false;
+  if (!wsStarted) {
+    webSocket.begin();
+    webSocket.onEvent(webSocketEvent);
+    // ★ Heartbeat: elimina clientes fantasma (refresh del navegador,
+    // celular que se fue de rango). Sin esto broadcastTXT se degrada.
+    webSocket.enableHeartbeat(WS_PING_INTERVAL_MS, WS_PONG_TIMEOUT_MS, WS_PONG_RETRIES);
+    wsStarted = true;
+  }
+}
+
+/* Eventos del driver WiFi (corren en otra task → solo flags) */
+void onWiFiEvent(WiFiEvent_t event) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      if (wifiUp) {
+        wifiUp          = false;
+        wifiDownSinceMs = millis();
+        wifiNextRetryMs = millis() + WIFI_RETRY_MIN_MS;
+        wifiRetryDelayMs = WIFI_RETRY_MIN_MS;
+      }
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      if (!wifiUp) {
+        wifiUp            = true;
+        wifiNeedsServices = true;   // mDNS se re-arranca desde el loop
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+/* Reconexión no bloqueante con backoff. La medición NUNCA se frena:
+ * el ADC y el AD9833 siguen, solo se pausa la transmisión. */
+void wifiWatchdog() {
+  if (wifiUp) {
+    if (wifiNeedsServices) {
+      wifiNeedsServices = false;
+      WiFi.setTxPower(WIFI_POWER_8_5dBm);
+      WiFi.setSleep(false);
+      Serial.print("✅ WiFi reconectado · IP "); Serial.println(WiFi.localIP());
+      startNetworkServices();
+    }
+    return;
+  }
+
+  unsigned long now = millis();
+
+  // Reboot preventivo solo si está INACTIVO (jamás durante una medición)
+  if (Chidori.estado == INACTIVO && now - wifiDownSinceMs >= WIFI_DEAD_REBOOT_MS) {
+    Serial.println("❌ WiFi muerto hace 3 min y sin medición en curso. Reiniciando…");
+    delay(200);
+    ESP.restart();
+  }
+
+  if (now >= wifiNextRetryMs) {
+    Serial.print("↻ Reintentando WiFi (backoff ");
+    Serial.print(wifiRetryDelayMs / 1000); Serial.println(" s)…");
+    WiFi.reconnect();
+    wifiRetryDelayMs = min(wifiRetryDelayMs * 2, WIFI_RETRY_MAX_MS);
+    wifiNextRetryMs  = now + wifiRetryDelayMs;
+  }
+}
+
+/* Línea de diagnóstico cada 10 s */
+void statusTick() {
+  if (millis() - last_status_ms < 10000) return;
+  last_status_ms = millis();
+
+  Serial.print("[status] estado=");
+  Serial.print(Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO");
+  Serial.print(" · wifi="); Serial.print(wifiUp ? "OK" : "CAIDO");
+  if (wifiUp) { Serial.print(" ("); Serial.print(WiFi.RSSI()); Serial.print(" dBm)"); }
+  Serial.print(" · clientesWS="); Serial.print(webSocket.connectedClients());
+  Serial.print(" · heap="); Serial.print(ESP.getFreeHeap());
+  Serial.print(" · Z="); Serial.println(Chidori.Z, 3);
 }
 
 /* ─────────────────────────────────────────────────────────────────────
- *  Factory reset · si el botón está apretado al boot, esperamos 5s
- *  sostenidos para confirmar y entonces borramos credenciales WiFi.
- *  Esto le da al clínico una forma de cambiar de red sin reflashear.
+ *  Factory reset · botón apretado 5 s al boot borra credenciales WiFi
  * ───────────────────────────────────────────────────────────────────── */
 void checkFactoryResetButton() {
   if (digitalRead(BUTTON) != HIGH) return;
@@ -361,8 +481,7 @@ void checkFactoryResetButton() {
     if (millis() - t0 >= FACTORY_RESET_HOLD_MS) {
       Serial.println("✅ FACTORY RESET · borrando credenciales WiFi");
       WiFiManager wm;
-      wm.resetSettings();              // wipes saved SSID + password
-      // Beep de confirmación: 3 tonos cortos
+      wm.resetSettings();
       for (int i = 0; i < 3; i++) {
         digitalWrite(BUZZER, HIGH); delay(120);
         digitalWrite(BUZZER, LOW);  delay(120);
@@ -373,89 +492,93 @@ void checkFactoryResetButton() {
     }
     delay(50);
   }
-  Serial.println("→ Botón soltado antes del umbral. Continuando normalmente.");
+  Serial.println("→ Botón soltado antes del umbral. Continuando.");
 }
 
-/* ================= INICIALIZACIÓN DEL AD9833 ================= */
+/* ================= AD9833 ================= */
 void Inicializar_AD9833() {
   pinMode(PIN_FSYNC, OUTPUT);
   digitalWrite(PIN_FSYNC, HIGH);
-  SPI.begin(PIN_SCK, -1, PIN_MOSI, -1);   // CS manejado manualmente
+  SPI.begin(PIN_SCK, -1, PIN_MOSI, -1);   // CS manual, sin MISO
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE2));
+  delay(100);                              // settle (igual que sketch soloAD)
   ad9833Begin(FREQ);
-  Serial.println("✅ AD9833 inicializado a 50 kHz (seno)");
+  Serial.println("✅ AD9833 inicializado a 50 kHz (seno) · antes del WiFi");
 }
 
-/* Envía una palabra de 16 bits al AD9833.
- * Usamos dos transfers de 8 bits para garantizar MSB-first independiente
- * del endianness del SoC (ESP32-C3 es RISC-V little-endian). */
+/* Palabra de 16 bits en dos transfers de 8 → MSB-first garantizado
+ * independiente del endianness (C3 es RISC-V little-endian). */
 void ad9833Write(uint16_t data) {
   digitalWrite(PIN_FSYNC, LOW);
-  delayMicroseconds(1);                  // tCSS · setup time CS-to-SCK
-  SPI.transfer((uint8_t)(data >> 8));    // MSB primero (D15-D8)
-  SPI.transfer((uint8_t)(data & 0xFF));  // LSB después (D7-D0)
+  delayMicroseconds(1);                  // tCSS
+  SPI.transfer((uint8_t)(data >> 8));
+  SPI.transfer((uint8_t)(data & 0xFF));
   digitalWrite(PIN_FSYNC, HIGH);
-  delayMicroseconds(2);                  // tCSH · hold time + recovery
+  delayMicroseconds(2);                  // tCSH
 }
 
-/* Calcula el freqWord para la frecuencia pedida.
- * IMPORTANTE: NO reescribe el control register para no salir del modo
- * RESET durante el setup. Eso lo hace ad9833Begin() al final. */
+/* Solo escribe FREQ0 (LSB+MSB). No toca el control register. */
 void ad9833SetFrequency(double freqHz) {
   uint32_t freqWord = (uint32_t)((freqHz * (1UL << 28)) / MCLK);
-  // Escribimos LSB primero, MSB después (orden requerido cuando B28=1)
   ad9833Write(REG_FREQ0 | (uint16_t)(freqWord        & 0x3FFF));
   ad9833Write(REG_FREQ0 | (uint16_t)((freqWord >> 14) & 0x3FFF));
 }
 
-/* Secuencia oficial de init según AD9833 datasheet / AN-1070:
- *   1. Control: B28=1, RESET=1  (mantiene salida en cero durante setup)
- *   2. FREQ0 LSB
- *   3. FREQ0 MSB
- *   4. PHASE0 (opcional)
- *   5. Control: B28=1, RESET=0  (recién aquí arranca la senoidal)
- */
+/* Secuencia oficial (datasheet AD9833 / AN-1070):
+ *   RESET=1 → FREQ0 LSB → FREQ0 MSB → PHASE0 → RESET=0 (seno) */
 void ad9833Begin(double freqHz) {
-  // 1. Mantener RESET activo durante toda la configuración
-  ad9833Write(CMD_RESET);                  // 0x2100 · B28=1, RESET=1
+  ad9833Write(CMD_RESET);
   delayMicroseconds(5);
-
-  // 2-3. Cargar la frecuencia (2 escrituras consecutivas a FREQ0)
   ad9833SetFrequency(freqHz);
-
-  // 4. Fase 0 (no estrictamente necesaria pero deja un estado conocido)
   ad9833Write(REG_PHASE0 | 0x0000);
-
   delayMicroseconds(5);
-
-  // 5. Liberar RESET → empieza a generar la senoidal
-  ad9833Write(CMD_EXIT_RESET_SINE);        // 0x2000 · B28=1, RESET=0, modo seno
+  ad9833Write(CMD_EXIT_RESET_SINE);
 }
 
 /* ================= WEBSOCKET ================= */
+/* El frontend hace parseFloat(msg) e ignora lo no-numérico (NaN),
+ * así que las respuestas de texto (STATUS/PONG) no lo rompen. */
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-  if (type != WStype_TEXT) return;
-
-  String command = String((char*)payload);
-  Serial.print("Comando WS: "); Serial.println(command);
-
-  if (command == "START" && Chidori.estado == INACTIVO) {
-    resetMedicion();
-    Chidori.estado = MIDIENDO;
-    last_sample_us = micros();
-    Serial.println(">> MIDIENDO (Por comando WS)");
+  switch (type) {
+    case WStype_CONNECTED: {
+      IPAddress ip = webSocket.remoteIP(num);
+      Serial.print("WS cliente #"); Serial.print(num);
+      Serial.print(" conectado desde "); Serial.println(ip);
+      return;
+    }
+    case WStype_DISCONNECTED:
+      Serial.print("WS cliente #"); Serial.print(num); Serial.println(" desconectado");
+      return;
+    case WStype_TEXT:
+      break;
+    default:
+      return;
   }
-  else if (command == "STOP") {
-    Chidori.estado = INACTIVO;
-    digitalWrite(BUZZER, LOW);
-    First_Measure  = true;
-    Serial.println(">> INACTIVO (STOP por WS)");
+
+  const char* cmd = (const char*)payload;   // la lib null-termina los TEXT
+  Serial.print("Comando WS: "); Serial.println(cmd);
+
+  if (strcmp(cmd, "START") == 0 && Chidori.estado == INACTIVO) {
+    startMeasurement("WS");
   }
-  else if (command == "RESET") {
-    Chidori.estado = INACTIVO;
-    digitalWrite(BUZZER, LOW);
+  else if (strcmp(cmd, "STOP") == 0) {
+    stopMeasurement("WS STOP");
+  }
+  else if (strcmp(cmd, "RESET") == 0) {
+    stopMeasurement("WS RESET");
     resetMedicion();
-    Serial.println(">> INACTIVO (RESET por WS)");
+  }
+  else if (strcmp(cmd, "PING") == 0) {
+    webSocket.sendTXT(num, "PONG");
+  }
+  else if (strcmp(cmd, "STATUS") == 0) {
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "STATUS estado=%s rssi=%d heap=%u Z=%.3f",
+             Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO",
+             wifiUp ? (int)WiFi.RSSI() : 0,
+             (unsigned)ESP.getFreeHeap(), Chidori.Z);
+    webSocket.sendTXT(num, buf);
   }
 }
 
@@ -477,12 +600,9 @@ void adquirir_y_promediar() {
   Calcular_promedio(Z);
   Chidori.Z = average_Z;
 
-  // ── WARMUP GATE ──────────────────────────────────────────────────
-  // No transmitimos ni calibramos referencia hasta tener suficientes
-  // muestras en el moving average. Las primeras lecturas son ruido
-  // transitorio y no deben quedar como Z_ref del paciente.
+  // ── WARMUP: no transmitir ni calibrar Z_ref con transitorios ──
   if (size_m < WARMUP_MUESTRAS) {
-    Serial.print("[warmup] muestra "); Serial.print(size_m);
+    Serial.print("[warmup] "); Serial.print(size_m);
     Serial.print("/"); Serial.print(WARMUP_MUESTRAS);
     Serial.print(" · Z parcial = "); Serial.println(Chidori.Z, 3);
     return;
@@ -491,13 +611,15 @@ void adquirir_y_promediar() {
   if (First_Measure) {
     Chidori.Ref   = Chidori.Z;
     First_Measure = false;
-    Serial.print("⭐ Z_ref calibrada (post-warmup): "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
+    Serial.print("⭐ Z_ref calibrada: "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
   }
 
+  // ── TX cada TX_INTERVAL_MS · sin String (cero fragmentación) ──
   if (millis() - last_tx_ms >= TX_INTERVAL_MS) {
     last_tx_ms = millis();
-    String msg = String(Chidori.Z, 5);
-    if (webSocket.connectedClients() > 0) {
+    char msg[16];
+    snprintf(msg, sizeof(msg), "%.5f", Chidori.Z);
+    if (wifiUp && webSocket.connectedClients() > 0) {
       webSocket.broadcastTXT(msg);
     }
     Serial.print("Z = "); Serial.println(msg);
@@ -538,7 +660,6 @@ void resetMedicion() {
   average_Z     = 0;
   adc_sum       = 0;
   adc_count     = 0;
-  Alarm_counter = MUESTRAS_ALARMA;
   First_Measure = true;
   last_tx_ms    = millis();
 }
