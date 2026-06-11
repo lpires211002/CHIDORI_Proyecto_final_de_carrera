@@ -19,6 +19,7 @@ export default function StatsGrid({
   rate,
   zHistory,
   rateHistory,
+  stale = false,
 }) {
   const zSpark = useMemo(
     () => (Array.isArray(zHistory) ? zHistory.slice(-SPARK_WINDOW) : []),
@@ -37,7 +38,11 @@ export default function StatsGrid({
   const rateStateClass = rate == null || rate === 0 ? '' : rate < 0 ? 'neg-state' : 'pos-state';
 
   return (
-    <div className="readout readout-3" role="group" aria-label="Lectura en vivo">
+    <div
+      className={`readout readout-3 ${stale ? 'is-stale' : ''}`}
+      role="group"
+      aria-label={stale ? 'Lectura desactualizada · sin datos del dispositivo' : 'Lectura en vivo'}
+    >
       {/* HERO · current impedance */}
       <div className="readout-cell hero">
         <span className="readout-label">Impedancia actual</span>

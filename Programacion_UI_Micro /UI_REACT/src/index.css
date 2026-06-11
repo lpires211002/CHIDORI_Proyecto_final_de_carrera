@@ -2114,3 +2114,19 @@ code {
 @media (max-width: 860px) {
   .setup-grid { grid-template-columns: 1fr; }
 }
+
+/* ─── READOUT obsoleto · señal congelada (watchdog de staleness) ──── */
+.readout.is-stale {
+  opacity: 0.55;
+  filter: saturate(0.5);
+  transition: opacity var(--dur-base) var(--ease-quart),
+              filter var(--dur-base) var(--ease-quart);
+}
+.readout.is-stale .readout-value { color: var(--type-mute); }
+
+/* ─── RECOVERY BANNER · sesión interrumpida recuperable ───────────── */
+.recovery-banner {
+  border-color: oklch(0.760 0.140 70 / 0.35);
+  background: oklch(0.760 0.140 70 / 0.06);
+}
+.recovery-banner .gate-banner-text strong { color: oklch(0.760 0.140 70); }

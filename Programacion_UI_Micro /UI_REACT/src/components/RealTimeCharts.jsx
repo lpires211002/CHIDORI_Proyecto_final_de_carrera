@@ -127,10 +127,25 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
         responsive: true,
         maintainAspectRatio: false,
         animation: { duration: 0 },
+        // Requisitos del plugin decimation: sin parsing y datos {x,y}
+        // ordenados por x (los buffers del Dashboard ya cumplen ambos).
+        parsing: false,
+        normalized: true,
         interaction: { intersect: false, mode: 'index' },
         scales: axisConfig(p, 'z'),
         plugins: {
           legend: { display: false },
+          /* Decimación LTTB · sesiones largas (horas a 4 Hz) acumulan
+           * decenas de miles de puntos; dibujarlos todos degrada la UI.
+           * Por encima de `threshold` puntos, Chart.js reduce la serie a
+           * `samples` muestras visualmente representativas. El dataset
+           * completo queda intacto para export y cloud commit. */
+          decimation: {
+            enabled: true,
+            algorithm: 'lttb',
+            samples: 500,
+            threshold: 1000,
+          },
           tooltip: {
             backgroundColor: p.bg,
             titleColor: readToken('--type-hi', '#fff'),

@@ -51,6 +51,17 @@ const MAX_CONSEC_REJECT = 3;       // tras N rechazos seguidos, aceptá (resync)
 const STATUS_POLL_MS    = 5000;    // consulta de estado/diagnóstico al firmware
 const USER_ACTION_GRACE = 2000;    // ventana anti-race tras una acción del usuario
 
+/* Señal congelada · el firmware transmite cada ~250 ms; si midiendo pasan
+ * más de STALE_AFTER_MS sin datos con el socket abierto, el último valor en
+ * pantalla ya no es confiable y hay que decirlo. */
+const STALE_AFTER_MS    = 3000;
+
+/* Respaldo de sesión · snapshot periódico a localStorage para que un F5 o
+ * un crash del navegador no pierdan una medición larga. */
+const SESSION_BACKUP_KEY    = 'chidori-session-backup';
+const BACKUP_INTERVAL_MS    = 30000;
+const BACKUP_MAX_AGE_MS     = 24 * 3600 * 1000;
+
 /**
  * Dashboard · vista principal del clínico autenticado.
  * El gate de auth está en App.jsx; acá ya sabemos que hay session y profile.
@@ -87,6 +98,13 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const lastUserActionRef    = useRef(0);      // timestamp última acción del clínico
   const lastAcceptedZRef     = useRef(null);   // último Z aceptado (guard de spikes)
   const consecRejectRef      = useRef(0);      // rechazos consecutivos del guard
+  const lastDataAtRef        = useRef(null);   // timestamp del último dato (staleness)
+
+  /* Buffers espejo de data/rateData. Fuente de verdad síncrona para el
+   * data handler: permite calcular la tasa SIN side effects dentro de los
+   * updaters de setState (que deben ser puros — StrictMode los invoca 2x). */
+  const dataBufRef = useRef([]);
+  const rateBufRef = useRef([]);
 
   /* ── Cloud sync (Supabase) ────────────────────────────────────────────
    * NUEVO MODELO · "commit explícito":
@@ -138,6 +156,19 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [confirmReset, setConfirmReset]     = useState(false);
   const [setupTab, setSetupTab]             = useState('config'); // 'config' | 'events'
   const [toasts, setToasts]                 = useState([]);
+  const [signalStale, setSignalStale]       = useState(false);
+  // Respaldo recuperable · lazy init desde localStorage (evita setState en effect)
+  const [recovery, setRecovery]             = useState(() => {
+    try {
+      const raw = localStorage.getItem(SESSION_BACKUP_KEY);
+      if (!raw) return null;
+      const b = JSON.parse(raw);
+      const valid = b && b.v === 1 && Array.isArray(b.data) && b.data.length > 0
+        && Date.now() - (b.savedAt || 0) < BACKUP_MAX_AGE_MS;
+      if (!valid) { localStorage.removeItem(SESSION_BACKUP_KEY); return null; }
+      return b;
+    } catch { return null; }
+  });
 
   /* ── Refs ──────────────────────────────────────────────────────────── */
   const stateRef = useRef({});
@@ -229,6 +260,97 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return () => clearInterval(interval);
   }, [measuring, startTime, pausedDuration]);
 
+  /* ── Watchdog de señal congelada ──────────────────────────────────────
+   * El firmware transmite ~4 Hz. Si estamos midiendo con enlace activo y
+   * pasan STALE_AFTER_MS sin datos, el último valor en pantalla ya no es
+   * actual (el firmware pausa la TX si su WiFi cae, pero sigue midiendo).
+   * Marcamos el readout como obsoleto y avisamos UNA vez por episodio. */
+  useEffect(() => {
+    if (!measuring || isSimulator || wsStatus !== 'CONNECTED') {
+      setSignalStale(false);
+      return;
+    }
+    const iv = setInterval(() => {
+      const last = lastDataAtRef.current;
+      const stale = last != null && Date.now() - last > STALE_AFTER_MS;
+      setSignalStale((prev) => {
+        if (stale && !prev) toast('Señal interrumpida · sin datos del dispositivo', 'warn');
+        if (!stale && prev) toast('Señal restablecida', 'success');
+        return stale;
+      });
+    }, 1000);
+    return () => clearInterval(iv);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measuring, isSimulator, wsStatus]);
+
+  /* ── Respaldo de sesión (anti-F5) ─────────────────────────────────────
+   * Snapshot compacto a localStorage cada BACKUP_INTERVAL_MS mientras se
+   * mide. Coordenadas redondeadas a 3 decimales en arrays de pares para
+   * mantener una sesión de horas dentro del límite de ~5 MB. */
+  const writeBackup = useCallback(() => {
+    const cur = stateRef.current;
+    if (dataBufRef.current.length === 0) return;
+    try {
+      const r3 = (n) => Math.round(n * 1000) / 1000;
+      const payload = {
+        v: 1,
+        savedAt: Date.now(),
+        startTime: cur.startTime,
+        pausedDuration: cur.pausedDuration,
+        initialValue: cur.initialValue,
+        eventCount: cur.eventCount,
+        data: dataBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
+        rate: rateBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
+        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change)]),
+      };
+      localStorage.setItem(SESSION_BACKUP_KEY, JSON.stringify(payload));
+    } catch (err) {
+      // Cuota llena u otro error · el backup es best-effort, no frena la medición
+      console.warn('[backup]', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  useEffect(() => {
+    if (!measuring) return;
+    const iv = setInterval(writeBackup, BACKUP_INTERVAL_MS);
+    return () => clearInterval(iv);
+  }, [measuring, writeBackup]);
+
+  const restoreFromBackup = () => {
+    const b = recovery;
+    if (!b) return;
+    const dataPts = b.data.map(([x, y]) => ({ x, y }));
+    const ratePts = (b.rate || []).map(([x, y]) => ({ x, y }));
+    dataBufRef.current = dataPts;
+    rateBufRef.current = ratePts;
+    setData(dataPts.slice());
+    setRateData(ratePts.slice());
+    setEvents((b.events || []).map(([id, time, value, change]) => ({ id, time, value, change })));
+    setEventCount(b.eventCount || 0);
+    setInitialValue(b.initialValue ?? null);
+    const last = dataPts[dataPts.length - 1];
+    setCurrentValue(last ? last.y : null);
+    lastAcceptedZRef.current = last ? last.y : null;
+    // La sesión restaurada queda PAUSADA en el tiempo del último punto:
+    // startTime sintético para que el cronómetro retome coherente al reanudar.
+    const lastX = last ? last.x : 0;
+    setStartTime(Date.now() - lastX * 1000);
+    setPausedDur(0);
+    setPauseStart(Date.now());
+    setMeasuring(false);
+    const m = Math.floor(lastX / 60);
+    const s = Math.floor(lastX % 60);
+    setElapsedTime(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+    setRecovery(null);
+    toast(`Sesión recuperada · ${dataPts.length} puntos. Está en pausa: Reanudar para continuar.`, 'success');
+  };
+
+  const discardBackup = () => {
+    try { localStorage.removeItem(SESSION_BACKUP_KEY); } catch { /* noop */ }
+    setRecovery(null);
+  };
+
   /* ── Data handler ──────────────────────────────────────────────────── */
   /**
    * Warmup window · descartar el primer dato no es suficiente porque puede
@@ -288,26 +410,29 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       }
     }
     setCurrentValue(val);
+    lastDataAtRef.current = Date.now();
 
     const elapsed = (Date.now() - cur.startTime - cur.pausedDuration) / 1000;
-    let computedRate = 0;
 
-    setData((prev) => {
-      const next = [...prev, { x: elapsed, y: val }];
-      if (next.length >= 2) {
-        const recent = next.slice(-10);
-        const a = recent[0];
-        const b = recent[recent.length - 1];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        computedRate = dx > 0 ? (dy / dx) * 60 : 0;
-        setRate(computedRate);
-        setRateData((p) => [...p, { x: elapsed, y: computedRate }]);
-      } else {
-        setRateData((p) => [...p, { x: elapsed, y: 0 }]);
-      }
-      return next;
-    });
+    // ── Buffers síncronos · la tasa se calcula acá, no dentro de un updater ──
+    const buf = dataBufRef.current;
+    buf.push({ x: elapsed, y: val });
+
+    let computedRate = 0;
+    if (buf.length >= 2) {
+      const recent = buf.slice(-10);
+      const a = recent[0];
+      const b = recent[recent.length - 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      computedRate = dx > 0 ? (dy / dx) * 60 : 0;
+    }
+    rateBufRef.current.push({ x: elapsed, y: computedRate });
+
+    // Updaters puros: copia superficial para nueva identidad de referencia.
+    setRate(computedRate);
+    setData(buf.slice());
+    setRateData(rateBufRef.current.slice());
 
     // NOTA · ya no insertamos en Supabase aquí. Todo queda en memoria
     // hasta que el clínico confirme el guardado desde el ExportModal.
@@ -356,6 +481,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       lastAcceptedZRef.current = null;
       consecRejectRef.current  = 0;
       baselineSamplesRef.current = [];
+      lastDataAtRef.current = Date.now();
       if (!cur.startTime) setStartTime(Date.now());
       if (cur.pauseStart) { setPausedDur((d) => d + (Date.now() - cur.pauseStart)); setPauseStart(null); }
       setMeasuring(true);
@@ -470,7 +596,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         lastAcceptedZRef.current = null;
         consecRejectRef.current  = 0;
         baselineSamplesRef.current = [];
+        dataBufRef.current = [];
+        rateBufRef.current = [];
       }
+      lastDataAtRef.current = Date.now();   // el watchdog cuenta desde el start
       if (pauseStart) { pDur += Date.now() - pauseStart; setPausedDur(pDur); setPauseStart(null); }
 
       // NO se crea sesión en la nube acá. La creación es explícita y
@@ -486,6 +615,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       sendCommand('STOP');
       setMeasuring(false);
       setPauseStart(Date.now());
+      writeBackup();   // snapshot fresco al pausar (el intervalo se corta acá)
     }
   };
 
@@ -516,6 +646,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     baselineSamplesRef.current = [];
     lastAcceptedZRef.current   = null;
     consecRejectRef.current    = 0;
+    dataBufRef.current = [];
+    rateBufRef.current = [];
+    lastDataAtRef.current = null;
+    try { localStorage.removeItem(SESSION_BACKUP_KEY); } catch { /* noop */ }
     setCurrentValue(null);
     setRate(0);
     setEventCount(0);
@@ -722,14 +856,16 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           <span
             className={`pill keep-mobile ${
               isSimulator ? 'pill-syncing'
+              : signalStale ? 'pill-alarm'
               : wsStatus === 'CONNECTED' ? 'pill-live'
               : wsStatus === 'CONNECTING' ? 'pill-syncing'
               : 'pill-alarm'
             }`}
-            title={connectionTitle}
+            title={signalStale ? 'Socket abierto pero sin datos del firmware' : connectionTitle}
           >
             <span className="pill-dot" />
             {isSimulator ? 'Simulador'
+              : signalStale ? 'Sin datos'
               : wsStatus === 'CONNECTED' ? (measuring ? 'Grabando' : 'En línea')
               : wsStatus === 'CONNECTING' ? 'Reintentando'
               : 'Sin enlace'}
@@ -770,6 +906,27 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           onOpenSettings={() => setIsSettingsOpen(true)}
           onReconnect={connectWebSocket}
         />
+
+        {/* Sesión interrumpida recuperable · solo si todavía no hay datos nuevos */}
+        {recovery && !hasAnyData && (
+          <div className="gate-banner recovery-banner" role="status">
+            <div className="gate-banner-text">
+              <strong>Sesión interrumpida encontrada.</strong>
+              <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>
+                {recovery.data.length} puntos · guardada{' '}
+                {new Date(recovery.savedAt).toLocaleString('es-AR')}. Se restaura en pausa.
+              </span>
+            </div>
+            <div className="row">
+              <button type="button" className="button button-ghost button-sm" onClick={discardBackup}>
+                Descartar
+              </button>
+              <button type="button" className="button button-primary button-sm" onClick={restoreFromBackup}>
+                Recuperar sesión
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Barra de comando · control primario + cronómetro + acciones ── */}
         <section className="command-bar">
@@ -821,6 +978,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                   rate={rate}
                   zHistory={data}
                   rateHistory={rateData}
+                  stale={signalStale}
                 />
                 <RealTimeCharts data={data} rateData={rateData} events={events} theme={theme} />
               </div>
