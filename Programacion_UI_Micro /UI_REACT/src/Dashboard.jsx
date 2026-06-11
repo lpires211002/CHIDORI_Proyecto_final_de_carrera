@@ -6,6 +6,7 @@ import {
 
 import SettingsPanel     from './components/SettingsPanel';
 import MobileMenu, { MobileMenuItem, MobileMenuSection } from './components/MobileMenu';
+import HeaderMenu        from './components/HeaderMenu';
 import StatsGrid         from './components/StatsGrid';
 import RealTimeCharts    from './components/RealTimeCharts';
 import Timeline          from './components/Timeline';
@@ -22,9 +23,43 @@ import useCloudSync      from './components/useCloudSync';
 
 import { supabase, emailToUsername } from './supabaseClient';
 
+/* ─────────────────────────────────────────────────────────────────────
+ * CONGRUENCIA CON EL FIRMWARE · Chidori_ESP32C3_WiFiManager
+ *
+ * Protocolo real del firmware (verificado contra el .ino):
+ *   · TX numérico  · cadena "%.5f" (Z en Ω) cada ~250 ms (4 Hz), solo
+ *     tras un warmup de 5 muestras y con al menos un cliente WS.
+ *   · TX texto     · "PONG" (respuesta a PING) y
+ *                    "STATUS estado=<MIDIENDO|INACTIVO> rssi=<int> heap=<uint> Z=<float>"
+ *   · RX comandos  · START (ignorado si ya MIDIENDO), STOP, RESET, PING, STATUS
+ *   · El BOTÓN FÍSICO (GPIO20) también arranca/para → el dispositivo puede
+ *     cambiar de estado sin que la UI lo ordene. Por eso reconciliamos vía
+ *     STATUS en cada conexión + polling.
+ *
+ * La Z ya viene fuertemente filtrada en el firmware (promedio de 128
+ * muestras ADC + media móvil de 10). Acá agregamos una segunda línea de
+ * defensa: límites de plausibilidad + rechazo de spikes con histéresis,
+ * para que un glitch eléctrico o un frame corrupto no contamine la curva,
+ * el basal ni la alarma.
+ * ───────────────────────────────────────────────────────────────────── */
+const BASELINE_WINDOW   = 5;       // mediana de las primeras N como basal
+const Z_PLAUSIBLE_MIN   = 1;       // Ω · por debajo = desconexión/glitch
+const Z_PLAUSIBLE_MAX   = 100000;  // Ω · por encima = saturación/ruido
+const SPIKE_REL         = 0.30;    // salto >30% en un tick = sospechoso
+const SPIKE_MIN_ABS     = 15;      // …pero tolerá al menos 15 Ω de cambio
+const MAX_CONSEC_REJECT = 3;       // tras N rechazos seguidos, aceptá (resync)
+const STATUS_POLL_MS    = 5000;    // consulta de estado/diagnóstico al firmware
+const USER_ACTION_GRACE = 2000;    // ventana anti-race tras una acción del usuario
+
 /**
  * Dashboard · vista principal del clínico autenticado.
  * El gate de auth está en App.jsx; acá ya sabemos que hay session y profile.
+ *
+ * ARQUITECTURA (rediseño v3):
+ *   header     · mínimo · marca + estado + usuario + menú ⋯ (acciones 2as)
+ *   command    · barra sticky · control primario + cronómetro + acciones
+ *   monitor    · grid · [readout + señal en vivo] | [vejiga hero + alarma]
+ *   setup      · tabs · Configuración (calibración + alarma) / Eventos
  */
 export default function Dashboard({ session, profile, onSignOut, isAdmin = false, onSwitchToAdmin }) {
   const userId      = session.user.id;
@@ -43,8 +78,15 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return saved ? JSON.parse(saved) : { protocol: 'ws://', host: 'chidori.local', port: '81' };
   });
   const [wsStatus, setWsStatus] = useState('DISCONNECTED');
+  // Diagnóstico reportado por el firmware vía STATUS (estado real del equipo,
+  // RSSI del enlace, heap libre). null = todavía no informado.
+  const [device, setDevice] = useState({ state: null, rssi: null, heap: null, at: null });
   const socketRef = useRef(null);
   const reconnectIntervalRef = useRef(null);
+  const statusPollRef        = useRef(null);   // intervalo de consulta STATUS
+  const lastUserActionRef    = useRef(0);      // timestamp última acción del clínico
+  const lastAcceptedZRef     = useRef(null);   // último Z aceptado (guard de spikes)
+  const consecRejectRef      = useRef(0);      // rechazos consecutivos del guard
 
   /* ── Cloud sync (Supabase) ────────────────────────────────────────────
    * NUEVO MODELO · "commit explícito":
@@ -94,13 +136,14 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [confirmReset, setConfirmReset]     = useState(false);
+  const [setupTab, setSetupTab]             = useState('config'); // 'config' | 'events'
   const [toasts, setToasts]                 = useState([]);
 
   /* ── Refs ──────────────────────────────────────────────────────────── */
   const stateRef = useRef({});
   useEffect(() => {
     stateRef.current = {
-      measuring, startTime, pausedDuration, data, initialValue, currentValue,
+      measuring, startTime, pausedDuration, pauseStart, data, initialValue, currentValue,
       alarmEnabled, alarmType, alarmAbs, alarmPercent, alarmDiff, alarmFired, alarmArmed,
       persistedSessionId, eventCount, cloud,
     };
@@ -129,18 +172,30 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           clearInterval(reconnectIntervalRef.current);
           reconnectIntervalRef.current = null;
         }
+        // Consultar el estado real del equipo al instante y luego en intervalos.
+        // Esto reconcilia el botón físico y trae RSSI/heap para diagnóstico.
+        try { ws.send('STATUS'); } catch { /* socket cerrándose */ }
+        if (statusPollRef.current) clearInterval(statusPollRef.current);
+        statusPollRef.current = setInterval(() => {
+          const sock = socketRef.current;
+          if (sock && sock.readyState === WebSocket.OPEN) {
+            try { sock.send('STATUS'); } catch { /* noop */ }
+          }
+        }, STATUS_POLL_MS);
       };
       ws.onclose = () => {
         setWsStatus('DISCONNECTED');
+        setDevice((d) => ({ ...d, state: null }));   // estado del equipo desconocido
+        if (statusPollRef.current) {
+          clearInterval(statusPollRef.current);
+          statusPollRef.current = null;
+        }
         if (!reconnectIntervalRef.current && !isSimulator) {
           reconnectIntervalRef.current = setInterval(() => connectWebSocket(), 5000);
         }
       };
       ws.onerror = () => setWsStatus('DISCONNECTED');
-      ws.onmessage = (event) => {
-        const val = parseFloat(event.data);
-        if (!isNaN(val)) handleIncomingData(val);
-      };
+      ws.onmessage = (event) => handleSocketMessage(event.data);
     } catch {
       setWsStatus('DISCONNECTED');
     }
@@ -152,6 +207,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return () => {
       if (socketRef.current) socketRef.current.close();
       if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+      if (statusPollRef.current) clearInterval(statusPollRef.current);
     };
   }, [wsConfig, isSimulator, connectWebSocket]);
 
@@ -180,12 +236,42 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
    * BASELINE_WINDOW lecturas para que outliers no contaminen la referencia.
    * Esto es defensa secundaria: el firmware ya hace su propio warmup gate.
    */
-  const BASELINE_WINDOW = 5;
   const baselineSamplesRef = useRef([]);
 
-  const handleIncomingData = (val) => {
+  /**
+   * sanitizeZ · segunda línea de defensa sobre la lectura cruda.
+   *   1. Descarta no-finitos (NaN, ±Infinity).
+   *   2. Descarta fuera de rango plausible (desconexión, saturación).
+   *   3. Rechaza spikes: un salto > max(SPIKE_MIN_ABS, |last|·SPIKE_REL)
+   *      respecto al último valor aceptado se considera glitch. Con
+   *      histéresis: tras MAX_CONSEC_REJECT rechazos seguidos asume que
+   *      el cambio es real (p. ej. la vejiga se vació) y resincroniza.
+   * Devuelve el valor limpio o null si hay que ignorarlo.
+   */
+  const sanitizeZ = (raw) => {
+    const v = Number(raw);
+    if (!Number.isFinite(v)) return null;
+    if (v < Z_PLAUSIBLE_MIN || v > Z_PLAUSIBLE_MAX) return null;
+
+    const last = lastAcceptedZRef.current;
+    if (last != null) {
+      const maxStep = Math.max(SPIKE_MIN_ABS, Math.abs(last) * SPIKE_REL);
+      if (Math.abs(v - last) > maxStep && consecRejectRef.current < MAX_CONSEC_REJECT) {
+        consecRejectRef.current += 1;
+        return null;
+      }
+    }
+    consecRejectRef.current = 0;
+    lastAcceptedZRef.current = v;
+    return v;
+  };
+
+  const handleIncomingData = (raw) => {
     const cur = stateRef.current;
     if (!cur.measuring) return;
+
+    const val = sanitizeZ(raw);
+    if (val === null) return;
 
     let baseline = cur.initialValue;
     if (baseline === null) {
@@ -250,6 +336,65 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     }
   };
 
+  /* ── Router de mensajes WS ──────────────────────────────────────────
+   * El firmware mezcla en el mismo socket datos numéricos (Z) y mensajes
+   * de texto (STATUS, PONG). Clasificamos explícitamente en vez de confiar
+   * en que parseFloat devuelva NaN para el texto. */
+  /**
+   * reconcileMeasuring · alinea el estado de la UI con el del firmware.
+   * Cubre el caso del botón físico y el de refrescar la página a mitad de
+   * una medición. Una ventana de gracia evita pisar una acción que el
+   * clínico acaba de hacer (race entre el comando y el siguiente STATUS).
+   */
+  const reconcileMeasuring = (estado) => {
+    if (isSimulator || !estado) return;
+    if (Date.now() - lastUserActionRef.current < USER_ACTION_GRACE) return;
+    const cur = stateRef.current;
+
+    if (estado === 'MIDIENDO' && !cur.measuring) {
+      // El equipo ya estaba midiendo (botón físico o refresh de la página).
+      lastAcceptedZRef.current = null;
+      consecRejectRef.current  = 0;
+      baselineSamplesRef.current = [];
+      if (!cur.startTime) setStartTime(Date.now());
+      if (cur.pauseStart) { setPausedDur((d) => d + (Date.now() - cur.pauseStart)); setPauseStart(null); }
+      setMeasuring(true);
+      toast('Sincronizado · el dispositivo ya estaba midiendo', 'info');
+    } else if (estado === 'INACTIVO' && cur.measuring) {
+      // El equipo se detuvo por su cuenta (botón físico).
+      setMeasuring(false);
+      setPauseStart(Date.now());
+      toast('El dispositivo detuvo la medición', 'warn');
+    }
+  };
+
+  const applyDeviceStatus = (s) => {
+    const field = (k) => {
+      const m = s.match(new RegExp(`${k}=([^\\s]+)`));
+      return m ? m[1] : null;
+    };
+    const estado = field('estado');
+    const rssi   = field('rssi') != null ? parseInt(field('rssi'), 10) : null;
+    const heap   = field('heap') != null ? parseInt(field('heap'), 10) : null;
+    setDevice({
+      state: estado,
+      rssi:  Number.isFinite(rssi) ? rssi : null,
+      heap:  Number.isFinite(heap) ? heap : null,
+      at:    Date.now(),
+    });
+    reconcileMeasuring(estado);
+  };
+
+  const handleSocketMessage = (rawData) => {
+    if (typeof rawData !== 'string') return;
+    const s = rawData.trim();
+    if (s === '' || s === 'PONG') return;          // liveness · sin efecto
+    if (s.startsWith('STATUS')) { applyDeviceStatus(s); return; }
+    const v = Number(s);                            // estricto: "1.2.3" → NaN
+    if (Number.isFinite(v)) handleIncomingData(v);
+    // cualquier otro texto desconocido se ignora (forward-compat)
+  };
+
   /* ── Shortcuts ─────────────────────────────────────────────────────── */
   useEffect(() => {
     const onKey = (e) => {
@@ -296,29 +441,49 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   };
 
   /* ── Controls ──────────────────────────────────────────────────────── */
+  // Envío seguro de comando WS · evita throw si el socket no está abierto.
+  const sendCommand = (cmd) => {
+    const sock = socketRef.current;
+    if (!isSimulator && sock && sock.readyState === WebSocket.OPEN) {
+      try { sock.send(cmd); return true; } catch { /* noop */ }
+    }
+    return false;
+  };
+
   const toggleMeasuring = async () => {
     if (wsStatus !== 'CONNECTED' && !isSimulator) {
       toast('Sin conexión. Active el simulador o configure el dispositivo.', 'warn');
       return;
     }
 
+    // Marca la acción para que el reconciliador no la pise con un STATUS en vuelo.
+    lastUserActionRef.current = Date.now();
+
     if (!measuring) {
       let sTime = startTime;
       let pDur = pausedDuration;
-      if (!sTime) { sTime = Date.now(); setStartTime(sTime); }
+      if (!sTime) {
+        // Sesión nueva: reseteamos el guard de spikes para que el primer
+        // valor fije la referencia sin falsos rechazos.
+        sTime = Date.now();
+        setStartTime(sTime);
+        lastAcceptedZRef.current = null;
+        consecRejectRef.current  = 0;
+        baselineSamplesRef.current = [];
+      }
       if (pauseStart) { pDur += Date.now() - pauseStart; setPausedDur(pDur); setPauseStart(null); }
 
       // NO se crea sesión en la nube acá. La creación es explícita y
       // sucede solo cuando el clínico confirma desde el ExportModal.
 
-      if (!isSimulator && socketRef.current) socketRef.current.send('START');
+      sendCommand('START');
       setMeasuring(true);
 
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission().catch(() => {});
       }
     } else {
-      if (!isSimulator && socketRef.current) socketRef.current.send('STOP');
+      sendCommand('STOP');
       setMeasuring(false);
       setPauseStart(Date.now());
     }
@@ -337,9 +502,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   };
 
   const handleReset = () => {
-    if (socketRef.current && wsStatus === 'CONNECTED' && !isSimulator) {
-      socketRef.current.send('RESET');
-    }
+    lastUserActionRef.current = Date.now();
+    sendCommand('RESET');
     setMeasuring(false);
     setStartTime(null);
     setPausedDur(0);
@@ -350,6 +514,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setEvents([]);
     setInitialValue(null);
     baselineSamplesRef.current = [];
+    lastAcceptedZRef.current   = null;
+    consecRejectRef.current    = 0;
     setCurrentValue(null);
     setRate(0);
     setEventCount(0);
@@ -484,6 +650,57 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return cloud.state;
   }, [cloud.state, data.length, persistedSessionId]);
 
+  // Estado resumido de la alarma para el panel lateral
+  const alarmStatus = !alarmEnabled
+    ? { label: 'Desactivada', cls: 'pill-off', tag: 'Off' }
+    : alarmFired
+      ? { label: 'Disparada', cls: 'pill-alarm', tag: 'Activa' }
+      : alarmArmed
+        ? { label: 'Armada', cls: 'pill-amber', tag: 'Preventiva' }
+        : { label: 'En espera', cls: 'pill-off', tag: 'Rearmando' };
+
+  // Calidad de enlace derivada del RSSI reportado por el firmware.
+  const linkQuality = device.rssi == null ? null
+    : device.rssi >= -60 ? 'señal fuerte'
+    : device.rssi >= -70 ? 'señal buena'
+    : device.rssi >= -80 ? 'señal débil'
+    : 'señal muy débil';
+
+  const connectionTitle = isSimulator
+    ? 'Simulador activo · sin hardware'
+    : wsStatus === 'CONNECTED'
+      ? (device.rssi != null ? `Enlace ${device.rssi} dBm · ${linkQuality}` : 'Enlace activo')
+      : wsStatus === 'CONNECTING'
+        ? 'Reintentando conexión…'
+        : 'Sin enlace al microcontrolador';
+
+  // Acciones secundarias · viven en el menú ⋯ (desktop) y en el MobileMenu.
+  const overflowItems = [
+    ...(isAdmin && onSwitchToAdmin
+      ? [{ icon: Shield, label: 'Panel de administración', hint: 'Volver a la vista admin', onClick: onSwitchToAdmin }, { divider: true }]
+      : []),
+    {
+      icon: Cpu,
+      label: isSimulator ? 'Desactivar simulador' : 'Activar simulador',
+      hint: 'Curva fisiológica sintética',
+      onClick: toggleSimulator,
+    },
+    {
+      icon: SettingsIcon,
+      label: 'Configuración',
+      hint: 'Microcontrolador y red',
+      onClick: () => setIsSettingsOpen(true),
+    },
+    {
+      icon: theme === 'dark' ? Sun : Moon,
+      label: `Tema ${theme === 'dark' ? 'claro' : 'oscuro'}`,
+      hint: theme === 'dark' ? 'Más legible con luz ambiente' : 'Más cómodo en quirófano',
+      onClick: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
+    },
+    { divider: true },
+    { icon: LogOut, label: 'Cerrar sesión', danger: true, onClick: onSignOut },
+  ];
+
   return (
     <div className="app-shell">
       <AlarmBanner
@@ -502,24 +719,15 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         </div>
 
         <div className="app-actions">
-          {isAdmin && onSwitchToAdmin && (
-            <button
-              type="button"
-              className="button button-sm"
-              onClick={onSwitchToAdmin}
-              title="Volver al panel de administración"
-            >
-              <Shield size={14} />
-              Panel admin
-            </button>
-          )}
-
-          <span className={`pill keep-mobile ${
-            isSimulator ? 'pill-syncing'
-            : wsStatus === 'CONNECTED' ? 'pill-live'
-            : wsStatus === 'CONNECTING' ? 'pill-syncing'
-            : 'pill-alarm'
-          }`}>
+          <span
+            className={`pill keep-mobile ${
+              isSimulator ? 'pill-syncing'
+              : wsStatus === 'CONNECTED' ? 'pill-live'
+              : wsStatus === 'CONNECTING' ? 'pill-syncing'
+              : 'pill-alarm'
+            }`}
+            title={connectionTitle}
+          >
             <span className="pill-dot" />
             {isSimulator ? 'Simulador'
               : wsStatus === 'CONNECTED' ? (measuring ? 'Grabando' : 'En línea')
@@ -540,26 +748,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             {displayName}
           </span>
 
-          <button type="button" className="icon-button" onClick={toggleSimulator} title="Alternar simulador">
-            <Cpu size={15} />
-          </button>
-
-          <button type="button" className="icon-button" onClick={() => setIsSettingsOpen(true)} title="Configuración">
-            <SettingsIcon size={15} />
-          </button>
-
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-            title="Cambiar tema"
-          >
-            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
-
-          <button type="button" className="icon-button" onClick={onSignOut} title="Cerrar sesión">
-            <LogOut size={15} />
-          </button>
+          {/* Menú ⋯ · acciones secundarias · solo desktop (CSS oculta en mobile) */}
+          <HeaderMenu items={overflowItems} />
 
           {/* Hamburguesa · solo visible en mobile (CSS controla) */}
           <button
@@ -581,34 +771,35 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           onReconnect={connectWebSocket}
         />
 
-        <section className="surface" style={{ padding: '16px 22px' }}>
-          <div className="row-between" style={{ gap: 16, flexWrap: 'wrap' }}>
-            <div>
-              <span className="section-label">Control</span>
-              <h3 style={{ fontSize: 'var(--t-lg)', marginTop: 2 }}>Adquisición de bioimpedancia</h3>
+        {/* ── Barra de comando · control primario + cronómetro + acciones ── */}
+        <section className="command-bar">
+          <div className="command-primary">
+            <button
+              type="button"
+              className={`button button-lg ${measuring ? '' : 'button-primary'}`}
+              onClick={toggleMeasuring}
+            >
+              {measuring ? <Pause size={16} /> : <Play size={16} />}
+              {primaryButtonLabel}
+            </button>
+            <div className="command-clock">
+              <span className="section-label">Sesión</span>
+              <span className="command-clock-value numeric">{elapsedTime || '00:00'}</span>
             </div>
-            <div className="row" style={{ gap: 10 }}>
-              <button
-                type="button"
-                className={`button button-lg ${measuring ? '' : 'button-primary'}`}
-                onClick={toggleMeasuring}
-              >
-                {measuring ? <Pause size={16} /> : <Play size={16} />}
-                {primaryButtonLabel}
-              </button>
-              <button type="button" className="button" onClick={handleMarkEvent} disabled={!measuring} title="Marcar evento (E)">
-                <Bookmark size={15} />
-                Marcar
-              </button>
-              <button type="button" className="button button-ghost" onClick={() => setConfirmReset(true)} disabled={!startTime && data.length === 0}>
-                <RotateCcw size={14} />
-                Reiniciar
-              </button>
-              <button type="button" className="button button-ghost" onClick={() => setIsExportOpen(true)}>
-                <Download size={14} />
-                Exportar
-              </button>
-            </div>
+          </div>
+          <div className="command-actions">
+            <button type="button" className="button" onClick={handleMarkEvent} disabled={!measuring} title="Marcar evento (E)">
+              <Bookmark size={15} />
+              Marcar
+            </button>
+            <button type="button" className="button button-ghost" onClick={() => setConfirmReset(true)} disabled={!startTime && data.length === 0}>
+              <RotateCcw size={14} />
+              Reiniciar
+            </button>
+            <button type="button" className="button button-ghost" onClick={() => setIsExportOpen(true)}>
+              <Download size={14} />
+              Exportar
+            </button>
           </div>
         </section>
 
@@ -621,110 +812,174 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           />
         ) : (
           <>
-            <StatsGrid
-              initialValue={initialValue}
-              currentValue={currentValue}
-              elapsedTime={elapsedTime}
-              eventCount={eventCount}
-              rate={rate}
-              zHistory={data}
-              rateHistory={rateData}
-            />
-
-            <RealTimeCharts data={data} rateData={rateData} events={events} theme={theme} />
-
-            <div className="split">
-              <BladderVisual
-                initialValue={initialValue}
-                currentValue={currentValue}
-                alarmThreshold={thresholdPreview}
-              />
-              <div className="stack-md">
-                <Timeline events={events} />
-                <CalibrationWizard
+            {/* ── Grid de monitoreo · señal (izq) + vejiga hero (der) ── */}
+            <div className="monitor-grid">
+              <div className="monitor-main">
+                <StatsGrid
+                  initialValue={initialValue}
                   currentValue={currentValue}
-                  onSaveCalibration={handleSaveCalibration}
-                  onShowAlert={toast}
+                  rate={rate}
+                  zHistory={data}
+                  rateHistory={rateData}
                 />
+                <RealTimeCharts data={data} rateData={rateData} events={events} theme={theme} />
+              </div>
+
+              <div className="monitor-side">
+                <BladderVisual
+                  initialValue={initialValue}
+                  currentValue={currentValue}
+                  alarmThreshold={thresholdPreview}
+                />
+
+                {/* Resumen de alarma · vivo, siempre a la vista */}
+                <section className="surface surface-pad alarm-mini" aria-label="Estado de la alarma">
+                  <div className="row-between" style={{ alignItems: 'flex-start' }}>
+                    <div>
+                      <span className="section-label">Alarma preventiva</span>
+                      <h3 style={{ fontSize: 'var(--t-lg)', marginTop: 2 }}>{alarmStatus.label}</h3>
+                    </div>
+                    <span className={`pill ${alarmStatus.cls}`}>
+                      <span className="pill-dot" />
+                      {alarmStatus.tag}
+                    </span>
+                  </div>
+
+                  {alarmEnabled && initialValue !== null ? (
+                    <div className="alarm-mini-grid">
+                      <div>
+                        <span className="field-label">Umbral</span>
+                        <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
+                      </div>
+                      <div>
+                        <span className="field-label">Margen</span>
+                        <strong className="numeric">
+                          {currentValue != null ? `${(currentValue - thresholdPreview).toFixed(2)} Ω` : '—'}
+                        </strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="field-hint" style={{ marginTop: 4 }}>
+                      Configure el umbral en la pestaña <strong>Configuración</strong> para activar
+                      el aviso preventivo durante la sesión.
+                    </span>
+                  )}
+                </section>
               </div>
             </div>
 
-            <section className="surface surface-pad">
-              <header className="section-head" style={{ marginBottom: 18 }}>
-                <div>
-                  <h2>Umbral de alarma</h2>
-                  <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-                    Condición que dispara el aviso preventivo durante la sesión
-                  </span>
-                </div>
-                <label className="switch" title="Activar / desactivar alarma">
-                  <input type="checkbox" checked={alarmEnabled} onChange={(e) => setAlarmEnabled(e.target.checked)} />
-                  <span className="switch-track" />
-                </label>
-              </header>
-
-              <div className="stack-md">
-                <div className="segment" role="radiogroup" aria-label="Tipo de umbral">
-                  {[
-                    { v: 'abs',     label: 'Valor absoluto' },
-                    { v: 'percent', label: '% del basal' },
-                    { v: 'diff',    label: 'Δ respecto al basal' },
-                  ].map(({ v, label }) => (
-                    <button
-                      key={v}
-                      type="button"
-                      className={`segment-item ${alarmType === v ? 'active' : ''}`}
-                      onClick={() => setAlarmType(v)}
-                      disabled={!alarmEnabled}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {alarmType === 'abs' && (
-                  <div className="field">
-                    <label className="field-label" htmlFor="th-abs">Impedancia mínima permitida</label>
-                    <input id="th-abs" className="input" type="number" placeholder="120.5"
-                      value={alarmAbs} onChange={(e) => setAlarmAbs(e.target.value)} disabled={!alarmEnabled} />
-                    <span className="field-hint">La alarma dispara cuando Z desciende por debajo de este valor en ohmios.</span>
-                  </div>
-                )}
-
-                {alarmType === 'percent' && (
-                  <div className="field">
-                    <label className="field-label" htmlFor="th-pct">% del valor basal</label>
-                    <input id="th-pct" className="input" type="number" min="0" max="100" placeholder="85"
-                      value={alarmPercent} onChange={(e) => setAlarmPercent(e.target.value)} disabled={!alarmEnabled} />
-                    <span className="field-hint">
-                      La alarma dispara cuando Z desciende a este porcentaje del valor basal
-                      registrado al iniciar la sesión.
-                    </span>
-                  </div>
-                )}
-
-                {alarmType === 'diff' && (
-                  <div className="field">
-                    <label className="field-label" htmlFor="th-diff">Caída en ohmios</label>
-                    <input id="th-diff" className="input" type="number" placeholder="35"
-                      value={alarmDiff} onChange={(e) => setAlarmDiff(e.target.value)} disabled={!alarmEnabled} />
-                    <span className="field-hint">La alarma dispara cuando Z desciende esta cantidad respecto al basal.</span>
-                  </div>
-                )}
-
-                {alarmEnabled && initialValue !== null && (
-                  <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                    <span>Basal</span>
-                    <span>Umbral calculado</span>
-                    <span>Margen restante</span>
-                    <strong className="numeric">{initialValue.toFixed(2)} Ω</strong>
-                    <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
-                    <strong className="numeric">
-                      {currentValue != null ? `${(currentValue - thresholdPreview).toFixed(2)} Ω` : '—'}
-                    </strong>
-                  </div>
-                )}
+            {/* ── Zona de setup · tabs Configuración / Eventos ── */}
+            <section className="setup-section">
+              <div className="setup-tabbar" role="tablist" aria-label="Configuración y eventos">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={setupTab === 'config'}
+                  className={`setup-tab ${setupTab === 'config' ? 'active' : ''}`}
+                  onClick={() => setSetupTab('config')}
+                >
+                  Configuración de sesión
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={setupTab === 'events'}
+                  className={`setup-tab ${setupTab === 'events' ? 'active' : ''}`}
+                  onClick={() => setSetupTab('events')}
+                >
+                  Eventos · {String(eventCount).padStart(2, '0')}
+                </button>
               </div>
+
+              {setupTab === 'config' ? (
+                <div className="setup-grid">
+                  <CalibrationWizard
+                    currentValue={currentValue}
+                    onSaveCalibration={handleSaveCalibration}
+                    onShowAlert={toast}
+                  />
+
+                  <section className="surface surface-pad">
+                    <header className="section-head" style={{ marginBottom: 18 }}>
+                      <div>
+                        <h2>Umbral de alarma</h2>
+                        <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
+                          Condición que dispara el aviso preventivo durante la sesión
+                        </span>
+                      </div>
+                      <label className="switch" title="Activar / desactivar alarma">
+                        <input type="checkbox" checked={alarmEnabled} onChange={(e) => setAlarmEnabled(e.target.checked)} />
+                        <span className="switch-track" />
+                      </label>
+                    </header>
+
+                    <div className="stack-md">
+                      <div className="segment" role="radiogroup" aria-label="Tipo de umbral">
+                        {[
+                          { v: 'abs',     label: 'Valor absoluto' },
+                          { v: 'percent', label: '% del basal' },
+                          { v: 'diff',    label: 'Δ respecto al basal' },
+                        ].map(({ v, label }) => (
+                          <button
+                            key={v}
+                            type="button"
+                            className={`segment-item ${alarmType === v ? 'active' : ''}`}
+                            onClick={() => setAlarmType(v)}
+                            disabled={!alarmEnabled}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {alarmType === 'abs' && (
+                        <div className="field">
+                          <label className="field-label" htmlFor="th-abs">Impedancia mínima permitida</label>
+                          <input id="th-abs" className="input" type="number" placeholder="120.5"
+                            value={alarmAbs} onChange={(e) => setAlarmAbs(e.target.value)} disabled={!alarmEnabled} />
+                          <span className="field-hint">La alarma dispara cuando Z desciende por debajo de este valor en ohmios.</span>
+                        </div>
+                      )}
+
+                      {alarmType === 'percent' && (
+                        <div className="field">
+                          <label className="field-label" htmlFor="th-pct">% del valor basal</label>
+                          <input id="th-pct" className="input" type="number" min="0" max="100" placeholder="85"
+                            value={alarmPercent} onChange={(e) => setAlarmPercent(e.target.value)} disabled={!alarmEnabled} />
+                          <span className="field-hint">
+                            La alarma dispara cuando Z desciende a este porcentaje del valor basal
+                            registrado al iniciar la sesión.
+                          </span>
+                        </div>
+                      )}
+
+                      {alarmType === 'diff' && (
+                        <div className="field">
+                          <label className="field-label" htmlFor="th-diff">Caída en ohmios</label>
+                          <input id="th-diff" className="input" type="number" placeholder="35"
+                            value={alarmDiff} onChange={(e) => setAlarmDiff(e.target.value)} disabled={!alarmEnabled} />
+                          <span className="field-hint">La alarma dispara cuando Z desciende esta cantidad respecto al basal.</span>
+                        </div>
+                      )}
+
+                      {alarmEnabled && initialValue !== null && (
+                        <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                          <span>Basal</span>
+                          <span>Umbral calculado</span>
+                          <span>Margen restante</span>
+                          <strong className="numeric">{initialValue.toFixed(2)} Ω</strong>
+                          <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
+                          <strong className="numeric">
+                            {currentValue != null ? `${(currentValue - thresholdPreview).toFixed(2)} Ω` : '—'}
+                          </strong>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              ) : (
+                <Timeline events={events} />
+              )}
             </section>
           </>
         )}
@@ -799,6 +1054,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         onSaveConfig={handleSaveConfig}
         wsStatus={wsStatus}
         onReconnect={connectWebSocket}
+        device={device}
+        linkQuality={linkQuality}
       />
 
       <ExportModal

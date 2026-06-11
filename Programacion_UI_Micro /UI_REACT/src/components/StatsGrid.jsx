@@ -5,22 +5,17 @@ import Sparkline from './Sparkline';
 const SPARK_WINDOW = 40;
 
 /**
- * Readout strip · hierarchical, hero + 3 satellites.
+ * Readout strip · jerárquico, hero + 2 satélites.
  *
- *   [ HERO · Z actual + sparkline ]  [ Z basal ]  [ Tasa + sparkline ]  [ Sesión ]
+ *   [ HERO · Z actual + sparkline ]  [ Z basal ]  [ Tasa + sparkline ]
  *
- * Cada valor numérico usa NumberTicker con spring physics. Los dígitos
- * cambian con un roll suave + blur durante el "stretch" para mascarar
- * el cross-fade entre números (truco de Emil Kowalski).
- *
- * Sparklines: reusan el buffer de RealTimeCharts (props zHistory/rateHistory)
- * y cortan a las últimas SPARK_WINDOW muestras — sin estado propio.
+ * El cronómetro de sesión y el contador de eventos ya no viven acá: pasaron
+ * a la barra de comando (timer) y al tab de eventos. Esto deja al readout
+ * enfocado en las tres magnitudes que el clínico mira en vivo.
  */
 export default function StatsGrid({
   initialValue,
   currentValue,
-  elapsedTime,
-  eventCount,
   rate,
   zHistory,
   rateHistory,
@@ -42,7 +37,7 @@ export default function StatsGrid({
   const rateStateClass = rate == null || rate === 0 ? '' : rate < 0 ? 'neg-state' : 'pos-state';
 
   return (
-    <div className="readout" role="group" aria-label="Lectura en vivo">
+    <div className="readout readout-3" role="group" aria-label="Lectura en vivo">
       {/* HERO · current impedance */}
       <div className="readout-cell hero">
         <span className="readout-label">Impedancia actual</span>
@@ -63,7 +58,7 @@ export default function StatsGrid({
           </span>
         )}
         <div className="readout-spark">
-          <Sparkline data={zSpark} width={220} height={36} state={diff < 0 ? 'neg' : diff > 0 ? 'pos' : null} />
+          <Sparkline data={zSpark} width={260} height={38} state={diff < 0 ? 'neg' : diff > 0 ? 'pos' : null} />
         </div>
       </div>
 
@@ -86,24 +81,8 @@ export default function StatsGrid({
         </span>
         <span className="readout-delta mute">Δ por minuto</span>
         <div className="readout-spark">
-          <Sparkline data={rateSpark} width={140} height={28} state={rate < 0 ? 'neg' : rate > 0 ? 'pos' : null} />
+          <Sparkline data={rateSpark} width={160} height={30} state={rate < 0 ? 'neg' : rate > 0 ? 'pos' : null} />
         </div>
-      </div>
-
-      {/* Time + events · ticker sobre el contador */}
-      <div className="readout-cell">
-        <span className="readout-label">Sesión</span>
-        <span className="readout-value numeric">{elapsedTime || '00:00'}</span>
-        <span className="readout-delta mute">
-          <NumberTicker
-            value={eventCount}
-            decimals={0}
-            stiffness={260}
-            damping={28}
-            formatter={(n) => `${Math.round(n)}`}
-          />
-          {' '}{eventCount === 1 ? 'evento' : 'eventos'}
-        </span>
       </div>
     </div>
   );

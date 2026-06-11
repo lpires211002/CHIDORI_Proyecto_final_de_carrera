@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import {
-  Shield, LogOut, X, UserCheck, UserX, RefreshCw, Search, ChevronRight,
+  Shield, ShieldOff, LogOut, X, UserCheck, UserX, RefreshCw, Search, ChevronRight,
   Activity, Pencil, Trash2, Download, FileText, Table, FileType2, Save, Menu,
 } from 'lucide-react';
 import { supabase, emailToUsername } from '../supabaseClient';
@@ -11,6 +11,11 @@ import MobileMenu, { MobileMenuItem, MobileMenuSection } from '../components/Mob
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
 
 const sessionLayoutId = (id) => `session-card-${id}`;
+
+/* Roles · el frontend solo distingue 'superadmin' (panel completo) del resto.
+ * Al quitar admin se vuelve a 'clinician' (rol por defecto del trigger de signup). */
+const ROLE_ADMIN     = 'superadmin';
+const ROLE_CLINICIAN = 'clinician';
 
 /**
  * AdminView · vista del superadmin.
@@ -27,6 +32,8 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
   const [selectedSession, setSelectedSession] = useState(null);
   const [filter, setFilter] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Cambio de rol pendiente de confirmación: { account, nextRole } | null
+  const [roleChange, setRoleChange] = useState(null);
 
   const loadAccounts = useCallback(async () => {
     setBusy(true); setError(null);
@@ -97,6 +104,38 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
       setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, is_approved: value } : a)));
     } catch (e) {
       setError(e.message || 'No se pudo actualizar la cuenta.');
+    }
+  };
+
+  /**
+   * setRole · promueve o degrada una cuenta.
+   * Guardas:
+   *   - Un admin no puede quitarse su propio rol (evita lock-out accidental;
+   *     siempre queda al menos quien está operando el panel).
+   *   - El cambio pasa por un ConfirmModal con hold (ver roleChange).
+   */
+  const setRole = async (id, role) => {
+    if (id === profile?.id && role !== ROLE_ADMIN) {
+      setError('No podés quitarte tu propio rol de administrador.');
+      return;
+    }
+    try {
+      const { data, error: err } = await supabase
+        .from('profiles')
+        .update({ role })
+        .eq('id', id)
+        .select('id, role');
+      if (err) throw err;
+      // RLS puede "aceptar" el update sin tocar filas (0 rows): verificamos.
+      if (!data || data.length === 0 || data[0].role !== role) {
+        throw new Error(
+          'La base de datos rechazó el cambio de rol (política RLS). ' +
+          'Revisá que la policy de UPDATE sobre profiles permita modificar role a los admins.'
+        );
+      }
+      setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, role } : a)));
+    } catch (e) {
+      setError(e.message || 'No se pudo cambiar el rol.');
     }
   };
 
@@ -260,12 +299,47 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
           <AccountsPanel
             accounts={accounts}
             busy={busy}
+            selfId={profile?.id}
             onReload={loadAccounts}
             onApprove={(id) => setApproval(id, true)}
             onRevoke={(id) => setApproval(id, false)}
+            onRequestRoleChange={(account, nextRole) => setRoleChange({ account, nextRole })}
           />
         )}
       </main>
+
+      <ConfirmModal
+        open={Boolean(roleChange)}
+        title={roleChange?.nextRole === ROLE_ADMIN ? 'Dar acceso de administrador' : 'Quitar acceso de administrador'}
+        body={roleChange && (
+          <>
+            <p style={{ marginBottom: 10 }}>
+              {roleChange.nextRole === ROLE_ADMIN ? (
+                <>
+                  <strong>{roleChange.account.display_name || emailToUsername(roleChange.account.email)}</strong>{' '}
+                  pasará a ser administrador: tendrá acceso global a todas las sesiones,
+                  podrá aprobar cuentas y otorgar o quitar este mismo rol.
+                </>
+              ) : (
+                <>
+                  <strong>{roleChange.account.display_name || emailToUsername(roleChange.account.email)}</strong>{' '}
+                  dejará de ser administrador y volverá a operar como clínico
+                  (solo sus propias sesiones).
+                </>
+              )}
+            </p>
+            <p>Mantenga presionado el botón para confirmar.</p>
+          </>
+        )}
+        actionLabel={roleChange?.nextRole === ROLE_ADMIN ? 'Mantener para promover' : 'Mantener para quitar'}
+        onCancel={() => setRoleChange(null)}
+        onConfirm={async () => {
+          const rc = roleChange;
+          setRoleChange(null);
+          if (rc) await setRole(rc.account.id, rc.nextRole);
+        }}
+        holdMs={1200}
+      />
 
       <footer className="app-footer">
         <span>Modo administrador · acceso global a sesiones y cuentas</span>
@@ -278,9 +352,10 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
 
 /* ──────────────────────────────────────────────────────────────────── */
 
-function AccountsPanel({ accounts, busy, onReload, onApprove, onRevoke }) {
+function AccountsPanel({ accounts, busy, selfId, onReload, onApprove, onRevoke, onRequestRoleChange }) {
   const pending  = accounts.filter((a) => !a.is_approved);
   const approved = accounts.filter((a) => a.is_approved);
+  const admins   = accounts.filter((a) => a.role === ROLE_ADMIN);
 
   return (
     <section className="stack-md">
@@ -288,7 +363,7 @@ function AccountsPanel({ accounts, busy, onReload, onApprove, onRevoke }) {
         <div>
           <h2>Cuentas</h2>
           <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-            {pending.length} pendientes · {approved.length} aprobadas
+            {pending.length} pendientes · {approved.length} aprobadas · {admins.length} admin{admins.length === 1 ? '' : 's'}
           </span>
         </div>
         <button type="button" className="button button-ghost button-sm" onClick={onReload} disabled={busy}>
@@ -320,13 +395,15 @@ function AccountsPanel({ accounts, busy, onReload, onApprove, onRevoke }) {
         )}
         {accounts.map((a) => {
           const username = emailToUsername(a.email);
+          const isAdminAcc = a.role === ROLE_ADMIN;
+          const isSelf     = a.id === selfId;
           return (
             <div
               key={a.id}
               className="admin-row"
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr auto auto auto',
+                gridTemplateColumns: '1fr auto auto auto auto',
                 alignItems: 'center',
                 gap: 14,
                 padding: '14px 18px',
@@ -336,31 +413,80 @@ function AccountsPanel({ accounts, busy, onReload, onApprove, onRevoke }) {
               <div>
                 <div style={{ color: 'var(--type-hi)', fontWeight: 500 }}>
                   {a.display_name || username}
+                  {isSelf && (
+                    <span className="mute" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', marginLeft: 8 }}>
+                      (vos)
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', color: 'var(--type-mute)' }}>
-                  {username} {a.role === 'superadmin' ? '· admin' : ''}
+                  {username}
                 </div>
               </div>
               <span className="mute" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
                 {new Date(a.created_at).toLocaleDateString('es-AR')}
               </span>
+
+              {/* Rol */}
+              {isAdminAcc ? (
+                <span className="pill pill-syncing" title="Acceso global: sesiones, cuentas y roles">
+                  <Shield size={11} />
+                  Admin
+                </span>
+              ) : (
+                <span className="pill pill-off">
+                  <span className="pill-dot" />
+                  Clínico
+                </span>
+              )}
+
+              {/* Aprobación */}
               {a.is_approved
                 ? <span className="pill pill-confirm"><span className="pill-dot" />Aprobada</span>
                 : <span className="pill pill-alarm"><span className="pill-dot" />Pendiente</span>}
 
-              {a.role === 'superadmin' ? (
-                <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>—</span>
-              ) : a.is_approved ? (
-                <button type="button" className="button button-ghost button-sm" onClick={() => onRevoke(a.id)}>
-                  <UserX size={13} />
-                  Revocar
-                </button>
-              ) : (
-                <button type="button" className="button button-primary button-sm" onClick={() => onApprove(a.id)}>
-                  <UserCheck size={13} />
-                  Aprobar
-                </button>
-              )}
+              {/* Acciones */}
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                {/* Promover / quitar admin · solo cuentas aprobadas, nunca sobre uno mismo */}
+                {a.is_approved && !isSelf && (
+                  isAdminAcc ? (
+                    <button
+                      type="button"
+                      className="button button-ghost button-sm"
+                      title="Quitar el rol de administrador"
+                      onClick={() => onRequestRoleChange(a, ROLE_CLINICIAN)}
+                    >
+                      <ShieldOff size={13} />
+                      Quitar admin
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button-ghost button-sm"
+                      title="Dar acceso de administrador"
+                      onClick={() => onRequestRoleChange(a, ROLE_ADMIN)}
+                    >
+                      <Shield size={13} />
+                      Hacer admin
+                    </button>
+                  )
+                )}
+
+                {/* Aprobación de la cuenta */}
+                {isSelf ? (
+                  <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>—</span>
+                ) : a.is_approved ? (
+                  <button type="button" className="button button-ghost button-sm" onClick={() => onRevoke(a.id)}>
+                    <UserX size={13} />
+                    Revocar
+                  </button>
+                ) : (
+                  <button type="button" className="button button-primary button-sm" onClick={() => onApprove(a.id)}>
+                    <UserCheck size={13} />
+                    Aprobar
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { X, RefreshCw, Save } from 'lucide-react';
 
 /**
- * Settings drawer · WebSocket connection.
- * La persistencia en la nube ahora está hardcodeada (auth con Supabase),
- * por lo que este panel solo gestiona la conexión al microcontrolador.
+ * Settings drawer · conexión al microcontrolador + diagnóstico del firmware.
+ * La persistencia en la nube está hardcodeada (auth con Supabase).
+ *
+ * `device` proviene del mensaje STATUS del firmware:
+ *   { state: 'MIDIENDO'|'INACTIVO'|null, rssi: dBm|null, heap: bytes|null, at: ts|null }
  */
 export default function SettingsPanel({
   open,
@@ -13,6 +15,8 @@ export default function SettingsPanel({
   onSaveConfig,
   wsStatus,
   onReconnect,
+  device = { state: null, rssi: null, heap: null, at: null },
+  linkQuality = null,
 }) {
   const [protocol, setProtocol] = useState(wsConfig.protocol);
   const [host, setHost]         = useState(wsConfig.host);
@@ -42,6 +46,24 @@ export default function SettingsPanel({
   const handleSubmit = (e) => {
     e.preventDefault();
     onSaveConfig({ protocol, host, port });
+  };
+
+  // ── Diagnóstico ──
+  const connected   = wsStatus === 'CONNECTED';
+  const hasReport    = device && device.state != null;
+  const heapKb       = device?.heap != null ? Math.round(device.heap / 1024) : null;
+  const estadoLabel  = device?.state === 'MIDIENDO' ? 'Midiendo'
+                     : device?.state === 'INACTIVO' ? 'Inactivo'
+                     : 'Desconocido';
+  const estadoClass  = device?.state === 'MIDIENDO' ? 'pill pill-live'
+                     : device?.state === 'INACTIVO' ? 'pill pill-off'
+                     : 'pill pill-off';
+  const fmtAgo = () => {
+    if (!device?.at) return '—';
+    const s = Math.max(0, Math.floor((Date.now() - device.at) / 1000));
+    if (s < 5) return 'ahora';
+    if (s < 60) return `hace ${s} s`;
+    return `hace ${Math.floor(s / 60)} min`;
   };
 
   return (
@@ -118,6 +140,48 @@ export default function SettingsPanel({
               </button>
             </div>
           </form>
+
+          <hr className="hairline" />
+
+          {/* ── Diagnóstico del dispositivo · reportado por el firmware (STATUS) ── */}
+          <div className="drawer-section">
+            <div className="drawer-section-head">
+              <h3 style={{ fontSize: 'var(--t-lg)' }}>Diagnóstico del dispositivo</h3>
+              <span className={estadoClass}>
+                <span className="pill-dot" />
+                {estadoLabel}
+              </span>
+            </div>
+
+            {connected && hasReport ? (
+              <>
+                <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                  <span>Enlace (RSSI)</span>
+                  <span>Memoria libre</span>
+                  <span>Última lectura</span>
+                  <strong className="numeric">
+                    {device.rssi != null ? `${device.rssi} dBm` : '—'}
+                  </strong>
+                  <strong className="numeric">
+                    {heapKb != null ? `${heapKb} KB` : '—'}
+                  </strong>
+                  <strong className="numeric">{fmtAgo()}</strong>
+                </div>
+                {linkQuality && (
+                  <span className="field-hint">
+                    Calidad del enlace WiFi: {linkQuality}. El firmware fija la potencia
+                    de transmisión en 8.5 dBm (fix de antena del ESP32-C3 Super Mini).
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="field-hint">
+                {connected
+                  ? 'Esperando el primer reporte de estado del firmware…'
+                  : 'Sin enlace al dispositivo. Los datos de diagnóstico aparecen cuando hay conexión.'}
+              </span>
+            )}
+          </div>
 
           <hr className="hairline" />
 
