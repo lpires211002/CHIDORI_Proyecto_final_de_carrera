@@ -86,7 +86,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   /* ── WebSocket ─────────────────────────────────────────────────────── */
   const [wsConfig, setWsConfig] = useState(() => {
     const saved = localStorage.getItem('chidori-ws-config');
-    return saved ? JSON.parse(saved) : { protocol: 'ws://', host: 'chidori.local', port: '81' };
+    return saved ? JSON.parse(saved) : { protocol: 'ws://', host: '192.168.0.200', port: '81' };
   });
   const [wsStatus, setWsStatus] = useState('DISCONNECTED');
   // Diagnóstico reportado por el firmware vía STATUS (estado real del equipo,
@@ -189,6 +189,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   /* ── WebSocket lifecycle ──────────────────────────────────────────── */
   const connectWebSocket = useCallback(() => {
     if (isSimulator) return;
+    // Si el socket ya está abierto, no interrumpir la conexión existente.
+    // Esto evita que callbacks encolados del reconnect interval cierren
+    // un socket que acaba de conectarse exitosamente.
+    if (socketRef.current?.readyState === WebSocket.OPEN) return;
     if (socketRef.current) socketRef.current.close();
     const { protocol, host, port } = wsConfig;
     const url = `${protocol}${host}:${port}/`;

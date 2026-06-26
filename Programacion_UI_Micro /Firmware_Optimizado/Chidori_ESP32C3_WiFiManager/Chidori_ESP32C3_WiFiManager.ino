@@ -118,6 +118,13 @@ const uint16_t PORTAL_TIMEOUT_S       = 180;
 const uint16_t CONNECT_TIMEOUT_S      = 15;
 const uint16_t FACTORY_RESET_HOLD_MS  = 5000;
 
+// IP estática · fuera del pool DHCP típico (.100-.150). Se aplica vía
+// WiFi.config() DESPUES de conectar, y se reafirma en cada reconexión.
+const IPAddress STA_IP (192, 168, 0, 200);
+const IPAddress STA_GW (192, 168, 0,   1);
+const IPAddress STA_SN (255, 255, 255, 0);
+const IPAddress STA_DNS(  8,   8,   8,   8);
+
 // Reconexión runtime: backoff entre reintentos
 const uint32_t WIFI_RETRY_MIN_MS      = 5000;
 const uint32_t WIFI_RETRY_MAX_MS      = 30000;
@@ -151,7 +158,8 @@ uint16_t adc_count = 0;
 
 bool botonConfirmado = false;
 int  debounceCount   = 0;
-const int DEBOUNCE_CUENTAS = 5;
+const int DEBOUNCE_START_CUENTAS = 8;    // 80 ms para ARRANCAR
+const int DEBOUNCE_STOP_CUENTAS  = 150;  // 1.5 s de hold para PARAR (anti-corte espurio en mediciones largas)
 
 bool First_Measure = true;
 
@@ -197,7 +205,7 @@ void statusTick();
 /* ================= SETUP ================= */
 void setup() {
   Serial.begin(115200);
-  delay(150);
+  delay(3000);
   Serial.println("\n=== ESP32-C3 CHIDORI · WiFiManager ROBUSTO ===");
 
   pinMode(BUZZER, OUTPUT);
@@ -218,6 +226,12 @@ void setup() {
 
   // ADC: atenuación 11 dB explícita (rango completo 0–3.3 V aprox.)
   analogSetPinAttenuation(ADC_PIN, ADC_11db);
+
+  // ── IP estática ──────────────────────────────────────────────────────
+  // Evita que DHCP asigne una IP distinta en cada boot, lo que obligaría
+  // a reconfigurar la app. .200 está fuera del rango típico de DHCP
+  // (los routers domésticos suelen usar .100–.150 para asignación dinámica).
+  // (IP estatica se aplica con WiFi.config() DESPUES del autoConnect)
 
   // ★ AD9833 PRIMERO, con el WiFi todavía apagado.
   // Reproduce el entorno del sketch "soloAD" (alimentación sin los picos
@@ -297,6 +311,11 @@ void stopMeasurement(const char* origen) {
   Chidori.estado = INACTIVO;
   digitalWrite(BUZZER, LOW);
   First_Measure  = true;
+  // Confirmacion audible del hold de 1.5 s: el usuario mantiene apretado
+  // hasta el beep y recien ahi suelta. (No suena en STOP por la app.)
+  if (strncmp(origen, "boton", 5) == 0) {
+    digitalWrite(BUZZER, HIGH); delay(60); digitalWrite(BUZZER, LOW);
+  }
   Serial.print(">> INACTIVO (por "); Serial.print(origen); Serial.println(")");
 }
 
@@ -350,6 +369,14 @@ void Inicializar_WiFiManager() {
     delay(2000);
     ESP.restart();
   }
+
+  // ★ IP fija DESPUES de conectar. autoConnect conecta por DHCP (confiable
+  //   en cada arranque, reusa credenciales). Aplicar la estatica aca evita el
+  //   'sta is connecting, cannot set config' que rompia el autoConnect en frio
+  //   cuando se usaba setSTAStaticIPConfig() ANTES de conectar.
+  WiFi.config(STA_IP, STA_GW, STA_SN, STA_DNS);
+  delay(100);
+  Serial.print("   IP fija aplicada: "); Serial.println(WiFi.localIP());
 
   // ★ TX power 8.5 dBm también en modo estación:
   //   - estabiliza el link (defecto de antena del C3 Super Mini)
@@ -446,6 +473,12 @@ void wifiWatchdog() {
   if (now >= wifiNextRetryMs) {
     Serial.print("↻ Reintentando WiFi (backoff ");
     Serial.print(wifiRetryDelayMs / 1000); Serial.println(" s)…");
+    // FIX 'sta is connecting, return error': si la state machine ya esta
+    // a mitad de un connect, reconnect() falla. Cortamos con disconnect(),
+    // reafirmamos la IP estatica y recien reconectamos.
+    WiFi.disconnect();
+    delay(10);
+    WiFi.config(STA_IP, STA_GW, STA_SN, STA_DNS);
     WiFi.reconnect();
     wifiRetryDelayMs = min(wifiRetryDelayMs * 2, WIFI_RETRY_MAX_MS);
     wifiNextRetryMs  = now + wifiRetryDelayMs;
@@ -461,6 +494,7 @@ void statusTick() {
   Serial.print(Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO");
   Serial.print(" · wifi="); Serial.print(wifiUp ? "OK" : "CAIDO");
   if (wifiUp) { Serial.print(" ("); Serial.print(WiFi.RSSI()); Serial.print(" dBm)"); }
+  if (wifiUp) { Serial.print(" ip="); Serial.print(WiFi.localIP()); }
   Serial.print(" · clientesWS="); Serial.print(webSocket.connectedClients());
   Serial.print(" · heap="); Serial.print(ESP.getFreeHeap());
   Serial.print(" · Z="); Serial.println(Chidori.Z, 3);
@@ -642,10 +676,15 @@ void Calcular_promedio(float Z) {
 
 /* ================= BOTÓN (antirrebote) ================= */
 void checkButton() {
+  // Umbral asimetrico anti-corte: ARRANCAR es rapido (80 ms), pero PARAR
+  // una medicion en curso exige un hold deliberado de 1.5 s. Asi un roce,
+  // vibracion o glitch electrico NO puede frenar una sesion de horas.
+  const int umbral = (Chidori.estado == INACTIVO) ? DEBOUNCE_START_CUENTAS
+                                                  : DEBOUNCE_STOP_CUENTAS;
   if (digitalRead(BUTTON) == HIGH) {
-    if (debounceCount < DEBOUNCE_CUENTAS) {
+    if (debounceCount < umbral) {
       debounceCount++;
-      if (debounceCount >= DEBOUNCE_CUENTAS) {
+      if (debounceCount >= umbral) {
         botonConfirmado = true;
       }
     }
