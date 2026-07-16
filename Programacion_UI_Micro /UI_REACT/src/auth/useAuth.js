@@ -22,6 +22,7 @@ export default function useAuth() {
       setProfile(null);
       return null;
     }
+    const CACHE_KEY = `chidori-profile-${userId}`;
     try {
       const { data, error: err } = await supabase
         .from('profiles')
@@ -30,9 +31,18 @@ export default function useAuth() {
         .maybeSingle();
       if (err) throw err;
       setProfile(data);
+      // Cache para modo offline (AP del Chidori sin internet): guardamos el
+      // ultimo profile conocido para no bloquear con pending-approval sin red.
+      if (data) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch { /* noop */ } }
       return data;
     } catch (e) {
       console.error('[useAuth] fetchProfile', e);
+      // Sin red (conectado al AP del Chidori): caer al ultimo profile cacheado
+      // en vez de tirar al usuario a la pantalla de pendiente-de-aprobacion.
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) { const p = JSON.parse(cached); setProfile(p); return p; }
+      } catch { /* noop */ }
       setProfile(null);
       return null;
     }
@@ -45,7 +55,17 @@ export default function useAuth() {
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
-      if (data.session?.user?.id) fetchProfile(data.session.user.id);
+      const uid = data.session?.user?.id;
+      if (uid) {
+        // Offline-first: sembramos el profile cacheado AL INSTANTE para no
+        // mostrar "pendiente de aprobacion" mientras la red responde (o sin
+        // internet, como en el AP del Chidori). Luego fetchProfile lo refresca.
+        try {
+          const cached = localStorage.getItem(`chidori-profile-${uid}`);
+          if (cached) setProfile(JSON.parse(cached));
+        } catch { /* noop */ }
+        fetchProfile(uid);
+      }
       setLoading(false);
     });
 

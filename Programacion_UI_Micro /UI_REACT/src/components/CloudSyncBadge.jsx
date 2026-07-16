@@ -11,7 +11,7 @@ import { CloudOff, RefreshCw, CheckCircle2, AlertTriangle, Save } from 'lucide-r
  *   busy     — write in flight
  *   warn     — last write failed, retry queued
  */
-export default function CloudSyncBadge({ state, lastSyncAt, queueSize, pendingCount, onRetry }) {
+export default function CloudSyncBadge({ state, lastSyncAt, queueSize, pendingCount, onRetry, pendingUploads, onUpload }) {
   const fmtAgo = () => {
     if (!lastSyncAt) return '—';
     const s = Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000));
@@ -20,6 +20,22 @@ export default function CloudSyncBadge({ state, lastSyncAt, queueSize, pendingCo
     if (s < 3600) return `${Math.floor(s / 60)}m`;
     return `${Math.floor(s / 3600)}h`;
   };
+
+  // Sesiones medidas offline (modo AP) pendientes de subir → prioridad máxima.
+  if (pendingUploads > 0) {
+    return (
+      <button
+        type="button"
+        className="sync-badge is-warn"
+        title="Sesiones medidas sin internet, pendientes de subir a la nube. Click para subir ahora (necesita internet)."
+        onClick={onUpload}
+        style={{ cursor: 'pointer' }}
+      >
+        <span className="sync-icon"><CloudOff size={13} /></span>
+        Subir {pendingUploads} a la nube
+      </button>
+    );
+  }
 
   if (state === 'off') {
     return (

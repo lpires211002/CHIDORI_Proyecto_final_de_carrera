@@ -67,28 +67,18 @@ export default function ExportModal({
   };
 
   /**
-   * Persistir en la nube ANTES de descargar el archivo. Si falla, abortamos
-   * el export para que el clínico decida (puede apagar el switch y reintentar).
-   * Retorna true si todo OK, false si el commit falló.
+   * Guardado en la nube · best-effort y en SEGUNDO PLANO. Nunca bloquea ni
+   * aborta el export local: el archivo se descarga SIEMPRE. Si no hay internet
+   * (modo AP), Dashboard muestra su aviso y el archivo local ya quedó guardado.
    */
-  const savePatientIfNeeded = async () => {
-    if (!saveToDb) return true;
-    if (!onSavePatient) return true;
-    try {
-      setCommitting(true);
-      await onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion });
-      return true;
-    } catch {
-      // El handler en Dashboard ya muestra el toast de error
-      return false;
-    } finally {
-      setCommitting(false);
-    }
+  const fireCloudSave = () => {
+    if (!saveToDb || !onSavePatient) return;
+    Promise.resolve(
+      onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion })
+    ).catch(() => { /* Dashboard ya togglea su propio toast de error */ });
   };
 
-  const handleExportPDF = async () => {
-    const ok = await savePatientIfNeeded();
-    if (!ok) return;
+  const handleExportPDF = () => {
     exportPDF({
       patient:      buildPatient(),
       stats:        buildStats(),
@@ -97,20 +87,18 @@ export default function ExportModal({
       chartImage:   getChartImage(),
     });
     onShowAlert('Reporte PDF generado', 'success');
+    fireCloudSave();
     onClose();
   };
 
-  const handleExportCSV = async () => {
-    const ok = await savePatientIfNeeded();
-    if (!ok) return;
+  const handleExportCSV = () => {
     exportCSV({ measurements: buildMeasurements() });
     onShowAlert('Datos exportados en CSV', 'success');
+    fireCloudSave();
     onClose();
   };
 
-  const handleExportTXT = async () => {
-    const ok = await savePatientIfNeeded();
-    if (!ok) return;
+  const handleExportTXT = () => {
     exportTXT({
       patient:      buildPatient(),
       stats:        buildStats(),
@@ -118,12 +106,14 @@ export default function ExportModal({
       events,
     });
     onShowAlert('Archivo de texto generado', 'success');
+    fireCloudSave();
     onClose();
   };
 
-  const handleSavePatientOnly = async () => {
-    const ok = await savePatientIfNeeded();
-    if (ok) onClose();
+  const handleSavePatientOnly = () => {
+    fireCloudSave();
+    onShowAlert('Guardando en la nube… si no hay internet, usá un export local', 'info');
+    onClose();
   };
 
   return (

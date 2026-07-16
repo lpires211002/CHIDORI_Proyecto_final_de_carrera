@@ -20,8 +20,10 @@ import Toasts            from './components/Toasts';
 import EmptyState        from './components/EmptyState';
 import ConnectionGate    from './components/ConnectionGate';
 import useCloudSync      from './components/useCloudSync';
+import usePendingSync    from './components/usePendingSync';
 
 import { supabase, emailToUsername } from './supabaseClient';
+import { commitSession, queuePendingSession } from './lib/sessionSync';
 
 /* ─────────────────────────────────────────────────────────────────────
  * CONGRUENCIA CON EL FIRMWARE · Chidori_ESP32C3_WiFiManager
@@ -86,7 +88,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   /* ── WebSocket ─────────────────────────────────────────────────────── */
   const [wsConfig, setWsConfig] = useState(() => {
     const saved = localStorage.getItem('chidori-ws-config');
-    return saved ? JSON.parse(saved) : { protocol: 'ws://', host: '192.168.0.200', port: '81' };
+    return saved ? JSON.parse(saved) : { protocol: 'ws://', host: '192.168.4.1', port: '81' };
   });
   const [wsStatus, setWsStatus] = useState('DISCONNECTED');
   // Diagnóstico reportado por el firmware vía STATUS (estado real del equipo,
@@ -674,6 +676,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setAlarmArmed(true);
   };
 
+  // Cola de sesiones medidas offline (modo AP): se suben solas al volver internet.
+  const pendingSync = usePendingSync(supabase, ({ synced }) => {
+    toast(`${synced} sesión${synced === 1 ? '' : 'es'} subida${synced === 1 ? '' : 's'} a la nube`, 'success');
+  });
+
   /**
    * Commit explícito · crea la sesión + inserta TODAS las mediciones y eventos
    * acumulados en memoria, además de los datos del paciente. Idempotente:
@@ -710,61 +717,40 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       return;
     }
 
-    // Primera vez: full batch commit
+    // Primera vez: armamos el payload completo y lo commiteamos vía helper.
+    const measurements = data.map((p, i) => ({
+      elapsed_time: p.x,
+      impedance:    p.y,
+      rate:         rateData[i]?.y ?? 0,
+    }));
+    const payload = {
+      userId,
+      patientPayload,
+      stats: { initialZ: initialValue, finalZ: currentValue, elapsedStr: elapsedTime, eventCount },
+      measurements,
+      events,
+    };
+
     try {
-      // 1 · Crear la sesión
-      const { data: newSession, error: sErr } = await supabase
-        .from('sessions')
-        .insert({
-          user_id:           userId,
-          ...patientPayload,
-          initial_impedance: initialValue,
-          final_impedance:   currentValue,
-          elapsed_time_str:  elapsedTime,
-          total_events:      eventCount,
-        })
-        .select()
-        .single();
-      if (sErr) throw sErr;
-
-      const sId = newSession.id;
-
-      // 2 · Insertar mediciones en chunks (Postgres tiene límites por payload)
-      const measRows = data.map((p, i) => ({
-        session_id:   sId,
-        elapsed_time: p.x,
-        impedance:    p.y,
-        rate:         rateData[i]?.y ?? 0,
-      }));
-      const CHUNK = 500;
-      for (let i = 0; i < measRows.length; i += CHUNK) {
-        const slice = measRows.slice(i, i + CHUNK);
-        const { error: mErr } = await supabase.from('measurements').insert(slice);
-        if (mErr) throw mErr;
-      }
-
-      // 3 · Insertar eventos (suelen ser pocos, en una sola query)
-      if (events.length > 0) {
-        const evRows = events.map((e) => ({
-          session_id:        sId,
-          event_number:      e.id,
-          elapsed_time:      e.time,
-          impedance:         e.value,
-          impedance_change:  e.change,
-        }));
-        const { error: eErr } = await supabase.from('session_events').insert(evRows);
-        if (eErr) throw eErr;
-      }
-
+      const sId = await commitSession(supabase, payload);
       setPersistedSessionId(sId);
       toast(
-        `Sesión guardada en la nube · ${measRows.length} mediciones, ${events.length} eventos`,
+        `Sesión guardada en la nube · ${measurements.length} mediciones, ${events.length} eventos`,
         'success'
       );
     } catch (err) {
       console.error('[batch commit]', err);
-      toast('No se pudo guardar la sesión en la nube. Reintentá o exportá solo local.', 'warn');
-      throw err;
+      // Sin internet (modo AP) o error de red: NO se pierde. La encolamos en
+      // IndexedDB y se sube sola al volver internet. El CSV local ya es respaldo.
+      try {
+        await queuePendingSession(payload);
+        await pendingSync.refresh();
+        toast('Sin internet: la sesión quedó en cola y se subirá sola al reconectar.', 'info');
+      } catch (qerr) {
+        console.error('[queue pending]', qerr);
+        toast('No se pudo guardar en la nube ni encolar. Exportá el CSV local como respaldo.', 'warn');
+      }
+      // No re-lanzamos: con la cola, el export local no debe abortar.
     }
   };
 
@@ -881,6 +867,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             queueSize={cloud.queueSize}
             pendingCount={data.length}
             onRetry={cloud.retry}
+            pendingUploads={pendingSync.pending}
+            onUpload={pendingSync.flush}
           />
 
           <span className="pill pill-off" title={`Sesión iniciada como ${displayName}`}>

@@ -114,6 +114,12 @@ constexpr double   MCLK                = 25e6;
 const char*    PORTAL_SSID            = "Chidori-Setup";
 const char*    PORTAL_PASSWORD        = "chidori123";   // WPA2, min 8 chars
 const char*    MDNS_HOSTNAME          = "chidori";
+
+// ── MODO AP (Access Point) ───────────────────────────────────────────
+// El ESP crea su PROPIA red WiFi; la Mac se conecta directo. Sin router,
+// sin hotspot, sin portal, sin credenciales, sin IP que dependa de la red.
+const char*    AP_SSID                = "Chidori";        // red que crea el ESP
+const char*    AP_PASSWORD            = "chidori123";     // WPA2, min 8 chars
 const uint16_t PORTAL_TIMEOUT_S       = 180;
 const uint16_t CONNECT_TIMEOUT_S      = 15;
 const uint16_t FACTORY_RESET_HOLD_MS  = 5000;
@@ -188,7 +194,7 @@ void Inicializar_AD9833();
 void ad9833Write(uint16_t data);
 void ad9833SetFrequency(double freqHz);
 void ad9833Begin(double freqHz);
-void Inicializar_WiFiManager();
+void Inicializar_AP();
 void onWiFiEvent(WiFiEvent_t event);
 void wifiWatchdog();
 void startNetworkServices();
@@ -211,8 +217,6 @@ void setup() {
   pinMode(BUZZER, OUTPUT);
   pinMode(BUTTON, INPUT);            // pull-down externo 2.2k en PCB
   digitalWrite(BUZZER, LOW);
-
-  checkFactoryResetButton();
 
   // Constantes derivadas
   CORRIENTE_INYECTADA = VPP * GANANCIA_GENERADOR / R1;
@@ -238,8 +242,8 @@ void setup() {
   // de corriente de la radio) → init SPI confiable siempre.
   Inicializar_AD9833();
 
-  // Recién ahora la radio
-  Inicializar_WiFiManager();
+  // Levantar el Access Point (red propia del ESP)
+  Inicializar_AP();
 }
 
 /* ================= LOOP PRINCIPAL ================= */
@@ -322,83 +326,36 @@ void stopMeasurement(const char* origen) {
 /* ─────────────────────────────────────────────────────────────────────
  *  WiFi: boot con WiFiManager + reconexión runtime por eventos
  * ───────────────────────────────────────────────────────────────────── */
-void Inicializar_WiFiManager() {
-  WiFi.mode(WIFI_STA);
+void Inicializar_AP() {
+  // ── MODO ACCESS POINT ──────────────────────────────────────────────
+  // El ESP crea su PROPIA red WiFi. La Mac se conecta directo a 'Chidori'
+  // y abre la UI apuntando a 192.168.4.1:81. No depende de ningun router,
+  // hotspot ni credenciales: funciona igual en cualquier lugar.
+  WiFi.mode(WIFI_AP);
 
-  // Eventos: detectan caída/recuperación del WiFi en runtime
-  WiFi.onEvent(onWiFiEvent);
+  // IP fija del AP: SIEMPRE 192.168.4.1 (lo que va en la UI).
+  WiFi.softAPConfig(IPAddress(192, 168, 4, 1),
+                    IPAddress(192, 168, 4, 1),
+                    IPAddress(255, 255, 255, 0));
 
-  WiFiManager wm;
-  wm.setConfigPortalTimeout(PORTAL_TIMEOUT_S);
-  wm.setConnectTimeout(CONNECT_TIMEOUT_S);
-  wm.setConnectRetries(3);
-  wm.setCleanConnect(true);          // desconecta antes de conectar (más confiable)
-  wm.setHostname(MDNS_HOSTNAME);
+  bool ok = WiFi.softAP(AP_SSID, AP_PASSWORD);
 
-  wm.setTitle("Chidori · Configuración WiFi");
-  wm.setShowInfoErase(true);
-  wm.setBreakAfterConfig(true);
-  wm.setDarkMode(true);
+  // TX power 8.5 dBm: fix de antena del C3 Super Mini + evita brown-out USB.
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
 
-  const char* CUSTOM_HTML =
-    "<p style='font-family:system-ui;font-size:13px;color:#666;line-height:1.5;margin:14px 0;'>"
-    "Seleccioná la red WiFi a la que querés que se conecte el dispositivo Chidori. "
-    "Las credenciales se guardan en el dispositivo, no se transmiten a ningún servidor."
-    "</p>";
-  wm.setCustomHeadElement(CUSTOM_HTML);
-
-  // ★ Cuando levanta el AP del portal, bajar TX power a 8.5 dBm.
-  // El C3 Super Mini tiene mal matching de antena: a potencia default
-  // el AP "Chidori-Setup" se ve intermitente o directamente no aparece.
-  wm.setAPCallback([](WiFiManager* w) {
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
-    Serial.println("⚙ Portal activo · TX power 8.5 dBm (fix antena C3)");
-    Serial.print  ("  Conectarse a \""); Serial.print(PORTAL_SSID);
-    Serial.println("\" y abrir http://192.168.4.1");
-  });
-
-  Serial.println("Conectando WiFi…");
-  Serial.print("  AP de respaldo: "); Serial.println(PORTAL_SSID);
-
-  bool connected = (strlen(PORTAL_PASSWORD) > 0)
-                     ? wm.autoConnect(PORTAL_SSID, PORTAL_PASSWORD)
-                     : wm.autoConnect(PORTAL_SSID);
-
-  if (!connected) {
-    Serial.println("❌ Sin conexión ni configuración dentro del timeout. Reiniciando…");
+  if (!ok) {
+    Serial.println("No se pudo iniciar el Access Point. Reiniciando...");
     delay(2000);
     ESP.restart();
   }
 
-  // ★ IP fija DESPUES de conectar. autoConnect conecta por DHCP (confiable
-  //   en cada arranque, reusa credenciales). Aplicar la estatica aca evita el
-  //   'sta is connecting, cannot set config' que rompia el autoConnect en frio
-  //   cuando se usaba setSTAStaticIPConfig() ANTES de conectar.
-  WiFi.config(STA_IP, STA_GW, STA_SN, STA_DNS);
-  delay(100);
-  Serial.print("   IP fija aplicada: "); Serial.println(WiFi.localIP());
+  Serial.println("Access Point activo");
+  Serial.print("   Red WiFi: ");  Serial.println(AP_SSID);
+  Serial.print("   Clave:    ");  Serial.println(AP_PASSWORD);
+  Serial.print("   IP:       ");  Serial.println(WiFi.softAPIP());
+  Serial.println("   En la Mac: conectate a la red 'Chidori' y abri la UI con IP 192.168.4.1 puerto 81");
 
-  // ★ TX power 8.5 dBm también en modo estación:
-  //   - estabiliza el link (defecto de antena del C3 Super Mini)
-  //   - evita picos >200 mA que disparan brown-out del USB CDC
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-
-  // ★ Power save OFF: sin esto el modem acumula paquetes y los manda en
-  // ráfagas según el DTIM del router → el lag que veíamos en el dashboard.
-  WiFi.setSleep(false);
-
-  // Auto-reconexión del driver + nuestro watchdog con backoff
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
-
-  Serial.println("✅ WiFi conectado");
-  Serial.print("   SSID: ");  Serial.println(WiFi.SSID());
-  Serial.print("   IP:   ");  Serial.println(WiFi.localIP());
-  Serial.print("   RSSI: ");  Serial.print(WiFi.RSSI()); Serial.println(" dBm");
-  Serial.println("   TX power 8.5 dBm · power save OFF");
-
-  wifiUp            = true;
-  wifiNeedsServices = false;   // el GOT_IP del boot ya quedó atendido acá
+  wifiUp = true;
   startNetworkServices();
 }
 
@@ -450,39 +407,8 @@ void onWiFiEvent(WiFiEvent_t event) {
 /* Reconexión no bloqueante con backoff. La medición NUNCA se frena:
  * el ADC y el AD9833 siguen, solo se pausa la transmisión. */
 void wifiWatchdog() {
-  if (wifiUp) {
-    if (wifiNeedsServices) {
-      wifiNeedsServices = false;
-      WiFi.setTxPower(WIFI_POWER_8_5dBm);
-      WiFi.setSleep(false);
-      Serial.print("✅ WiFi reconectado · IP "); Serial.println(WiFi.localIP());
-      startNetworkServices();
-    }
-    return;
-  }
-
-  unsigned long now = millis();
-
-  // Reboot preventivo solo si está INACTIVO (jamás durante una medición)
-  if (Chidori.estado == INACTIVO && now - wifiDownSinceMs >= WIFI_DEAD_REBOOT_MS) {
-    Serial.println("❌ WiFi muerto hace 3 min y sin medición en curso. Reiniciando…");
-    delay(200);
-    ESP.restart();
-  }
-
-  if (now >= wifiNextRetryMs) {
-    Serial.print("↻ Reintentando WiFi (backoff ");
-    Serial.print(wifiRetryDelayMs / 1000); Serial.println(" s)…");
-    // FIX 'sta is connecting, return error': si la state machine ya esta
-    // a mitad de un connect, reconnect() falla. Cortamos con disconnect(),
-    // reafirmamos la IP estatica y recien reconectamos.
-    WiFi.disconnect();
-    delay(10);
-    WiFi.config(STA_IP, STA_GW, STA_SN, STA_DNS);
-    WiFi.reconnect();
-    wifiRetryDelayMs = min(wifiRetryDelayMs * 2, WIFI_RETRY_MAX_MS);
-    wifiNextRetryMs  = now + wifiRetryDelayMs;
-  }
+  // En modo AP no hay reconexion que vigilar: el Access Point esta siempre
+  // activo mientras el ESP tenga alimentacion. (no-op para no tocar el loop)
 }
 
 /* Línea de diagnóstico cada 10 s */
@@ -492,9 +418,8 @@ void statusTick() {
 
   Serial.print("[status] estado=");
   Serial.print(Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO");
-  Serial.print(" · wifi="); Serial.print(wifiUp ? "OK" : "CAIDO");
-  if (wifiUp) { Serial.print(" ("); Serial.print(WiFi.RSSI()); Serial.print(" dBm)"); }
-  if (wifiUp) { Serial.print(" ip="); Serial.print(WiFi.localIP()); }
+  Serial.print(" · modo=AP ip="); Serial.print(WiFi.softAPIP());
+  Serial.print(" · stations="); Serial.print(WiFi.softAPgetStationNum());
   Serial.print(" · clientesWS="); Serial.print(webSocket.connectedClients());
   Serial.print(" · heap="); Serial.print(ESP.getFreeHeap());
   Serial.print(" · Z="); Serial.println(Chidori.Z, 3);
