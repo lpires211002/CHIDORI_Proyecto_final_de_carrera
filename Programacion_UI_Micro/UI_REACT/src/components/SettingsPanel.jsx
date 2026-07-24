@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, RefreshCw, Save } from 'lucide-react';
+import { X, RefreshCw, Save, ChevronRight, RotateCcw, Wifi } from 'lucide-react';
 
 /**
  * Settings drawer · conexión al microcontrolador + diagnóstico del firmware.
@@ -8,6 +8,9 @@ import { X, RefreshCw, Save } from 'lucide-react';
  * `device` proviene del mensaje STATUS del firmware:
  *   { state: 'MIDIENDO'|'INACTIVO'|null, rssi: dBm|null, heap: bytes|null, at: ts|null }
  */
+/** Valores de fábrica · el firmware corre en modo Access Point con IP fija. */
+const DEFAULTS = { protocol: 'ws://', host: '192.168.4.1', port: '81' };
+
 export default function SettingsPanel({
   open,
   onClose,
@@ -21,6 +24,7 @@ export default function SettingsPanel({
   const [protocol, setProtocol] = useState(wsConfig.protocol);
   const [host, setHost]         = useState(wsConfig.host);
   const [port, setPort]         = useState(wsConfig.port);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     setProtocol(wsConfig.protocol);
@@ -47,6 +51,18 @@ export default function SettingsPanel({
     e.preventDefault();
     onSaveConfig({ protocol, host, port });
   };
+
+  const handleReset = () => {
+    setProtocol(DEFAULTS.protocol);
+    setHost(DEFAULTS.host);
+    setPort(DEFAULTS.port);
+    onSaveConfig({ ...DEFAULTS });
+  };
+
+  // ¿La config actual es la de fábrica? Si no, lo avisamos en la vista simple.
+  const isDefault = wsConfig.protocol === DEFAULTS.protocol
+                 && wsConfig.host === DEFAULTS.host
+                 && String(wsConfig.port) === DEFAULTS.port;
 
   // ── Diagnóstico ──
   const connected   = wsStatus === 'CONNECTED';
@@ -87,58 +103,109 @@ export default function SettingsPanel({
               </span>
             </div>
 
-            <div className="field">
-              <label className="field-label" htmlFor="proto">Protocolo</label>
-              <select id="proto" className="input" value={protocol} onChange={(e) => setProtocol(e.target.value)}>
-                <option value="ws://">ws:// (red local)</option>
-                <option value="wss://">wss:// (TLS, requerido en hosts HTTPS)</option>
-              </select>
-              <span className="field-hint">
-                Vercel sirve por HTTPS y bloquea ws://. Use wss:// con un proxy seguro, o
-                acceda al frontend localmente vía http://localhost para usar ws://.
-              </span>
+            {/* ── Vista simple · el equipo siempre es un Access Point fijo ── */}
+            <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <span>Red WiFi del equipo</span>
+              <span>Dirección</span>
+              <strong>Chidori</strong>
+              <strong className="numeric">{wsConfig.host}:{wsConfig.port}</strong>
             </div>
 
-            <div className="field">
-              <label className="field-label" htmlFor="host">Dirección</label>
-              <input
-                id="host"
-                className="input"
-                type="text"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="chidori.local"
-                required
-              />
-              <span className="field-hint">
-                Hostname mDNS publicado por el firmware (chidori.local) o IP de red local.
-              </span>
-            </div>
+            <span className="field-hint">
+              <Wifi size={12} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+              Encendé el Chidori y conectá esta computadora a la red WiFi <strong>Chidori</strong>
+              {' '}(clave <strong>chidori123</strong>). La conexión es automática: no hay nada que configurar.
+            </span>
 
-            <div className="field">
-              <label className="field-label" htmlFor="port">Puerto</label>
-              <input
-                id="port"
-                className="input"
-                type="number"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="81"
-                required
-              />
-              <span className="field-hint">Puerto WebSocket. El firmware usa 81 por defecto.</span>
-            </div>
+            {!isDefault && (
+              <span className="field-hint" style={{ color: 'var(--c-warn, #d08700)' }}>
+                ⚠ La dirección no es la de fábrica ({DEFAULTS.host}:{DEFAULTS.port}).
+                Si no conecta, usá “Restablecer valores por defecto”.
+              </span>
+            )}
 
             <div className="row" style={{ justifyContent: 'flex-end' }}>
               <button type="button" className="button button-ghost" onClick={onReconnect} disabled={wsStatus === 'CONNECTING'}>
                 <RefreshCw size={14} className={wsStatus === 'CONNECTING' ? 'rotating' : ''} />
                 Reconectar
               </button>
-              <button type="submit" className="button button-primary">
-                <Save size={14} />
-                Guardar
-              </button>
             </div>
+
+            {/* ── Opciones avanzadas · plegadas por defecto ── */}
+            <button
+              type="button"
+              className="button button-ghost button-sm"
+              onClick={() => setShowAdvanced((v) => !v)}
+              aria-expanded={showAdvanced}
+              style={{ alignSelf: 'flex-start', paddingLeft: 0 }}
+            >
+              <ChevronRight
+                size={14}
+                style={{ transform: showAdvanced ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}
+              />
+              Opciones avanzadas
+            </button>
+
+            {showAdvanced && (
+              <>
+                <span className="field-hint">
+                  Solo para diagnóstico o para apuntar a un equipo en otra red. En uso normal
+                  no hace falta tocar nada.
+                </span>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="proto">Protocolo</label>
+                  <select id="proto" className="input" value={protocol} onChange={(e) => setProtocol(e.target.value)}>
+                    <option value="ws://">ws:// (red local)</option>
+                    <option value="wss://">wss:// (TLS)</option>
+                  </select>
+                  <span className="field-hint">
+                    El equipo usa ws://. wss:// solo aplica detrás de un proxy con TLS.
+                  </span>
+                </div>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="host">Dirección</label>
+                  <input
+                    id="host"
+                    className="input"
+                    type="text"
+                    value={host}
+                    onChange={(e) => setHost(e.target.value)}
+                    placeholder={DEFAULTS.host}
+                    required
+                  />
+                  <span className="field-hint">
+                    IP del equipo. En modo Access Point es siempre {DEFAULTS.host}.
+                  </span>
+                </div>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="port">Puerto</label>
+                  <input
+                    id="port"
+                    className="input"
+                    type="number"
+                    value={port}
+                    onChange={(e) => setPort(e.target.value)}
+                    placeholder={DEFAULTS.port}
+                    required
+                  />
+                  <span className="field-hint">Puerto WebSocket. El firmware usa 81.</span>
+                </div>
+
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <button type="button" className="button button-ghost button-sm" onClick={handleReset}>
+                    <RotateCcw size={14} />
+                    Restablecer valores por defecto
+                  </button>
+                  <button type="submit" className="button button-primary">
+                    <Save size={14} />
+                    Guardar
+                  </button>
+                </div>
+              </>
+            )}
           </form>
 
           <hr className="hairline" />

@@ -11,7 +11,7 @@ export default function EmptyState({ wsStatus, isSimulator, onOpenSettings, onTo
     <div className="empty-state">
       <h2>Listo para registrar una sesión</h2>
       <p>
-        Conecte el microcontrolador Chidori (vía mDNS o IP de red local), calibre los umbrales del
+        Encienda el Chidori y conecte esta computadora a su red WiFi, calibre los umbrales del
         paciente y comience la adquisición. Si todavía no hay hardware disponible, puede activar
         el simulador de curva fisiológica para familiarizarse con la interfaz.
       </p>
@@ -19,7 +19,7 @@ export default function EmptyState({ wsStatus, isSimulator, onOpenSettings, onTo
       <div className="row" style={{ justifyContent: 'center', gap: 12 }}>
         {connected ? null : (
           <button type="button" className="button button-primary" onClick={onOpenSettings}>
-            Configurar conexión
+            Revisar conexión
           </button>
         )}
         <button type="button" className="button button-ghost" onClick={onToggleSimulator}>
@@ -32,8 +32,9 @@ export default function EmptyState({ wsStatus, isSimulator, onOpenSettings, onTo
           <span className="empty-step-num">1</span>
           <span className="empty-step-title">Conectar el dispositivo</span>
           <span className="empty-step-body">
-            Abra el panel de configuración y verifique la dirección del microcontrolador
-            (chidori.local · puerto 81 por defecto).
+            Encienda el Chidori y, desde el WiFi de esta computadora, conéctese a la red
+            <strong> Chidori</strong> (clave <strong>chidori123</strong>). El enlace se
+            establece solo.
           </span>
         </div>
         <div className="empty-step">
