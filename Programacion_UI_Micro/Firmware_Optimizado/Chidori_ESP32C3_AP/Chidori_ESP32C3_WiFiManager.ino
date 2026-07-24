@@ -1,5 +1,5 @@
 /* =====================  PROYECTO CHIDORI ========================*/
-/* ===== ESP32-C3 SUPER MINI · WiFiManager · EDICIÓN ROBUSTA ======*/
+/* =====  ESP32-C3 SUPER MINI · ACCESS POINT · EDICIÓN ROBUSTA  ====*/
 //
 // Reescritura orientada a confiabilidad de transmisión en tiempo real.
 // Cambios clave respecto a la versión anterior:
@@ -10,12 +10,12 @@
 //   2. Heartbeat WebSocket (ping/pong) → los clientes fantasma que
 //      dejan los refresh del navegador se eliminan solos. Sin esto,
 //      broadcastTXT se frena llamando a sockets muertos.
-//   3. Reconexión WiFi EN RUNTIME, no bloqueante, con backoff. La
-//      versión anterior solo conectaba en el boot: si el router se
-//      caía después, el equipo quedaba offline para siempre.
+//   3. MODO ACCESS POINT: el ESP crea su PROPIA red WiFi ("Chidori"),
+//      no depende de ningún router ni hotspot. La Mac se conecta directo.
+//      (La versión anterior usaba WiFiManager + portal STA, frágil en el C3.)
 //   4. TX power fijado en 8.5 dBm. El ESP32-C3 Super Mini tiene un
 //      defecto conocido de matching de antena: a potencia default la
-//      señal es errática y el AP "Chidori-Setup" cuesta encontrarlo.
+//      señal es errática y el AP "Chidori" cuesta encontrarlo.
 //      8.5 dBm es el fix documentado por la comunidad y además evita
 //      el brown-out por picos de corriente con cables USB marginales.
 //   5. Scheduler de muestreo sin ráfagas: si el loop se atrasa (WiFi
@@ -30,8 +30,7 @@
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
 // ║                                                              ║
 // ║  Boards Manager:    esp32 by Espressif Systems ≥ 3.0.0       ║
-// ║  Library Manager:   WiFiManager by tzapu      ≥ 2.0.17       ║
-// ║                     WebSockets by Markus Sattler ≥ 2.4.0     ║
+// ║  Library Manager:   WebSockets by Markus Sattler ≥ 2.4.0     ║
 // ║                                                              ║
 // ║  Board:                ESP32C3 Dev Module                    ║
 // ║  USB CDC On Boot:      ENABLED                               ║
@@ -40,18 +39,14 @@
 // ║  Partition Scheme:     Default 4MB with spiffs               ║
 // ╚══════════════════════════════════════════════════════════════╝
 //
-// FLUJO WiFi (primera vez):
-//   1. Encender → conectarse desde el celular a "Chidori-Setup"
+// USO (siempre igual, sin configurar nada):
+//   1. Encender el ESP → crea su propia red WiFi "Chidori"
 //      (password: chidori123).
-//   2. Portal cautivo abre solo; si no, ir a http://192.168.4.1
-//   3. Configure WiFi → elegir red → Save. El ESP guarda y conecta.
+//   2. Desde la Mac, conectarse a esa red WiFi "Chidori".
+//   3. Abrir la app apuntando a la IP 192.168.4.1, puerto 81.
 //
-// FLUJO WiFi (booteos siguientes):
-//   Conecta solo a la red guardada. Si la red se cae DESPUÉS de
-//   conectar, reintenta solo (backoff 5→30 s) sin frenar la medición.
-//   Si nunca logra conectar en el boot, levanta el portal de nuevo.
-//
-// FACTORY RESET WiFi: mantener el botón apretado 5 s al encender.
+//   No hay portal, ni red que elegir, ni credenciales que guardar: el ESP
+//   ES su propio Access Point y arranca SIEMPRE en 192.168.4.1.
 //
 // Pines (verificados contra esquemático KiCAD):
 //   GPIO 0  → ADC (Vout, detector Schottky)
@@ -63,7 +58,6 @@
 // ─────────────────────────────────────────────────────────────────
 
 #include <WiFi.h>
-#include <WiFiManager.h>
 #include <ESPmDNS.h>
 #include <WebSocketsServer.h>
 #include <SPI.h>
@@ -110,9 +104,7 @@ constexpr uint16_t REG_FREQ0           = 0x4000;
 constexpr uint16_t REG_PHASE0          = 0xC000;
 constexpr double   MCLK                = 25e6;
 
-/* ================= WiFi / PORTAL ================= */
-const char*    PORTAL_SSID            = "Chidori-Setup";
-const char*    PORTAL_PASSWORD        = "chidori123";   // WPA2, min 8 chars
+/* ================= WiFi / ACCESS POINT ================= */
 const char*    MDNS_HOSTNAME          = "chidori";
 
 // ── MODO AP (Access Point) ───────────────────────────────────────────
@@ -120,16 +112,6 @@ const char*    MDNS_HOSTNAME          = "chidori";
 // sin hotspot, sin portal, sin credenciales, sin IP que dependa de la red.
 const char*    AP_SSID                = "Chidori";        // red que crea el ESP
 const char*    AP_PASSWORD            = "chidori123";     // WPA2, min 8 chars
-const uint16_t PORTAL_TIMEOUT_S       = 180;
-const uint16_t CONNECT_TIMEOUT_S      = 15;
-const uint16_t FACTORY_RESET_HOLD_MS  = 5000;
-
-// IP estática · fuera del pool DHCP típico (.100-.150). Se aplica vía
-// WiFi.config() DESPUES de conectar, y se reafirma en cada reconexión.
-const IPAddress STA_IP (192, 168, 0, 200);
-const IPAddress STA_GW (192, 168, 0,   1);
-const IPAddress STA_SN (255, 255, 255, 0);
-const IPAddress STA_DNS(  8,   8,   8,   8);
 
 // Reconexión runtime: backoff entre reintentos
 const uint32_t WIFI_RETRY_MIN_MS      = 5000;
@@ -198,7 +180,6 @@ void Inicializar_AP();
 void onWiFiEvent(WiFiEvent_t event);
 void wifiWatchdog();
 void startNetworkServices();
-void checkFactoryResetButton();
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
 void adquirir_y_promediar();
 void Calcular_promedio(float Z);
@@ -212,7 +193,7 @@ void statusTick();
 void setup() {
   Serial.begin(115200);
   delay(3000);
-  Serial.println("\n=== ESP32-C3 CHIDORI · WiFiManager ROBUSTO ===");
+  Serial.println("\n=== ESP32-C3 CHIDORI · ACCESS POINT ===");
 
   pinMode(BUZZER, OUTPUT);
   pinMode(BUTTON, INPUT);            // pull-down externo 2.2k en PCB
@@ -230,12 +211,6 @@ void setup() {
 
   // ADC: atenuación 11 dB explícita (rango completo 0–3.3 V aprox.)
   analogSetPinAttenuation(ADC_PIN, ADC_11db);
-
-  // ── IP estática ──────────────────────────────────────────────────────
-  // Evita que DHCP asigne una IP distinta en cada boot, lo que obligaría
-  // a reconfigurar la app. .200 está fuera del rango típico de DHCP
-  // (los routers domésticos suelen usar .100–.150 para asignación dinámica).
-  // (IP estatica se aplica con WiFi.config() DESPUES del autoConnect)
 
   // ★ AD9833 PRIMERO, con el WiFi todavía apagado.
   // Reproduce el entorno del sketch "soloAD" (alimentación sin los picos
@@ -324,7 +299,7 @@ void stopMeasurement(const char* origen) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────
- *  WiFi: boot con WiFiManager + reconexión runtime por eventos
+ *  WiFi: modo Access Point (el ESP crea su propia red "Chidori")
  * ───────────────────────────────────────────────────────────────────── */
 void Inicializar_AP() {
   // ── MODO ACCESS POINT ──────────────────────────────────────────────
@@ -423,35 +398,6 @@ void statusTick() {
   Serial.print(" · clientesWS="); Serial.print(webSocket.connectedClients());
   Serial.print(" · heap="); Serial.print(ESP.getFreeHeap());
   Serial.print(" · Z="); Serial.println(Chidori.Z, 3);
-}
-
-/* ─────────────────────────────────────────────────────────────────────
- *  Factory reset · botón apretado 5 s al boot borra credenciales WiFi
- * ───────────────────────────────────────────────────────────────────── */
-void checkFactoryResetButton() {
-  if (digitalRead(BUTTON) != HIGH) return;
-
-  Serial.println("⚠ Botón apretado al boot.");
-  Serial.print  ("  Mantener "); Serial.print(FACTORY_RESET_HOLD_MS / 1000);
-  Serial.println(" s para borrar credenciales WiFi…");
-
-  unsigned long t0 = millis();
-  while (digitalRead(BUTTON) == HIGH) {
-    if (millis() - t0 >= FACTORY_RESET_HOLD_MS) {
-      Serial.println("✅ FACTORY RESET · borrando credenciales WiFi");
-      WiFiManager wm;
-      wm.resetSettings();
-      for (int i = 0; i < 3; i++) {
-        digitalWrite(BUZZER, HIGH); delay(120);
-        digitalWrite(BUZZER, LOW);  delay(120);
-      }
-      Serial.println("Reiniciando en modo portal…");
-      delay(800);
-      ESP.restart();
-    }
-    delay(50);
-  }
-  Serial.println("→ Botón soltado antes del umbral. Continuando.");
 }
 
 /* ================= AD9833 ================= */
