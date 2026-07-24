@@ -62,12 +62,25 @@ npm run dist:mac
 - `Chidori-0.0.0.dmg` — lo que compartís. El usuario lo abre y **arrastra Chidori a Aplicaciones**.
 - `release/mac/Chidori.app` — la app suelta.
 
-**En Windows:**
-```bash
-npm run dist:win
-```
-→ Sale en `release/`:
-- `Chidori Setup 0.0.0.exe` — instalador de doble click.
+**Para Windows — SIN tener una PC con Windows (recomendado):**
+
+GitHub compila el `.exe` por vos en una máquina Windows en la nube (gratis).
+
+*Una sola vez* — cargar los secrets:
+1. En tu repo: **Settings → Secrets and variables → Actions → New repository secret**
+2. Creá dos secrets con los mismos valores de tu `.env.local`:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+
+*Cada vez que quieras el `.exe`*:
+1. Repo → pestaña **Actions** → **"Build Windows (.exe)"** (columna izquierda)
+2. Botón **"Run workflow"** → **"Run workflow"** (verde)
+3. Esperá ~10 min (aparece un ✓ verde)
+4. Entrá al run terminado → abajo de todo, sección **Artifacts** → descargá **`Chidori-Windows`**
+   (baja un `.zip`; adentro está el `.exe`)
+
+*(Si preferís hacerlo en una PC con Windows: instalá Node.js, cloná el repo, poné el
+`.env.local` en `UI_REACT/` y corré `npm run dist:win`.)*
 
 ---
 
@@ -81,6 +94,27 @@ apunta a `192.168.4.1`. Cero terminal.
 
 ---
 
+## Cómo se lo pasás a los usuarios (GitHub Releases)
+
+El `.dmg` pesa ~184 MB, así que **no va al repo** (GitHub rechaza archivos >100 MB, y
+además inflaría el historial para siempre). Por eso `release/` está en `.gitignore`.
+La forma correcta es **Releases**:
+
+1. Repo → columna derecha → **Releases** → **"Create a new release"**
+2. **Choose a tag** → escribí `v1.0.0` → **"+ Create new tag: v1.0.0 on publish"**
+3. **Release title**: `Chidori v1.0.0`
+4. Arrastrá los archivos: el **`.dmg`** (Mac) y el **`.exe`** (Windows)
+5. **Publish release**
+
+Les pasás **el link del release**. Cada uno baja el archivo de su sistema:
+- Mac → `.dmg`
+- Windows → `.exe`
+
+💡 Si publicás el tag `v1.0.0`, GitHub Actions **compila el `.exe` solo** y lo adjunta
+al release automáticamente.
+
+---
+
 ## Aviso de "app sin firmar" (esperado)
 
 Como la app **no está firmada** con un certificado de pago, la primera vez:
@@ -89,6 +123,7 @@ Como la app **no está firmada** con un certificado de pago, la primera vez:
   Si aparece "dañada/no se puede abrir", corré una vez:
   `xattr -cr /Applications/Chidori.app`
 - **Windows:** en el aviso de SmartScreen → **Más información** → **Ejecutar de todas formas**.
+  (Chrome puede avisar "descarga no habitual" → **Conservar**.)
 
 Para eliminar estos avisos hay que **firmar** la app (Apple Developer ~US$99/año;
 certificado code-signing en Windows). Para uso de tesis / interno, el workaround de

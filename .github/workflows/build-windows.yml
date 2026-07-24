@@ -1,0 +1,76 @@
+# Compila el ejecutable de Windows (.exe) en una maquina Windows de GitHub.
+# No hace falta tener una PC con Windows: GitHub la presta.
+#
+# COMO USARLO (todo por la web):
+#   Repo → pestaña "Actions" → "Build Windows (.exe)" → boton "Run workflow".
+#   Cuando termina (~10 min), el .exe queda para descargar en "Artifacts".
+#
+# REQUISITO (una sola vez): cargar los secrets en
+#   Repo → Settings → Secrets and variables → Actions → "New repository secret"
+#     VITE_SUPABASE_URL
+#     VITE_SUPABASE_ANON_KEY
+
+name: Build Windows (.exe)
+
+on:
+  workflow_dispatch:        # boton manual en la pestana Actions
+  push:
+    tags: ['v*']            # o automatico al publicar un tag v1.0.0, v1.1.0...
+
+permissions:
+  contents: write            # necesario para adjuntar el .exe al Release
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: Programacion_UI_Micro/UI_REACT
+
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Crear .env.local desde los secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.VITE_SUPABASE_URL }}" ] || [ -z "${{ secrets.VITE_SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::Faltan los secrets VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY."
+            echo "::error::Cargalos en: Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          {
+            echo "VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}"
+            echo "VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}"
+            echo "VITE_AUTH_LOCAL_DOMAIN=chidori.local"
+          } > .env.local
+          echo "Archivo .env.local creado."
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Generar el ejecutable de Windows
+        run: npm run dist:win
+
+      - name: Publicar el .exe para descargar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chidori-Windows
+          path: Programacion_UI_Micro/UI_REACT/release/*.exe
+          if-no-files-found: error
+          retention-days: 90
+
+      # Si el build se disparo por un tag (v1.0.0), ademas adjunta el .exe al Release.
+      - name: Adjuntar al Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Programacion_UI_Micro/UI_REACT/release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
