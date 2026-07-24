@@ -139,7 +139,120 @@ electron-builder genera solo el `.icns` (Mac) y el `.ico` (Windows) a partir de 
 
 ---
 
+## Actualizaciones · cómo mantener al día a los usuarios
+
+La app **avisa sola** cuando hay una versión nueva. Al abrirse consulta el último
+Release de GitHub y, si detecta una versión mayor a la instalada, muestra:
+
+> **Hay una versión nueva de Chidori (v1.1.0)** · [Descargar] [Más tarde]
+
+"Descargar" les abre la página del Release para bajar el archivo de su sistema.
+Instalan encima de la versión vieja (en Mac: reemplazar en Aplicaciones) y listo.
+**Las sesiones guardadas no se pierden.**
+
+Si no hay internet (modo AP), el repo es privado o no hay releases, **no muestra nada**
+y no molesta a nadie.
+
+### Para publicar una actualización · paso a paso
+
+**Paso 1 · Cambiar el número de versión** (en `package.json`)
+
+Abrí `UI_REACT/package.json` con cualquier editor de texto (doble click desde el
+Finder, o TextEdit). En la línea 4 dice:
+
+```json
+"version": "1.0.0",
+```
+
+Cambiala al número nuevo, por ejemplo:
+
+```json
+"version": "1.1.0",
+```
+
+Guardá (`Cmd + S`). *(Regla simple: arreglos chicos → `1.0.1`; funciones nuevas → `1.1.0`.)*
+
+⚠️ **Sin este paso nadie recibe el aviso de actualización.**
+
+---
+
+**Paso 2 · Subir los cambios a GitHub**
+
+Abrí la Terminal y pegá (una línea por vez):
+
+```bash
+cd ~/Documents/CHIDORI-Proyecto-final-de-carrera/Programacion_UI_Micro/UI_REACT
+```
+
+```bash
+git add -A && git commit -m "Version 1.1.0" && git push
+```
+
+⚠️ **Hacelo ANTES del Paso 4**: GitHub compila el `.exe` a partir de lo que está subido.
+
+---
+
+**Paso 3 · Generar el ejecutable de Mac**
+
+En la misma Terminal:
+
+```bash
+npm run dist:mac
+```
+
+Esperá 3–8 min. Después:
+
+```bash
+open release
+```
+
+Se abre el Finder con **`Chidori-1.1.0-universal.dmg`** (con el número nuevo).
+
+---
+
+**Paso 4 · Generar el ejecutable de Windows**
+
+1. Entrá a `github.com/lpires211002/CHIDORI_Proyecto_final_de_carrera`
+2. Pestaña **Actions**
+3. Izquierda: **"Build Windows (.exe)"**
+4. Botón **"Run workflow"** → **"Run workflow"** (verde)
+5. Esperá el ✓ verde (~2–10 min)
+6. Entrá al run terminado → abajo de todo, **Artifacts** → descargá **`Chidori-Windows`**
+7. Descomprimí el `.zip` → adentro está el **`.exe`**
+
+---
+
+**Paso 5 · Publicar el Release**
+
+1. En el repo → columna derecha → **Releases** → **"Draft a new release"**
+2. **Choose a tag** → escribí **`v1.1.0`** → **"+ Create new tag: v1.1.0 on publish"**
+   ⚠️ El tag lleva **`v`** adelante y debe coincidir con la versión del Paso 1.
+3. **Release title**: `Chidori v1.1.0`
+4. *(Opcional)* En la descripción, qué cambió.
+5. Arrastrá los **dos archivos** a la zona de "Attach binaries":
+   - `Chidori-1.1.0-universal.dmg` (de `release/`)
+   - el `.exe` descomprimido (del Paso 4)
+6. Esperá que suban (barra al 100%) → **"Publish release"**
+
+---
+
+**Paso 6 · Verificar**
+
+Abrí tu app Chidori vieja (la 1.0.0). A los ~3 segundos tiene que aparecer:
+
+> **Hay una versión nueva de Chidori (v1.1.0)** · [Descargar] [Más tarde]
+
+Si aparece, ya lo están viendo todos. ✅
+
+*(Si no aparece: revisá que el tag sea `v1.1.0` exacto, que el `package.json` diga
+`1.1.0`, y que el repo sea público.)*
+
+> **Importante:** el tag del Release y el `"version"` de `package.json` tienen que
+> coincidir (`v1.1.0` ↔ `1.1.0`), y el **repo debe ser público** para que la app
+> pueda consultar los releases.
+
+---
+
 ## Versión
 
-El nombre del archivo usa la versión de `package.json` (`"version"`). Subila (ej. `1.0.0`)
-cuando saques una release nueva.
+El nombre del archivo usa la versión de `package.json` (`"version"`), hoy en `1.0.0`.
