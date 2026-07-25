@@ -2130,3 +2130,27 @@ code {
   background: oklch(0.760 0.140 70 / 0.06);
 }
 .recovery-banner .gate-banner-text strong { color: oklch(0.760 0.140 70); }
+
+/* ── Eventos automáticos de enlace en la Timeline ─────────────────────
+   Desconexión (rojo) y reconexión (verde) del microcontrolador durante
+   una medición. Se destacan con borde lateral + etiqueta de texto. */
+.timeline-row.is-disconnect {
+  border-left: 3px solid var(--c-alarm, #e5484d);
+  padding-left: 9px;
+  background: color-mix(in srgb, var(--c-alarm, #e5484d) 7%, transparent);
+}
+.timeline-row.is-reconnect {
+  border-left: 3px solid var(--c-live, #30a46c);
+  padding-left: 9px;
+  background: color-mix(in srgb, var(--c-live, #30a46c) 6%, transparent);
+}
+.timeline-tag {
+  justify-self: end;
+  font-size: var(--t-xs, 11px);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.timeline-tag.is-down { color: var(--c-alarm, #e5484d); }
+.timeline-tag.is-up   { color: var(--c-live, #30a46c); }

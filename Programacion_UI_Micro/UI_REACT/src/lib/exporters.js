@@ -32,7 +32,15 @@ function normEvents(rows) {
     time:   e.elapsed_time ?? e.time,
     value:  e.impedance    ?? e.value,
     change: e.impedance_change ?? e.change ?? null,
+    kind:   e.kind ?? 'mark',
   }));
+}
+
+/** Etiqueta legible para los eventos automáticos de enlace. */
+function eventLabel(kind) {
+  if (kind === 'disconnect') return 'DESCONEXION del dispositivo';
+  if (kind === 'reconnect')  return 'RECONEXION del dispositivo';
+  return null;
 }
 
 function formatMmSs(secs) {
@@ -105,10 +113,19 @@ export function exportPDF({
     pdf.setFontSize(9); pdf.setTextColor(70);
     evs.forEach((e) => {
       if (y > 280) { pdf.addPage(); y = 20; }
-      pdf.text(
-        `#${String(e.id).padStart(2, '0')} · ${formatMmSs(e.time)} · ${Number(e.value).toFixed(2)} Ω`,
-        22, y,
-      );
+      const label = eventLabel(e.kind);
+      if (label) {
+        // Eventos de enlace: resaltados en rojo/verde, sin valor de impedancia.
+        if (e.kind === 'disconnect') pdf.setTextColor(200, 40, 40);
+        else                          pdf.setTextColor(30, 130, 80);
+        pdf.text(`#${String(e.id).padStart(2, '0')} · ${formatMmSs(e.time)} · ${label}`, 22, y);
+        pdf.setTextColor(70);
+      } else {
+        pdf.text(
+          `#${String(e.id).padStart(2, '0')} · ${formatMmSs(e.time)} · ${Number(e.value).toFixed(2)} Ω`,
+          22, y,
+        );
+      }
       y += 5;
     });
   }
@@ -171,6 +188,11 @@ export function exportTXT({
   if (evs.length > 0) {
     txt += '\n=== EVENTOS ===\n';
     evs.forEach((e) => {
+      const label = eventLabel(e.kind);
+      if (label) {
+        txt += `#${e.id} · ${formatMmSs(e.time)} · ${label}\n`;
+        return;
+      }
       txt += `#${e.id} · ${formatMmSs(e.time)} · ${Number(e.value).toFixed(2)} Ω`;
       if (e.change != null) txt += ` · Δ ${e.change > 0 ? '+' : ''}${Number(e.change).toFixed(2)} Ω`;
       txt += '\n';

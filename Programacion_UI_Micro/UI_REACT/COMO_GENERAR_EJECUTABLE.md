@@ -119,11 +119,34 @@ al release automáticamente.
 
 Como la app **no está firmada** con un certificado de pago, la primera vez:
 
-- **Mac:** click derecho sobre Chidori → **Abrir** → **Abrir** (solo la primera vez).
-  Si aparece "dañada/no se puede abrir", corré una vez:
-  `xattr -cr /Applications/Chidori.app`
-- **Windows:** en el aviso de SmartScreen → **Más información** → **Ejecutar de todas formas**.
-  (Chrome puede avisar "descarga no habitual" → **Conservar**.)
+### Mac
+
+El build aplica una **firma ad-hoc** automática (`electron/afterPack.cjs`), que evita
+que macOS trate la app como malware. Aun así, al ser un "desarrollador no identificado":
+
+1. Arrastrá Chidori a **Aplicaciones**.
+2. **Click derecho** sobre la app → **Abrir** → botón **Abrir**.
+3. Si macOS lo bloquea igual: **Ajustes del Sistema → Privacidad y seguridad** →
+   al final dice *"Chidori fue bloqueado…"* → **"Abrir de todas formas"**.
+
+**Si aparece "Malware bloqueado y transferido al basurero":**
+es un falso positivo de macOS por falta de firma de Apple. Recuperá la app del
+basurero y ejecutá una sola vez en la Terminal:
+
+```bash
+xattr -cr /Applications/Chidori.app
+codesign --force --deep --sign - /Applications/Chidori.app
+```
+
+Después abrila normalmente. (El primer comando saca la marca de "descargado de
+internet"; el segundo aplica la firma ad-hoc.)
+
+> Para que ese cartel no aparezca nunca en ninguna Mac hay que **notarizar** la app
+> con una cuenta Apple Developer (US$99/año). Es la única solución definitiva.
+### Windows
+
+- En el aviso de SmartScreen → **Más información** → **Ejecutar de todas formas**.
+- Chrome puede avisar "descarga no habitual" → **Conservar**.
 
 Para eliminar estos avisos hay que **firmar** la app (Apple Developer ~US$99/año;
 certificado code-signing en Windows). Para uso de tesis / interno, el workaround de

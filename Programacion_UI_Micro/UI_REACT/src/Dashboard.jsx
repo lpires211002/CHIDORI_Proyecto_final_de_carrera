@@ -307,7 +307,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         eventCount: cur.eventCount,
         data: dataBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
         rate: rateBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
-        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change)]),
+        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change), e.kind || 'mark']),
       };
       localStorage.setItem(SESSION_BACKUP_KEY, JSON.stringify(payload));
     } catch (err) {
@@ -332,7 +332,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     rateBufRef.current = ratePts;
     setData(dataPts.slice());
     setRateData(ratePts.slice());
-    setEvents((b.events || []).map(([id, time, value, change]) => ({ id, time, value, change })));
+    setEvents((b.events || []).map(([id, time, value, change, kind]) => ({ id, time, value, change, kind: kind || 'mark' })));
     setEventCount(b.eventCount || 0);
     setInitialValue(b.initialValue ?? null);
     const last = dataPts[dataPts.length - 1];
@@ -633,9 +633,43 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const changeVal = (initialValue !== null && currentValue !== null)
       ? currentValue - initialValue
       : null;
-    setEvents((prev) => [{ id: nextCount, time: elapsed, value: currentValue || 0, change: changeVal }, ...prev]);
+    setEvents((prev) => [{ id: nextCount, time: elapsed, value: currentValue || 0, change: changeVal, kind: 'mark' }, ...prev]);
     // El evento se persiste recién en el batch commit del ExportModal.
   };
+
+  /* ── Eventos automáticos de enlace ───────────────────────────────────
+   * Si el microcontrolador se desconecta EN MEDIO de una medición, queda
+   * registrado como evento (rojo) y su reconexión (verde). Así el hueco de
+   * datos es trazable en la lista, en el PDF y en la nube.
+   * No aplica al simulador ni fuera de una sesión activa.
+   */
+  const prevWsRef = useRef(wsStatus);
+  useEffect(() => {
+    const prev = prevWsRef.current;
+    prevWsRef.current = wsStatus;
+    if (isSimulator) return;
+    if (!measuring || !startTime) return;
+    if (prev === wsStatus) return;
+
+    const wasUp = prev === 'CONNECTED';
+    const isUp  = wsStatus === 'CONNECTED';
+    if (wasUp === isUp) return;                 // solo transiciones reales
+
+    const kind = isUp ? 'reconnect' : 'disconnect';
+    const elapsed = (Date.now() - startTime - pausedDuration) / 1000;
+
+    setEventCount((n) => {
+      const next = n + 1;
+      setEvents((prevEv) => [{
+        id: next,
+        time: elapsed,
+        value: currentValue || 0,
+        change: null,
+        kind,
+      }, ...prevEv]);
+      return next;
+    });
+  }, [wsStatus, measuring, startTime, pausedDuration, currentValue, isSimulator]);
 
   const handleReset = () => {
     lastUserActionRef.current = Date.now();

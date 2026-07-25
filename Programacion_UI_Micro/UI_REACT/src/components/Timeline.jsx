@@ -50,10 +50,17 @@ export default function Timeline({ events }) {
               const deltaClass = evt.change == null || evt.change === 0
                 ? ''
                 : evt.change < 0 ? 'neg' : 'pos';
+              // Eventos automáticos de enlace: se destacan por color y llevan
+              // etiqueta en vez del delta numérico.
+              const isDown = evt.kind === 'disconnect';
+              const isUp   = evt.kind === 'reconnect';
+              const rowClass = isDown ? 'timeline-row is-disconnect'
+                             : isUp   ? 'timeline-row is-reconnect'
+                             : 'timeline-row';
               return (
                 <motion.li
                   key={evt.id}
-                  className="timeline-row"
+                  className={rowClass}
                   layout
                   variants={itemVariants}
                   initial="hidden"
@@ -69,12 +76,20 @@ export default function Timeline({ events }) {
                   <span className="timeline-id">
                     #{evt.id.toString().padStart(2, '0')} · {fmtTime(evt.time)}
                   </span>
-                  <span className="timeline-z numeric">{evt.value.toFixed(2)} Ω</span>
-                  <span className={`timeline-delta numeric ${deltaClass}`}>
-                    {evt.change != null
-                      ? `${evt.change > 0 ? '+' : ''}${evt.change.toFixed(2)} Ω`
-                      : '—'}
+                  <span className="timeline-z numeric">
+                    {isDown || isUp ? '—' : `${evt.value.toFixed(2)} Ω`}
                   </span>
+                  {isDown || isUp ? (
+                    <span className={`timeline-tag ${isDown ? 'is-down' : 'is-up'}`}>
+                      {isDown ? 'Desconexión' : 'Reconexión'}
+                    </span>
+                  ) : (
+                    <span className={`timeline-delta numeric ${deltaClass}`}>
+                      {evt.change != null
+                        ? `${evt.change > 0 ? '+' : ''}${evt.change.toFixed(2)} Ω`
+                        : '—'}
+                    </span>
+                  )}
                 </motion.li>
               );
             })}

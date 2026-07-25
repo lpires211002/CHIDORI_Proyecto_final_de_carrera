@@ -101,8 +101,17 @@ export async function commitSession(supabase, payload) {
       elapsed_time:     e.time,
       impedance:        e.value,
       impedance_change: e.change,
+      kind:             e.kind || 'mark',   // 'mark' | 'disconnect' | 'reconnect'
     }));
-    const { error: eErr } = await supabase.from('session_events').insert(evRows);
+    let { error: eErr } = await supabase.from('session_events').insert(evRows);
+
+    // Fallback: si la columna `kind` todavía no existe en la tabla, reintentamos
+    // sin ese campo. Preferimos guardar el evento (perdiendo el tipo) antes que
+    // perder la sesión entera. Ver ALTER TABLE en COMO_MEDIR_CHIDORI.md.
+    if (eErr && /kind/i.test(eErr.message || '')) {
+      const legacy = evRows.map(({ kind, ...rest }) => rest);   // eslint-disable-line no-unused-vars
+      ({ error: eErr } = await supabase.from('session_events').insert(legacy));
+    }
     if (eErr) throw eErr;
   }
 

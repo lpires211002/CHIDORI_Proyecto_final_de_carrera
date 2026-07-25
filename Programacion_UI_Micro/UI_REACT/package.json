@@ -1,7 +1,7 @@
 {
   "name": "ui-react",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -55,7 +55,8 @@
         }
       ],
       "category": "public.app-category.medical",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "identity": null
     },
     "win": {
       "target": [
@@ -68,7 +69,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
-    }
+    },
+    "afterPack": "electron/afterPack.cjs"
   },
   "description": "Chidori - instrumento de bioimpedancia vesical",
   "author": "Luca Pires"
