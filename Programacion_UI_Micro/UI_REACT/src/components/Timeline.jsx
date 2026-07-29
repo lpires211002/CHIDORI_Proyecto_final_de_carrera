@@ -54,8 +54,10 @@ export default function Timeline({ events }) {
               // etiqueta en vez del delta numérico.
               const isDown = evt.kind === 'disconnect';
               const isUp   = evt.kind === 'reconnect';
+              const isGap  = evt.kind === 'gap';
               const rowClass = isDown ? 'timeline-row is-disconnect'
                              : isUp   ? 'timeline-row is-reconnect'
+                             : isGap  ? 'timeline-row is-gap'
                              : 'timeline-row';
               return (
                 <motion.li
@@ -79,9 +81,11 @@ export default function Timeline({ events }) {
                   <span className="timeline-z numeric">
                     {isDown || isUp ? '—' : `${evt.value.toFixed(2)} Ω`}
                   </span>
-                  {isDown || isUp ? (
-                    <span className={`timeline-tag ${isDown ? 'is-down' : 'is-up'}`}>
-                      {isDown ? 'Desconexión' : 'Reconexión'}
+                  {isDown || isUp || isGap ? (
+                    <span className={`timeline-tag ${isDown ? 'is-down' : isGap ? 'is-gap' : 'is-up'}`}>
+                      {isDown ? 'Desconexión'
+                        : isGap ? `Microcorte · ${Number(evt.change).toFixed(1)} s`
+                        : 'Reconexión'}
                     </span>
                   ) : (
                     <span className={`timeline-delta numeric ${deltaClass}`}>

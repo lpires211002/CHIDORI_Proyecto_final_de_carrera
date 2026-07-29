@@ -118,7 +118,7 @@ export default function SettingsPanel({
             </span>
 
             {!isDefault && (
-              <span className="field-hint" style={{ color: 'var(--c-warn, #d08700)' }}>
+              <span className="field-hint" style={{ color: 'var(--alarm)' }}>
                 ⚠ La dirección no es la de fábrica ({DEFAULTS.host}:{DEFAULTS.port}).
                 Si no conecta, usá “Restablecer valores por defecto”.
               </span>

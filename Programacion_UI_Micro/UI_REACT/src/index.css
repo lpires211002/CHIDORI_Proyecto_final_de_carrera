@@ -67,9 +67,13 @@
   --dur-slow:   360ms;   /* drawer */
 
   /* Typography */
-  --font-display: 'Fraunces', 'Source Serif 4', Georgia, serif;
-  --font-sans:    'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-  --font-mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* Tipografía · Climate Crisis solo para la marca; Montserrat para todo lo
+     demás, incluidos los números (con tabular-nums en .numeric para que no
+     cambien de ancho al actualizarse en vivo). */
+  --font-brand:   'Climate Crisis', 'Montserrat', system-ui, sans-serif;
+  --font-display: 'Montserrat', system-ui, -apple-system, sans-serif;
+  --font-sans:    'Montserrat', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Montserrat', system-ui, -apple-system, sans-serif;
 
   /* Type scale · ratio 1.250 (major third) */
   --t-xs:  11px;
@@ -197,12 +201,13 @@ a {
 }
 
 .brand-mark {
-  font-family: var(--font-display);
-  font-weight: 600;
+  /* Climate Crisis · exclusiva de la marca */
+  font-family: var(--font-brand);
+  font-weight: 400;              /* la fuente tiene un solo peso */
   font-style: normal;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0;
-  font-size: var(--t-2xl);
-  letter-spacing: -0.02em;
+  font-size: var(--t-xl);        /* algo menor: es una display muy pesada */
+  letter-spacing: 0.01em;
+  line-height: 1.1;
   color: var(--type-hi);
 }
 
@@ -272,9 +277,9 @@ h1, h2, h3 {
   line-height: 1.18;
 }
 
-h1 { font-size: var(--t-3xl); font-variation-settings: 'opsz' 144, 'SOFT' 0; }
-h2 { font-size: var(--t-xl);  font-variation-settings: 'opsz' 144, 'SOFT' 0; }
-h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
+h1 { font-size: var(--t-3xl); }
+h2 { font-size: var(--t-xl); }
+h3 { font-size: var(--t-lg); }
 
 .section-label {
   font-family: var(--font-mono);
@@ -585,7 +590,6 @@ h3 { font-size: var(--t-lg);  font-variation-settings: 'opsz' 96; }
 .readout-value {
   font-family: var(--font-display);
   font-weight: 400;
-  font-variation-settings: 'opsz' 144;
   font-size: var(--t-2xl);
   line-height: 1;
   color: var(--type-hi);
@@ -2033,7 +2037,6 @@ code {
 .command-clock-value {
   font-family: var(--font-display);
   font-weight: 400;
-  font-variation-settings: 'opsz' 144;
   font-size: var(--t-xl);
   line-height: 1;
   color: var(--type-hi);
@@ -2137,14 +2140,14 @@ code {
    Desconexión (rojo) y reconexión (verde) del microcontrolador durante
    una medición. Se destacan con borde lateral + etiqueta de texto. */
 .timeline-row.is-disconnect {
-  border-left: 3px solid var(--c-alarm, #e5484d);
+  border-left: 3px solid var(--alarm);
   padding-left: 9px;
-  background: color-mix(in srgb, var(--c-alarm, #e5484d) 7%, transparent);
+  background: color-mix(in srgb, var(--alarm) 7%, transparent);
 }
 .timeline-row.is-reconnect {
-  border-left: 3px solid var(--c-live, #30a46c);
+  border-left: 3px solid var(--confirm);
   padding-left: 9px;
-  background: color-mix(in srgb, var(--c-live, #30a46c) 6%, transparent);
+  background: color-mix(in srgb, var(--confirm) 6%, transparent);
 }
 .timeline-tag {
   justify-self: end;
@@ -2154,8 +2157,8 @@ code {
   font-weight: 600;
   white-space: nowrap;
 }
-.timeline-tag.is-down { color: var(--c-alarm, #e5484d); }
-.timeline-tag.is-up   { color: var(--c-live, #30a46c); }
+.timeline-tag.is-down { color: var(--alarm); }
+.timeline-tag.is-up   { color: var(--confirm); }
 
 /* ── Barra de acotado de ejes del gráfico ─────────────────────────────── */
 .chart-axis-bar {
@@ -2422,3 +2425,11 @@ code {
   border-radius: 2px;
   z-index: 5;
 }
+
+/* Microcorte en la transmisión · hueco de muestras (ámbar) */
+.timeline-row.is-gap {
+  border-left: 3px solid var(--alarm);
+  padding-left: 9px;
+  background: color-mix(in srgb, var(--alarm) 6%, transparent);
+}
+.timeline-tag.is-gap { color: var(--alarm); }

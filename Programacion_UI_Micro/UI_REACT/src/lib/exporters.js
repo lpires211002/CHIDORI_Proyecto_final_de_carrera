@@ -37,9 +37,15 @@ function normEvents(rows) {
 }
 
 /** Etiqueta legible para los eventos automáticos de enlace. */
-function eventLabel(kind) {
+function eventLabel(kind, e) {
   if (kind === 'disconnect') return 'DESCONEXION del dispositivo';
   if (kind === 'reconnect')  return 'RECONEXION del dispositivo';
+  if (kind === 'gap') {
+    const secs = Number(e?.change);
+    if (!Number.isFinite(secs)) return 'MICROCORTE en la transmision';
+    const lost = Math.max(0, Math.round(secs * 4) - 1);   // firmware a ~4 Hz
+    return `MICROCORTE · ${secs.toFixed(1)} s sin datos (~${lost} muestras perdidas)`;
+  }
   return null;
 }
 
@@ -128,10 +134,11 @@ export function exportPDF({
     pdf.setFontSize(9); pdf.setTextColor(70);
     evs.forEach((e) => {
       if (y > 280) { pdf.addPage(); y = 20; }
-      const label = eventLabel(e.kind);
+      const label = eventLabel(e.kind, e);
       if (label) {
         // Eventos de enlace: resaltados en rojo/verde, sin valor de impedancia.
         if (e.kind === 'disconnect') pdf.setTextColor(200, 40, 40);
+        else if (e.kind === 'gap')   pdf.setTextColor(190, 120, 20);
         else                          pdf.setTextColor(30, 130, 80);
         pdf.text(`#${String(e.id).padStart(2, '0')} · ${formatMmSs(e.time)} · ${label}`, 22, y);
         pdf.setTextColor(70);
@@ -208,7 +215,7 @@ export function exportTXT({
   if (evs.length > 0) {
     txt += '\n=== EVENTOS ===\n';
     evs.forEach((e) => {
-      const label = eventLabel(e.kind);
+      const label = eventLabel(e.kind, e);
       if (label) {
         txt += `#${e.id} · ${formatMmSs(e.time)} · ${label}\n`;
         return;

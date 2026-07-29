@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun,
   Settings as SettingsIcon, Cpu, LogOut, Shield, Menu,
+  ZapOff,
 } from 'lucide-react';
 
 import SettingsPanel     from './components/SettingsPanel';
@@ -59,6 +60,11 @@ const USER_ACTION_GRACE = 2000;    // ventana anti-race tras una acción del usu
  * más de STALE_AFTER_MS sin datos con el socket abierto, el último valor en
  * pantalla ya no es confiable y hay que decirlo. */
 const STALE_AFTER_MS    = 3000;
+/* Microcortes · el firmware transmite cada 250 ms (4 Hz). Un hueco mayor a
+ * esto implica muestras perdidas aunque el WebSocket nunca se haya cerrado
+ * (típico de interferencia WiFi). Se registra como evento para que el vacío
+ * en la curva quede documentado. */
+const GAP_THRESHOLD_MS  = 1500;
 
 /* Respaldo de sesión · snapshot periódico a localStorage para que un F5 o
  * un crash del navegador no pierdan una medición larga. */
@@ -129,6 +135,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [isSimulator, setIsSimulator] = useState(false);
   const simulatorIntervalRef = useRef(null);
   const simulatedZRef = useRef(150.0);
+  /* Corte simulado · hasta este timestamp el simulador no emite muestras.
+   * Sirve para probar la detección de microcortes sin desenchufar el equipo. */
+  const simGapUntilRef = useRef(0);
+  const SIM_GAP_SAMPLES = 6;          // el simulador emite 1 muestra/segundo
   // Factor V/Ω del simulador · aproxima I_iny x G_receptor del circuito real
   const SIM_V_PER_OHM = 0.0576;
 
@@ -425,9 +435,30 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       }
     }
     setCurrentValue(val);
-    lastDataAtRef.current = Date.now();
 
-    const elapsed = (Date.now() - cur.startTime - cur.pausedDuration) / 1000;
+    // ── Microcorte · hueco entre muestras consecutivas ────────────────────
+    const nowTs = Date.now();
+    const prevTs = lastDataAtRef.current;
+    lastDataAtRef.current = nowTs;
+
+    const elapsed = (nowTs - cur.startTime - cur.pausedDuration) / 1000;
+
+    if (prevTs != null && nowTs - prevTs > GAP_THRESHOLD_MS) {
+      const gapSec = (nowTs - prevTs) / 1000;
+      const lost = Math.max(0, Math.round(gapSec * 4) - 1);   // ~4 Hz
+      setEventCount((n) => {
+        const next = n + 1;
+        setEvents((prevEv) => [{
+          id: next,
+          time: elapsed,
+          value: val,
+          change: gapSec,        // duración del hueco, en segundos
+          kind: 'gap',
+        }, ...prevEv]);
+        return next;
+      });
+      console.warn(`[microcorte] ${gapSec.toFixed(1)} s sin datos · ~${lost} muestras perdidas`);
+    }
 
     // ── Buffers síncronos · la tasa se calcula acá, no dentro de un updater ──
     const buf = dataBufRef.current;
@@ -563,11 +594,21 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measuring, startTime, pausedDuration, data, initialValue, currentValue, eventCount, wsStatus, isSimulator]);
 
+  /* Al iniciar o reanudar, la referencia de "última muestra" se reinicia:
+   * el tiempo en pausa no es un microcorte. */
+  useEffect(() => {
+    if (measuring) lastDataAtRef.current = null;
+  }, [measuring]);
+
   /* ── Simulator ─────────────────────────────────────────────────────── */
   useEffect(() => {
     if (isSimulator && measuring) {
       simulatedZRef.current = initialValue !== null ? initialValue : 150.0;
       simulatorIntervalRef.current = setInterval(() => {
+        // Corte simulado en curso: el simulador "no transmite" y el hueco
+        // queda registrado por la detección de microcortes al volver.
+        if (Date.now() < simGapUntilRef.current) return;
+
         const noise = (Math.random() - 0.5) * 0.08;
         const fillStep = 0.12;
         const nextZ = simulatedZRef.current - fillStep + noise;
@@ -586,6 +627,14 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return () => simulatorIntervalRef.current && clearInterval(simulatorIntervalRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSimulator, measuring]);
+
+  /** Fuerza un hueco de SIM_GAP_SAMPLES muestras en el simulador. */
+  const simulateMicroGap = () => {
+    if (!isSimulator || !measuring) return;
+    const ms = SIM_GAP_SAMPLES * 1000;          // 1 muestra/segundo
+    simGapUntilRef.current = Date.now() + ms;
+    toast(`Simulando corte de ${SIM_GAP_SAMPLES} muestras (${ms / 1000} s)…`, 'info');
+  };
 
   const toggleSimulator = () => {
     if (measuring) { toast('Detenga la medición antes de alternar el simulador', 'warn'); return; }
@@ -1052,6 +1101,19 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               <Bookmark size={15} />
               Marcar
             </button>
+            {/* Solo en simulador · prueba de la detección de microcortes */}
+            {isSimulator && (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={simulateMicroGap}
+                disabled={!measuring}
+                title={`Corta la transmisión simulada durante ${SIM_GAP_SAMPLES} muestras`}
+              >
+                <ZapOff size={14} />
+                Simular corte
+              </button>
+            )}
             <button type="button" className="button button-ghost" onClick={() => setConfirmReset(true)} disabled={!startTime && data.length === 0}>
               <RotateCcw size={14} />
               Reiniciar

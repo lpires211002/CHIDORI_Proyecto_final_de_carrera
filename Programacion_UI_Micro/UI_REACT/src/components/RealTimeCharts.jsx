@@ -42,7 +42,64 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
     mute:   readToken('--type-mute', '#666'),
     grid:   readToken('--hairline', 'rgba(255,255,255,0.06)'),
     bg:     readToken('--ink-1', '#181818'),
+    alarm:  readToken('--alarm', '#e5484d'),
   });
+
+  /* Plugin · bandas de microcorte.
+   * Marca el intervalo donde se perdieron muestras (evento kind 'gap':
+   * `time` es el instante en que volvieron los datos y `change` la duración
+   * del hueco en segundos). Se dibuja ANTES del dataset para que la curva
+   * quede por encima de la banda. Aplica a las tres series: el hueco de
+   * transmisión afecta a todas por igual. */
+  const gapBandsPlugin = {
+    id: 'gapBands',
+    beforeDatasetsDraw(chart) {
+      const evts = eventsRef.current;
+      if (!evts || evts.length === 0) return;
+      const { ctx, chartArea, scales: { x } } = chart;
+      if (!chartArea) return;
+
+      const p = palette();
+      const gaps = evts.filter((e) => e.kind === 'gap' && Number.isFinite(Number(e.change)));
+      if (gaps.length === 0) return;
+
+      ctx.save();
+      gaps.forEach((g) => {
+        const tEnd   = Number(g.time);
+        const tStart = tEnd - Number(g.change);
+
+        // Recortamos al área visible (con zoom o ventana puede quedar fuera)
+        let xa = x.getPixelForValue(tStart);
+        let xb = x.getPixelForValue(tEnd);
+        if (xb < chartArea.left || xa > chartArea.right) return;
+        xa = Math.max(xa, chartArea.left);
+        xb = Math.min(xb, chartArea.right);
+
+        const w = Math.max(xb - xa, 1.5);   // visible aunque el hueco sea corto
+        const h = chartArea.bottom - chartArea.top;
+
+        // Fondo tenue · usamos globalAlpha porque el canvas 2D no soporta
+        // color-mix(); así funciona con cualquier formato del token (hex/oklch).
+        ctx.globalAlpha = 0.13;
+        ctx.fillStyle = p.alarm;
+        ctx.fillRect(xa, chartArea.top, w, h);
+        ctx.globalAlpha = 1;
+
+        // Bordes punteados
+        ctx.beginPath();
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = p.alarm;
+        ctx.moveTo(xa, chartArea.top);
+        ctx.lineTo(xa, chartArea.bottom);
+        ctx.moveTo(xb, chartArea.top);
+        ctx.lineTo(xb, chartArea.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+      ctx.restore();
+    },
+  };
 
   // Plugin · event markers (solo en modo impedancia)
   const eventLinesPlugin = {
@@ -70,7 +127,7 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
 
         ctx.setLineDash([]);
         const label = `${evt.id.toString().padStart(2, '0')}`;
-        ctx.font = '500 10px "IBM Plex Mono", monospace';
+        ctx.font = '600 10px Montserrat, system-ui, sans-serif';
         const labelWidth = ctx.measureText(label).width + 10;
         ctx.fillStyle = p.signal;
         ctx.beginPath();
@@ -92,8 +149,8 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
       type: 'linear',
       ...(lim.xMin != null ? { min: lim.xMin } : {}),
       ...(lim.xMax != null ? { max: lim.xMax } : {}),
-      title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 10, weight: '500', family: 'IBM Plex Mono' } },
-      ticks: { color: p.mute, font: { size: 10, family: 'IBM Plex Mono' } },
+      title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 10, weight: '500', family: 'Montserrat' } },
+      ticks: { color: p.mute, font: { size: 10, family: 'Montserrat' } },
       grid:  { color: p.grid, drawTicks: false },
       border: { color: p.grid },
     },
@@ -105,9 +162,9 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
         display: true,
         text: m === 'z' ? 'impedancia (Ω)' : m === 'v' ? 'tensión (V)' : 'Ω/min',
         color: p.mute,
-        font: { size: 10, weight: '500', family: 'IBM Plex Mono' },
+        font: { size: 10, weight: '500', family: 'Montserrat' },
       },
-      ticks: { color: p.mute, font: { size: 10, family: 'IBM Plex Mono' } },
+      ticks: { color: p.mute, font: { size: 10, family: 'Montserrat' } },
       grid:  { color: p.grid, drawTicks: false },
       border: { color: p.grid },
     },
@@ -135,7 +192,7 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
           pointHoverBorderWidth: 1.5,
         }],
       },
-      plugins: [eventLinesPlugin],
+      plugins: [gapBandsPlugin, eventLinesPlugin],
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -167,8 +224,8 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
             borderWidth: 1,
             padding: 10,
             displayColors: false,
-            titleFont:  { family: 'IBM Plex Mono', size: 10 },
-            bodyFont:   { family: 'IBM Plex Mono', size: 11 },
+            titleFont:  { family: 'Montserrat', size: 10 },
+            bodyFont:   { family: 'Montserrat', size: 11 },
             callbacks: {
               title: (c) => `t = ${c[0].parsed.x.toFixed(1)} s`,
               label: (c) => (modeRef.current === 'z'
