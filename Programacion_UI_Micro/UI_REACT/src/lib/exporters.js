@@ -107,6 +107,21 @@ export function exportPDF({
     } catch { /* noop */ }
   }
 
+  // Observaciones libres de la sesión
+  if (patient?.notas) {
+    if (y > 240) { pdf.addPage(); y = 20; }
+    pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Notas de la sesión', 20, y); y += 6;
+    pdf.setFontSize(9); pdf.setTextColor(70);
+    // split para que el texto largo no se salga de la hoja
+    const wrapped = pdf.splitTextToSize(String(patient.notas), 170);
+    wrapped.forEach((line) => {
+      if (y > 280) { pdf.addPage(); y = 20; }
+      pdf.text(line, 22, y);
+      y += 5;
+    });
+    y += 5;
+  }
+
   if (evs.length > 0) {
     if (y > 250) { pdf.addPage(); y = 20; }
     pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Eventos', 20, y); y += 6;
@@ -184,6 +199,11 @@ export function exportTXT({
   meas.forEach((m) => {
     txt += `${Number(m.t).toFixed(2)}\t${Number(m.z).toFixed(3)}\t${Number(m.rate).toFixed(3)}\n`;
   });
+
+  if (patient?.notas) {
+    txt += '\n=== NOTAS DE LA SESIÓN ===\n';
+    txt += `${patient.notas}\n`;
+  }
 
   if (evs.length > 0) {
     txt += '\n=== EVENTOS ===\n';

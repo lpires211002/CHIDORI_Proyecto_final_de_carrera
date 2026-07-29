@@ -18,8 +18,6 @@ import CloudSyncBadge    from './components/CloudSyncBadge';
 import ConfirmModal      from './components/ConfirmModal';
 import Toasts            from './components/Toasts';
 import EmptyState        from './components/EmptyState';
-import SpotlightArea     from './components/SpotlightArea';
-import LineTabs          from './components/LineTabs';
 import ConnectionGate    from './components/ConnectionGate';
 import useCloudSync      from './components/useCloudSync';
 import usePendingSync    from './components/usePendingSync';
@@ -129,8 +127,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [isSimulator, setIsSimulator] = useState(false);
   const simulatorIntervalRef = useRef(null);
   const simulatedZRef = useRef(150.0);
-  // Factor V/Ω del simulador · aproxima I_iny x G_receptor del circuito real
-  const SIM_V_PER_OHM = 0.0576;
 
   /* ── Session state ────────────────────────────────────────────────── */
   const [measuring, setMeasuring]       = useState(false);
@@ -142,11 +138,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [rateData, setRateData]         = useState([]);
   const [events, setEvents]             = useState([]);
   const [initialValue, setInitialValue] = useState(null);
-  // Tension de lectura (Vpp del detector) reportada por el firmware · referencia
-  const [voltage, setVoltage]           = useState(null);
-  const [voltageData, setVoltageData]   = useState([]);   // serie graficable
-  const voltageBufRef = useRef([]);
-  const lastVoltageRef = useRef(null);
   const [currentValue, setCurrentValue] = useState(null);
   const [rate, setRate]                 = useState(0);
   const [eventCount, setEventCount]     = useState(0);
@@ -443,16 +434,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       computedRate = dx > 0 ? (dy / dx) * 60 : 0;
     }
     rateBufRef.current.push({ x: elapsed, y: computedRate });
-    // Serie de tensión · misma base temporal que Z (solo si el firmware la reporta)
-    if (lastVoltageRef.current != null) {
-      voltageBufRef.current.push({ x: elapsed, y: lastVoltageRef.current });
-    }
 
     // Updaters puros: copia superficial para nueva identidad de referencia.
     setRate(computedRate);
     setData(buf.slice());
     setRateData(rateBufRef.current.slice());
-    if (voltageBufRef.current.length) setVoltageData(voltageBufRef.current.slice());
 
     // NOTA · ya no insertamos en Supabase aquí. Todo queda en memoria
     // hasta que el clínico confirme el guardado desde el ExportModal.
@@ -522,8 +508,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const estado = field('estado');
     const rssi   = field('rssi') != null ? parseInt(field('rssi'), 10) : null;
     const heap   = field('heap') != null ? parseInt(field('heap'), 10) : null;
-    const volt   = field('v') != null ? parseFloat(field('v')) : null;
-    if (Number.isFinite(volt)) setVoltage(volt);
     setDevice({
       state: estado,
       rssi:  Number.isFinite(rssi) ? rssi : null,
@@ -538,16 +522,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const s = rawData.trim();
     if (s === '' || s === 'PONG') return;          // liveness · sin efecto
     if (s.startsWith('STATUS')) { applyDeviceStatus(s); return; }
-    // Formato del firmware: "<Z>" (viejo) o "<Z> <Vpp>" (nuevo, tension de lectura).
-    const parts = s.split(/\s+/);
-    const v = Number(parts[0]);                     // estricto: "1.2.3" → NaN
-    if (Number.isFinite(v)) {
-      if (parts.length > 1) {
-        const volt = Number(parts[1]);
-        if (Number.isFinite(volt)) { setVoltage(volt); lastVoltageRef.current = volt; }
-      }
-      handleIncomingData(v);
-    }
+    const v = Number(s);                            // estricto: "1.2.3" → NaN
+    if (Number.isFinite(v)) handleIncomingData(v);
     // cualquier otro texto desconocido se ignora (forward-compat)
   };
 
@@ -572,11 +548,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         const fillStep = 0.12;
         const nextZ = simulatedZRef.current - fillStep + noise;
         simulatedZRef.current = nextZ;
-        // Tensión sintética coherente con la Z (V = Z x I x G del circuito real),
-        // para poder ver/probar la celda de tensión sin el hardware conectado.
-        const simV = nextZ * SIM_V_PER_OHM;
-        setVoltage(simV);
-        lastVoltageRef.current = simV;
         handleIncomingData(nextZ);
       }, 1000);
     } else if (simulatorIntervalRef.current) {
@@ -654,49 +625,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     }
   };
 
-  /* ── Basal manual ────────────────────────────────────────────────────
-   * Permite fijar la referencia cuando el paciente YA está acomodado, en vez
-   * de depender de la calibración automática de las primeras muestras.
-   */
-  const BASELINE_MANUAL_WINDOW = 8;
-
-  /** Valor que aplicaría "Re-fijar": la MISMA mediana que usa handleSetBaselineNow.
-   *  Se expone para que el botón muestre exactamente lo que va a fijar (antes
-   *  mostraba la lectura instantánea y aplicaba otra cosa). */
-  const baselineCandidate = useMemo(() => {
-    const buf = dataBufRef.current;
-    if (!buf || buf.length === 0) return null;
-    const last   = buf.slice(-BASELINE_MANUAL_WINDOW).map((p) => p.y);
-    const sorted = [...last].sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentValue]);
-
-  const handleSetBaselineNow = () => {
-    const buf = dataBufRef.current;
-    if (!buf || buf.length === 0) {
-      toast('Todavía no hay lecturas para fijar el basal', 'warn');
-      return;
-    }
-    // Mediana de las últimas muestras: evita que un pico puntual quede como referencia.
-    const last   = buf.slice(-BASELINE_MANUAL_WINDOW).map((p) => p.y);
-    const sorted = [...last].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    setInitialValue(median);
-    toast(`Basal fijado en ${median.toFixed(2)} Ω (mediana de ${last.length} lecturas)`, 'success');
-  };
-
-  const handleSetBaselineManual = (raw) => {
-    const v = parseFloat(raw);
-    if (!Number.isFinite(v) || v <= 0) {
-      toast('Ingresá un valor de basal válido en Ω', 'warn');
-      return false;
-    }
-    setInitialValue(v);
-    toast(`Basal fijado en ${v.toFixed(2)} Ω`, 'success');
-    return true;
-  };
-
   const handleMarkEvent = () => {
     if (!measuring || !startTime) return;
     const elapsed = (Date.now() - startTime - pausedDuration) / 1000;
@@ -755,10 +683,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setRateData([]);
     setEvents([]);
     setInitialValue(null);
-    setVoltage(null);
-    setVoltageData([]);
-    voltageBufRef.current = [];
-    lastVoltageRef.current = null;
     baselineSamplesRef.current = [];
     lastAcceptedZRef.current   = null;
     consecRejectRef.current    = 0;
@@ -811,7 +735,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       patient_height:     patientInfo.altura === '' || patientInfo.altura == null ? null : parseFloat(patientInfo.altura),
       patient_iliac_circ: patientInfo.circ === '' || patientInfo.circ == null ? null : parseFloat(patientInfo.circ),
       menstruation_info:  patientInfo.menstruacion || null,
-      notes:              patientInfo.notas || null,   // observaciones libres
     };
 
     // Sesión ya commiteada: solo update del paciente + stats finales
@@ -1071,14 +994,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             onToggleSimulator={toggleSimulator}
           />
         ) : (
-          /* Foco + borde luminoso sobre las tarjetas reales de medición.
-             Es solo presentación: no altera datos ni interacción. */
-          <SpotlightArea>
+          <>
             {/* ── Grid de monitoreo · señal (izq) + vejiga hero (der) ── */}
             <div className="monitor-grid">
               <div className="monitor-main">
                 <StatsGrid
-                  voltage={voltage}
                   initialValue={initialValue}
                   currentValue={currentValue}
                   rate={rate}
@@ -1086,7 +1006,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                   rateHistory={rateData}
                   stale={signalStale}
                 />
-                <RealTimeCharts data={data} rateData={rateData} voltageData={voltageData} events={events} theme={theme} />
+                <RealTimeCharts data={data} rateData={rateData} events={events} theme={theme} />
               </div>
 
               <div className="monitor-side">
@@ -1134,14 +1054,26 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
             {/* ── Zona de setup · tabs Configuración / Eventos ── */}
             <section className="setup-section">
-              <LineTabs
-                items={[
-                  { key: 'config', label: 'Configuración de sesión' },
-                  { key: 'events', label: `Eventos · ${String(eventCount).padStart(2, '0')}` },
-                ]}
-                active={setupTab}
-                onChange={setSetupTab}
-              />
+              <div className="setup-tabbar" role="tablist" aria-label="Configuración y eventos">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={setupTab === 'config'}
+                  className={`setup-tab ${setupTab === 'config' ? 'active' : ''}`}
+                  onClick={() => setSetupTab('config')}
+                >
+                  Configuración de sesión
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={setupTab === 'events'}
+                  className={`setup-tab ${setupTab === 'events' ? 'active' : ''}`}
+                  onClick={() => setSetupTab('events')}
+                >
+                  Eventos · {String(eventCount).padStart(2, '0')}
+                </button>
+              </div>
 
               {setupTab === 'config' ? (
                 <div className="setup-grid">
@@ -1149,12 +1081,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                     currentValue={currentValue}
                     onSaveCalibration={handleSaveCalibration}
                     onShowAlert={toast}
-                    activeBaseline={initialValue}
-                    onSetBaselineNow={handleSetBaselineNow}
-                    baselineCandidate={baselineCandidate}
-                    onSetBaselineManual={handleSetBaselineManual}
                   />
-
 
                   <section className="surface surface-pad">
                     <header className="section-head" style={{ marginBottom: 18 }}>
@@ -1238,7 +1165,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                 <Timeline events={events} />
               )}
             </section>
-          </SpotlightArea>
+          </>
         )}
       </main>
 

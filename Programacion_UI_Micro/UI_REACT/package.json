@@ -1,7 +1,7 @@
 {
   "name": "ui-react",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,26 +14,28 @@
     "dist:win": "vite build && electron-builder --win"
   },
   "dependencies": {
+    "@react-three/fiber": "^9.6.1",
     "@supabase/supabase-js": "^2.106.1",
     "chart.js": "^4.5.1",
     "framer-motion": "^12.40.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
-    "vite": "^8.0.12",
-    "electron": "^31.7.7",
-    "electron-builder": "^24.13.3"
+    "vite": "^8.0.12"
   },
   "main": "electron/main.cjs",
   "build": {

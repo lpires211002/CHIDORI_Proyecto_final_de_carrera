@@ -1,4 +1,8 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
+
+// Carga diferida: three.js pesa, y así no demora el arranque de la app.
+// Solo se descarga/monta en esta pantalla previa a la medición.
+const Antigravity = lazy(() => import('./Antigravity'));
 
 /**
  * Empty state shown before any data has arrived.
@@ -9,6 +13,28 @@ export default function EmptyState({ wsStatus, isSimulator, onOpenSettings, onTo
 
   return (
     <div className="empty-state">
+      {/* Fondo animado · decorativo. Se desmonta al iniciar la medición
+          (este componente deja de renderizarse), así que no consume GPU
+          durante una sesión larga. */}
+      <div className="empty-state-bg" aria-hidden="true">
+        <Suspense fallback={null}>
+          <Antigravity
+            count={260}
+            magnetRadius={9}
+            ringRadius={7.5}
+            waveSpeed={0.4}
+            waveAmplitude={1}
+            particleSize={1.4}
+            lerpSpeed={0.05}
+            autoAnimate
+            particleVariance={1}
+            rotationSpeed={0.05}
+            pulseSpeed={2.4}
+            fieldStrength={10}
+          />
+        </Suspense>
+      </div>
+
       <h2>Listo para registrar una sesión</h2>
       <p>
         Encienda el Chidori y conecte esta computadora a su red WiFi, calibre los umbrales del

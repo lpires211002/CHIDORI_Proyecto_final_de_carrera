@@ -29,13 +29,14 @@ export default function ExportModal({
   const [altura, setAltura]             = useState('');
   const [circ, setCirc]                 = useState('');
   const [menstruacion, setMenstruacion] = useState('');
+  const [notas, setNotas]               = useState('');
   const [saveToDb, setSaveToDb]         = useState(true);
   const [committing, setCommitting]     = useState(false);
 
   if (!isOpen) return null;
 
   const buildPatient = () => {
-    if (!(nombre || edad || sexo || peso || altura || circ)) return null;
+    if (!(nombre || edad || sexo || peso || altura || circ || notas)) return null;
     return {
       nombre:        nombre || 'N/A',
       edad:          edad || 'N/A',
@@ -44,6 +45,7 @@ export default function ExportModal({
       altura:        altura || 'N/A',
       circ:          circ || 'N/A',
       menstruacion:  menstruacion || 'N/A',
+      notas:         notas || '',
     };
   };
 
@@ -74,7 +76,7 @@ export default function ExportModal({
   const fireCloudSave = () => {
     if (!saveToDb || !onSavePatient) return;
     Promise.resolve(
-      onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion })
+      onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion, notas })
     ).catch(() => { /* Dashboard ya togglea su propio toast de error */ });
   };
 
@@ -234,6 +236,23 @@ export default function ExportModal({
                 <input id="ex-menst" className="input" type="text" placeholder="p.ej. 15 días" value={menstruacion} onChange={(e) => setMenstruacion(e.target.value)} />
               </div>
             )}
+
+            {/* Observaciones libres · particularidades de esta sesión */}
+            <div className="field">
+              <label className="field-label" htmlFor="ex-notas">Notas de la sesión</label>
+              <textarea
+                id="ex-notas"
+                className="input"
+                rows={4}
+                placeholder="Particularidades de la medición: posición del paciente, incidencias, cambios de electrodos, observaciones clínicas…"
+                value={notas}
+                onChange={(e) => setNotas(e.target.value)}
+                style={{ resize: 'vertical', minHeight: 84, lineHeight: 1.5, fontFamily: 'inherit' }}
+              />
+              <span className="field-hint">
+                Se incluyen en el reporte PDF, en el TXT y se guardan con la sesión.
+              </span>
+            </div>
 
             <div className="row" style={{ justifyContent: 'flex-end' }}>
               <button

@@ -2052,6 +2052,8 @@ code {
 /* ─── READOUT · variante de 3 celdas (hero + 2 satélites) ─────────── */
 @media (min-width: 981px) {
   .readout-3 { grid-template-columns: 1.6fr 1fr 1fr; }
+  /* 4 celdas · cuando el firmware reporta la tensión de lectura */
+  .readout-4 { grid-template-columns: 1.5fr 1fr 1fr 1fr; }
 }
 
 /* ─── SEGMENT · variante compacta (toggle del gráfico) ────────────── */
@@ -2154,3 +2156,269 @@ code {
 }
 .timeline-tag.is-down { color: var(--c-alarm, #e5484d); }
 .timeline-tag.is-up   { color: var(--c-live, #30a46c); }
+
+/* ── Barra de acotado de ejes del gráfico ─────────────────────────────── */
+.chart-axis-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 2px 0 10px;
+}
+.chart-axis-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-axis-label {
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--type-mute, #666);
+  white-space: nowrap;
+}
+.input-xs {
+  width: 72px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  height: auto;
+}
+
+/* ── Fondo animado de la pantalla previa a la medición ────────────────── */
+.empty-state { position: relative; overflow: hidden; }
+
+.empty-state-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.42;            /* atenuado: no debe competir con el texto */
+  pointer-events: auto;     /* deja que las partículas sigan al mouse */
+}
+
+/* El contenido queda por encima del canvas y mantiene sus clicks. */
+.empty-state > *:not(.empty-state-bg) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Tema claro · el efecto necesita menos presencia sobre fondo blanco. */
+[data-theme='light'] .empty-state-bg { opacity: 0.28; }
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-state-bg { display: none; }
+}
+
+/* ── Franja de basal activo · dentro de la tarjeta de Calibración ─────── */
+.baseline-strip {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline, rgba(255,255,255,0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.baseline-strip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.baseline-strip-value {
+  font-size: var(--t-lg, 15px);
+  color: var(--type-hi, #fff);
+}
+.baseline-strip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.baseline-strip-manual {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.baseline-strip-manual .input-xs { width: 96px; }
+
+/* ── Realce de tarjetas (adaptación de MagicBento) ────────────────────────
+   LO PRINCIPAL: la tarjeta bajo el cursor se ilumina — borde encendido,
+   halo alrededor y una leve elevación. El brillo por proximidad queda como
+   acento secundario, no como protagonista. */
+
+.spotlight-area { position: relative; }
+
+.spotlight-area .surface,
+.spotlight-area .readout-cell {
+  --glow-x: 50%;
+  --glow-y: 50%;
+  --glow-intensity: 0;
+  --glow-radius: 320px;
+  position: relative;
+  transition: border-color .2s ease, box-shadow .25s ease, transform .25s ease;
+}
+
+/* ── HOVER · la tarjeta se enciende ─────────────────────────────────── */
+.spotlight-area .surface:hover,
+.spotlight-area .readout-cell:hover {
+  border-color: color-mix(in srgb, var(--signal, #6366f1) 55%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--signal, #6366f1) 35%, transparent),
+    0 0 26px -6px color-mix(in srgb, var(--signal, #6366f1) 45%, transparent),
+    0 10px 30px -12px rgba(0, 0, 0, .55);
+  transform: translateY(-2px);
+  z-index: 5;
+}
+
+/* Fondo apenas realzado en la tarjeta activa */
+.spotlight-area .surface:hover::before,
+.spotlight-area .readout-cell:hover::before {
+  background: radial-gradient(
+    140% 120% at var(--glow-x) var(--glow-y),
+    color-mix(in srgb, var(--signal, #6366f1) 10%, transparent) 0%,
+    color-mix(in srgb, var(--signal, #6366f1) 4%, transparent) 45%,
+    transparent 80%);
+}
+
+/* Capa de fondo (base, sin hover) */
+.spotlight-area .surface::before,
+.spotlight-area .readout-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: transparent;
+  pointer-events: none;
+  z-index: 0;
+  transition: background .2s ease-out;
+}
+
+/* ── Acento por proximidad · borde tenue en las tarjetas cercanas ───── */
+.spotlight-area .surface::after,
+.spotlight-area .readout-cell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    var(--glow-radius) circle at var(--glow-x) var(--glow-y),
+    color-mix(in srgb, var(--signal, #6366f1) calc(var(--glow-intensity) * 30%), transparent) 0%,
+    transparent 60%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* El contenido siempre por encima de los halos */
+.spotlight-area .surface > *,
+.spotlight-area .readout-cell > * { position: relative; z-index: 4; }
+
+/* Las celdas de lectura viven dentro de un contenedor con borde propio:
+   evitamos que el hover de la celda "pise" visualmente al del contenedor. */
+.spotlight-area .readout:hover { z-index: 1; }
+
+/* Tema claro · sombra menos pesada */
+[data-theme='light'] .spotlight-area .surface:hover,
+[data-theme='light'] .spotlight-area .readout-cell:hover {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--signal, #6366f1) 30%, transparent),
+    0 0 22px -8px color-mix(in srgb, var(--signal, #6366f1) 40%, transparent),
+    0 8px 24px -14px rgba(0, 0, 0, .25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-area .surface,
+  .spotlight-area .readout-cell { transition: none; }
+  .spotlight-area .surface:hover,
+  .spotlight-area .readout-cell:hover { transform: none; }
+  .spotlight-area .surface::after,
+  .spotlight-area .readout-cell::after { display: none; }
+}
+
+/* ── LineTabs · adaptación horizontal de LineSidebar ──────────────────────
+   Una sola variable --effect (0..1), animada por rAF en JS, alimenta color,
+   escala del marcador y opacidad del índice: todo se mueve en conjunto. */
+
+.line-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 30px;
+  border-bottom: 1px solid var(--hairline);
+  --max-shift: 0px;
+}
+
+.line-tab {
+  --effect: 0;
+  position: relative;
+  padding: 10px 2px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  /* Área de detección más amplia: reacciona un poco antes de llegar */
+  isolation: isolate;
+}
+.line-tab::before {
+  content: '';
+  position: absolute;
+  inset: -4px -14px;
+}
+
+.line-tab__label {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  /* El color viaja del apagado al acento según --effect */
+  color: color-mix(in srgb,
+    var(--signal, #6366f1) calc(var(--effect) * 100%),
+    var(--type-mute, #666));
+  transform: translateY(calc(var(--effect) * var(--max-shift) * -1));
+}
+
+.line-tab.is-active .line-tab__label { color: var(--type-hi, #fff); }
+
+.line-tab__index {
+  margin-right: 0.55em;
+  font-size: 0.9em;
+  opacity: calc(0.4 + var(--effect) * 0.6);
+}
+
+/* Marcador · línea bajo la pestaña que crece con la proximidad */
+.line-tab__marker {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(calc(0.12 + var(--effect) * 0.88));
+  background-color: color-mix(in srgb,
+    var(--signal, #6366f1) calc(var(--effect) * 100%),
+    var(--hairline-strong, #444));
+}
+
+.line-tab.is-active .line-tab__marker {
+  background-color: var(--signal, #6366f1);
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line-tab__label { transform: none; }
+}
+
+/* ── Zoom por selección en el gráfico ─────────────────────────────────── */
+.chart-drag-box {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--signal, #6366f1) 70%, transparent);
+  background: color-mix(in srgb, var(--signal, #6366f1) 12%, transparent);
+  border-radius: 2px;
+  z-index: 5;
+}

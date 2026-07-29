@@ -17,6 +17,7 @@ export default function StatsGrid({
   initialValue,
   currentValue,
   rate,
+  voltage = null,
   zHistory,
   rateHistory,
   stale = false,
@@ -39,7 +40,7 @@ export default function StatsGrid({
 
   return (
     <div
-      className={`readout readout-3 ${stale ? 'is-stale' : ''}`}
+      className={`readout ${voltage != null ? 'readout-4' : 'readout-3'} ${stale ? 'is-stale' : ''}`}
       role="group"
       aria-label={stale ? 'Lectura desactualizada · sin datos del dispositivo' : 'Lectura en vivo'}
     >
@@ -89,6 +90,19 @@ export default function StatsGrid({
           <Sparkline data={rateSpark} width={160} height={30} state={rate < 0 ? 'neg' : rate > 0 ? 'pos' : null} />
         </div>
       </div>
+
+      {/* Tensión de lectura · dato crudo del detector, referencia/diagnóstico.
+          Solo aparece si el firmware la reporta (protocolo "<Z> <Vpp>"). */}
+      {voltage != null && (
+        <div className="readout-cell">
+          <span className="readout-label">Tensión de lectura</span>
+          <span className="readout-value numeric">
+            <NumberTicker value={voltage} decimals={4} stiffness={140} damping={24} />
+            <span className="readout-unit" style={{ marginLeft: 6 }}>V</span>
+          </span>
+          <span className="readout-delta mute">Vpp del detector</span>
+        </div>
+      )}
     </div>
   );
 }

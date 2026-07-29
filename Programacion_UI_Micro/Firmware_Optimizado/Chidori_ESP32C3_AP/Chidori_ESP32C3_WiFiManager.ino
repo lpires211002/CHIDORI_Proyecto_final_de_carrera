@@ -133,6 +133,11 @@ float muestras[CANT_MUESTRAS];
 int   size_m    = 0;
 float average_Z = 0;
 
+// Ultima tension pico-pico del detector (la que alimenta el calculo de Z).
+// Se transmite junto con Z como dato de referencia/diagnostico. Es solo una
+// asignacion por ciclo: no altera el muestreo ni el calculo.
+float last_Vpp  = 0.0f;
+
 float CORRIENTE_INYECTADA;
 float GANANCIA_RECEPTOR;
 
@@ -477,12 +482,12 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
     webSocket.sendTXT(num, "PONG");
   }
   else if (strcmp(cmd, "STATUS") == 0) {
-    char buf[96];
+    char buf[112];
     snprintf(buf, sizeof(buf),
-             "STATUS estado=%s rssi=%d heap=%u Z=%.3f",
+             "STATUS estado=%s rssi=%d heap=%u Z=%.3f v=%.4f",
              Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO",
              wifiUp ? (int)WiFi.RSSI() : 0,
-             (unsigned)ESP.getFreeHeap(), Chidori.Z);
+             (unsigned)ESP.getFreeHeap(), Chidori.Z, last_Vpp);
     webSocket.sendTXT(num, buf);
   }
 }
@@ -501,6 +506,7 @@ void adquirir_y_promediar() {
   float voltage = ADC(avg_adc);
   float Vpp     = Amp2Vpp(voltage + VShotcky);
   float Z       = Vpp / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);
+  last_Vpp      = Vpp;                     // para el TX (dato de referencia)
 
   Calcular_promedio(Z);
   Chidori.Z = average_Z;
@@ -522,8 +528,11 @@ void adquirir_y_promediar() {
   // ── TX cada TX_INTERVAL_MS · sin String (cero fragmentación) ──
   if (millis() - last_tx_ms >= TX_INTERVAL_MS) {
     last_tx_ms = millis();
-    char msg[16];
-    snprintf(msg, sizeof(msg), "%.5f", Chidori.Z);
+    // Formato: "<Z> <Vpp>"  (ej: "22.30942 1.5234")
+    // La UI toma el 1er valor como impedancia y el 2do como tension de lectura.
+    // Sigue siendo un unico snprintf sin String: costo identico al anterior.
+    char msg[32];
+    snprintf(msg, sizeof(msg), "%.5f %.4f", Chidori.Z, last_Vpp);
     if (wifiUp && webSocket.connectedClients() > 0) {
       webSocket.broadcastTXT(msg);
     }

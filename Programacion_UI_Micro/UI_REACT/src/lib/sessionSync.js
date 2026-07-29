@@ -71,18 +71,25 @@ export async function countPendingSessions() {
 export async function commitSession(supabase, payload) {
   const { userId, patientPayload, stats, measurements, events } = payload;
 
-  const { data: newSession, error: sErr } = await supabase
-    .from('sessions')
-    .insert({
-      user_id:           userId,
-      ...patientPayload,
-      initial_impedance: stats.initialZ,
-      final_impedance:   stats.finalZ,
-      elapsed_time_str:  stats.elapsedStr,
-      total_events:      stats.eventCount,
-    })
-    .select()
-    .single();
+  const sessionRow = {
+    user_id:           userId,
+    ...patientPayload,
+    initial_impedance: stats.initialZ,
+    final_impedance:   stats.finalZ,
+    elapsed_time_str:  stats.elapsedStr,
+    total_events:      stats.eventCount,
+  };
+
+  let { data: newSession, error: sErr } = await supabase
+    .from('sessions').insert(sessionRow).select().single();
+
+  // Fallback: si la columna `notes` todavía no existe, reintentamos sin ella
+  // antes que perder la sesión entera. Ver ALTER TABLE en la guía.
+  if (sErr && /notes/i.test(sErr.message || '')) {
+    const { notes, ...legacy } = sessionRow;   // eslint-disable-line no-unused-vars
+    ({ data: newSession, error: sErr } = await supabase
+      .from('sessions').insert(legacy).select().single());
+  }
   if (sErr) throw sErr;
 
   const sId = newSession.id;

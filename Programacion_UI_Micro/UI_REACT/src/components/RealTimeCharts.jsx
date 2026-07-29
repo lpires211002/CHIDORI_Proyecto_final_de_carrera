@@ -17,8 +17,17 @@ function readToken(name, fallback) {
   return v || fallback;
 }
 
-export default function RealTimeCharts({ data, rateData, events, theme }) {
+export default function RealTimeCharts({ data, rateData, voltageData = [], events, theme }) {
   const [mode, setMode] = useState('z'); // 'z' | 'rate'
+  // Acotado de ejes · ventana temporal (segundos o 'all') y límites de magnitud
+  const [timeWin, setTimeWin] = useState('all');
+  const [yMin, setYMin]       = useState('');
+  const [yMax, setYMax]       = useState('');
+  // Zoom por selección (arrastre): { xMin, xMax, yMin, yMax } · pisa a los demás
+  const [zoom, setZoom]       = useState(null);
+  const [dragBox, setDragBox] = useState(null);   // rectángulo en píxeles, mientras arrastrás
+  const hostRef = useRef(null);
+  const dragRef = useRef(null);
   const modeRef   = useRef(mode);
   const canvasRef = useRef(null);
   const instRef   = useRef(null);
@@ -78,9 +87,11 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
   };
 
   // Configuración de ejes según el modo actual
-  const axisConfig = (p, m) => ({
+  const axisConfig = (p, m, lim = {}) => ({
     x: {
       type: 'linear',
+      ...(lim.xMin != null ? { min: lim.xMin } : {}),
+      ...(lim.xMax != null ? { max: lim.xMax } : {}),
       title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 10, weight: '500', family: 'IBM Plex Mono' } },
       ticks: { color: p.mute, font: { size: 10, family: 'IBM Plex Mono' } },
       grid:  { color: p.grid, drawTicks: false },
@@ -88,9 +99,11 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
     },
     y: {
       type: 'linear',
+      ...(lim.yMin != null ? { min: lim.yMin } : {}),
+      ...(lim.yMax != null ? { max: lim.yMax } : {}),
       title: {
         display: true,
-        text: m === 'z' ? 'impedancia (Ω)' : 'Ω/min',
+        text: m === 'z' ? 'impedancia (Ω)' : m === 'v' ? 'tensión (V)' : 'Ω/min',
         color: p.mute,
         font: { size: 10, weight: '500', family: 'IBM Plex Mono' },
       },
@@ -183,6 +196,12 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
       ds.borderColor = p.signal;
       ds.borderWidth = 1.6;
       ds.tension = 0.24;
+    } else if (mode === 'v') {
+      ds.label = 'Tensión';
+      ds.data = voltageData;
+      ds.borderColor = p.type;
+      ds.borderWidth = 1.4;
+      ds.tension = 0.24;
     } else {
       ds.label = 'Tasa';
       ds.data = rateData;
@@ -191,18 +210,140 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
       ds.tension = 0.2;
     }
 
-    inst.options.scales = axisConfig(p, mode);
+    // ── Recorte de la serie ──────────────────────────────────────────────
+    // IMPORTANTE: filtramos los PUNTOS (no solo el eje X). Si solo se acota el
+    // eje, Chart.js sigue autoescalando Y sobre TODO el dataset y la curva
+    // visible queda aplastada. Filtrando, el eje Y se ajusta a lo que se ve.
+    const series = mode === 'z' ? data : mode === 'v' ? voltageData : rateData;
+    const lastX  = series && series.length ? series[series.length - 1].x : 0;
+
+    const yLo = parseFloat(yMin);
+    const yHi = parseFloat(yMax);
+
+    let visible = series;
+    let lim;
+
+    if (zoom) {
+      visible = series.filter((pt) => pt.x >= zoom.xMin && pt.x <= zoom.xMax);
+      lim = { xMin: zoom.xMin, xMax: zoom.xMax, yMin: zoom.yMin, yMax: zoom.yMax };
+    } else if (timeWin !== 'all') {
+      // El eje X muestra SIEMPRE la ventana completa (300 s = 300 s de eje),
+      // aunque la sesión todavía no llegue: la curva queda comprimida a la
+      // izquierda y el encuadre se mantiene estable mientras se llena.
+      const win  = Number(timeWin);
+      const from = Math.max(0, lastX - win);
+      visible = series.filter((pt) => pt.x >= from);
+      lim = {
+        xMin: from,
+        xMax: from + win,
+        // Y autoescala sobre lo visible (por eso filtramos los puntos), salvo
+        // que haya límites manuales.
+        yMin: Number.isFinite(yLo) ? yLo : null,
+        yMax: Number.isFinite(yHi) ? yHi : null,
+      };
+    } else {
+      lim = {
+        xMin: null,
+        xMax: null,
+        yMin: Number.isFinite(yLo) ? yLo : null,
+        yMax: Number.isFinite(yHi) ? yHi : null,
+      };
+    }
+    ds.data = visible;
+    inst.options.scales = axisConfig(p, mode, lim);
     inst.options.plugins.tooltip.backgroundColor = p.bg;
     inst.options.plugins.tooltip.bodyColor = p.type;
     inst.options.plugins.tooltip.borderColor = readToken('--hairline-strong', '#444');
     inst.update('none');
-  }, [data, rateData, mode, theme]);
+  }, [data, rateData, voltageData, mode, theme, timeWin, yMin, yMax, zoom]);
 
   // Exponer para el export modal (siempre la instancia visible)
   useEffect(() => {
     window.mainChartInstance = instRef.current;
     return () => { window.mainChartInstance = null; };
   }, [data, events, mode]);
+
+  /* ── Zoom por selección · arrastrar un rectángulo sobre el gráfico ─────
+   * Convertimos los píxeles del recuadro a valores de los ejes con las
+   * escalas de Chart.js. Doble click (o el botón Auto) vuelve a la vista
+   * completa. Implementado a mano: evita sumar chartjs-plugin-zoom. */
+  const pointerToValues = (clientX, clientY) => {
+    const inst = instRef.current;
+    if (!inst) return null;
+    const rect = inst.canvas.getBoundingClientRect();
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    return {
+      x: inst.scales.x.getValueForPixel(px),
+      y: inst.scales.y.getValueForPixel(py),
+    };
+  };
+
+  const handleDragStart = (e) => {
+    if (e.button !== 0) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const r = host.getBoundingClientRect();
+    dragRef.current = { x0: e.clientX, y0: e.clientY };
+    setDragBox({ left: e.clientX - r.left, top: e.clientY - r.top, width: 0, height: 0 });
+  };
+
+  const handleDragMove = (e) => {
+    if (!dragRef.current) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const r = host.getBoundingClientRect();
+    const { x0, y0 } = dragRef.current;
+    setDragBox({
+      left:  Math.min(x0, e.clientX) - r.left,
+      top:   Math.min(y0, e.clientY) - r.top,
+      width:  Math.abs(e.clientX - x0),
+      height: Math.abs(e.clientY - y0),
+    });
+  };
+
+  const handleDragEnd = (e) => {
+    const start = dragRef.current;
+    dragRef.current = null;
+    setDragBox(null);
+    if (!start) return;
+
+    // Arrastres muy chicos = click accidental
+    if (Math.abs(e.clientX - start.x0) < 12 || Math.abs(e.clientY - start.y0) < 12) return;
+
+    const a = pointerToValues(start.x0, start.y0);
+    const b = pointerToValues(e.clientX, e.clientY);
+    if (!a || !b) return;
+
+    const next = {
+      xMin: Math.min(a.x, b.x),
+      xMax: Math.max(a.x, b.x),
+      yMin: Math.min(a.y, b.y),
+      yMax: Math.max(a.y, b.y),
+    };
+    if (!Number.isFinite(next.xMin) || !Number.isFinite(next.yMin)) return;
+    setZoom(next);
+  };
+
+  const resetView = () => {
+    setZoom(null);
+    setYMin('');
+    setYMax('');
+    setTimeWin('all');
+  };
+
+  /** Duración registrada (s) de la serie visible · define qué ventanas aplican. */
+  const seriesForSpan = mode === 'z' ? data : mode === 'v' ? voltageData : rateData;
+  const recordedSpan = seriesForSpan && seriesForSpan.length
+    ? seriesForSpan[seriesForSpan.length - 1].x
+    : 0;
+
+  const fmtSpan = (s) => {
+    if (s < 60) return `${Math.floor(s)} s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} min`;
+    return `${Math.floor(m / 60)} h ${m % 60} min`;
+  };
 
   const onExport = () => {
     if (!instRef.current) return;
@@ -220,7 +361,9 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
           <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
             {mode === 'z'
               ? 'Impedancia · módulo del tejido vesical'
-              : 'dZ/dt · velocidad de llenado'}
+              : mode === 'v'
+                ? 'Tensión de lectura · Vpp del detector'
+                : 'dZ/dt · velocidad de llenado'}
           </span>
         </div>
         <div className="row" style={{ gap: 10 }}>
@@ -243,14 +386,101 @@ export default function RealTimeCharts({ data, rateData, events, theme }) {
             >
               dZ/dt
             </button>
+            {/* Solo si el firmware reporta tensión */}
+            {voltageData.length > 0 && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'v'}
+                className={`segment-item ${mode === 'v' ? 'active' : ''}`}
+                onClick={() => setMode('v')}
+              >
+                Tensión
+              </button>
+            )}
           </div>
           <button type="button" className="icon-button" onClick={onExport} aria-label="Exportar gráfico">
             <Camera size={15} />
           </button>
         </div>
       </header>
-      <div className="chart-host">
+      {/* ── Acotado de ejes ─────────────────────────────────────────── */}
+      <div className="chart-axis-bar">
+        <div className="segment segment-compact" role="group" aria-label="Ventana temporal">
+          {[['all', 'Todo'], [300, '5 min'], [900, '15 min'], [3600, '1 h']].map(([val, label]) => (
+            <button
+              key={label}
+              type="button"
+              className={`segment-item ${String(timeWin) === String(val) ? 'active' : ''}`}
+              onClick={() => setTimeWin(val)}
+              title={val === 'all'
+                ? `Toda la sesión · ${fmtSpan(recordedSpan)}`
+                : `Escala fija de ${label} (la sesión lleva ${fmtSpan(recordedSpan)})`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="chart-axis-fields">
+          <label className="chart-axis-label" htmlFor="y-min">
+            {mode === 'z' ? 'Ω' : mode === 'v' ? 'V' : 'Ω/min'} mín
+          </label>
+          <input
+            id="y-min"
+            className="input input-xs numeric"
+            type="number"
+            step="any"
+            placeholder="auto"
+            value={yMin}
+            onChange={(e) => setYMin(e.target.value)}
+          />
+          <label className="chart-axis-label" htmlFor="y-max">máx</label>
+          <input
+            id="y-max"
+            className="input input-xs numeric"
+            type="number"
+            step="any"
+            placeholder="auto"
+            value={yMax}
+            onChange={(e) => setYMax(e.target.value)}
+          />
+          {(yMin !== '' || yMax !== '' || timeWin !== 'all' || zoom) && (
+            <button
+              type="button"
+              className="button button-ghost button-sm"
+              onClick={resetView}
+              title="Volver a la vista completa"
+            >
+              {zoom ? 'Quitar zoom' : 'Auto'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="chart-host"
+        ref={hostRef}
+        onMouseDown={handleDragStart}
+        onMouseMove={handleDragMove}
+        onMouseUp={handleDragEnd}
+        onMouseLeave={() => { dragRef.current = null; setDragBox(null); }}
+        onDoubleClick={resetView}
+        style={{ cursor: 'crosshair', position: 'relative' }}
+        title="Arrastrá para hacer zoom · doble click para volver"
+      >
         <canvas ref={canvasRef} />
+        {dragBox && (
+          <div
+            className="chart-drag-box"
+            style={{
+              left: dragBox.left,
+              top: dragBox.top,
+              width: dragBox.width,
+              height: dragBox.height,
+            }}
+          />
+        )}
       </div>
     </section>
   );

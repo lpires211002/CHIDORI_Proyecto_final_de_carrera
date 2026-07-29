@@ -5,13 +5,31 @@ import { ArrowRight, RotateCcw } from 'lucide-react';
  * Calibration wizard · 4 steps. Progress rail uses transform: scaleX
  * (no width transitions). Copy is clinical, without emojis.
  */
-export default function CalibrationWizard({ currentValue, onSaveCalibration, onShowAlert }) {
+export default function CalibrationWizard({
+  currentValue,
+  onSaveCalibration,
+  onShowAlert,
+  // Basal EN USO (fuente de verdad para el cambio y la alarma) + acciones para
+  // re-fijarlo sin repetir todo el asistente.
+  activeBaseline = null,
+  onSetBaselineNow,
+  onSetBaselineManual,
+  baselineCandidate = null,
+}) {
   const [step, setStep] = useState(1);
+  const [manualBaseline, setManualBaseline] = useState('');
   const [zEmpty, setZEmpty] = useState(null);
   const [zFull, setZFull]   = useState(null);
   const [dbCalc, setDbCalc] = useState(null);
 
   const fmtZ = (v) => (v == null ? '—' : `${v.toFixed(1)} Ω`);
+
+  /** Avanza usando el basal YA fijado (manual o de una calibración previa),
+   *  sin sobrescribirlo con la lectura del momento. */
+  const keepBaseline = () => {
+    setZEmpty(activeBaseline);
+    setStep(2);
+  };
 
   const measureEmpty = () => {
     if (currentValue === null) {
@@ -19,8 +37,11 @@ export default function CalibrationWizard({ currentValue, onSaveCalibration, onS
       return;
     }
     setZEmpty(currentValue);
+    // Se aplica YA como basal activo: así el asistente y la franja de abajo
+    // muestran siempre el mismo número (antes el wizard lo retenía hasta el
+    // paso 4 y convivían dos valores distintos).
+    onSetBaselineManual?.(String(currentValue));
     setStep(2);
-    onShowAlert('Impedancia basal registrada', 'success');
   };
 
   const measureFull = () => {
@@ -71,13 +92,36 @@ export default function CalibrationWizard({ currentValue, onSaveCalibration, onS
             completamente. Con los electrodos colocados y el paciente en reposo, registre la
             impedancia de referencia.
           </p>
+          {activeBaseline != null && (
+            <p className="field-hint" style={{ margin: 0 }}>
+              Ya hay un basal fijado en <strong>{activeBaseline.toFixed(2)} Ω</strong>. Podés
+              continuar con ese valor o registrarlo de nuevo con la lectura actual.
+            </p>
+          )}
+
           <div className="row-between">
             <span className="mute numeric" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
               Z actual: <strong style={{ color: 'var(--type-hi)' }}>{fmtZ(currentValue)}</strong>
             </span>
-            <button type="button" className="button button-primary" onClick={measureEmpty} disabled={currentValue === null}>
-              Registrar basal <ArrowRight size={14} />
-            </button>
+
+            <div className="row" style={{ gap: 8 }}>
+              {/* Si ya hay basal (p. ej. cargado a mano), NO lo pisamos sin que
+                  el usuario lo pida explícitamente. */}
+              {activeBaseline != null && (
+                <button type="button" className="button button-primary" onClick={keepBaseline}>
+                  Continuar con {activeBaseline.toFixed(2)} Ω <ArrowRight size={14} />
+                </button>
+              )}
+              <button
+                type="button"
+                className={activeBaseline != null ? 'button button-ghost' : 'button button-primary'}
+                onClick={measureEmpty}
+                disabled={currentValue === null}
+              >
+                {activeBaseline != null ? 'Registrar de nuevo' : 'Registrar basal'}
+                {activeBaseline == null && <ArrowRight size={14} />}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -89,10 +133,7 @@ export default function CalibrationWizard({ currentValue, onSaveCalibration, onS
             500 ml de líquido. El llenado vesical comenzará a producir caídas progresivas en la
             impedancia. Avance cuando el paciente refiera sensación inicial de llenado.
           </p>
-          <div className="row-between">
-            <span className="mute numeric" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
-              Basal: <strong style={{ color: 'var(--type-hi)' }}>{fmtZ(zEmpty)}</strong>
-            </span>
+          <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="button button-primary" onClick={() => setStep(3)}>
               Continuar <ArrowRight size={14} />
             </button>
@@ -109,7 +150,6 @@ export default function CalibrationWizard({ currentValue, onSaveCalibration, onS
           </p>
           <div className="row-between">
             <div className="stack-sm" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
-              <span className="mute">Basal: <strong style={{ color: 'var(--type-hi)' }}>{fmtZ(zEmpty)}</strong></span>
               <span className="mute">En vivo: <strong style={{ color: 'var(--type-hi)' }}>{fmtZ(currentValue)}</strong></span>
             </div>
             <button type="button" className="button button-danger" onClick={measureFull} disabled={currentValue === null}>
@@ -139,6 +179,61 @@ export default function CalibrationWizard({ currentValue, onSaveCalibration, onS
           </button>
         </div>
       )}
+
+      {/* ── Basal activo · re-fijar sin repetir el asistente ──────────────
+          Es el valor que realmente usan el cálculo de cambio y la alarma. */}
+      <div className="baseline-strip">
+        <div className="baseline-strip-head">
+          <span className="section-label">Basal activo</span>
+          <strong className="numeric baseline-strip-value">
+            {activeBaseline != null ? `${activeBaseline.toFixed(2)} Ω` : 'sin fijar'}
+          </strong>
+        </div>
+
+        <p className="field-hint" style={{ margin: 0 }}>
+          Si el paciente se acomodó después de calibrar, volvé a fijarlo. Toma la mediana de
+          las últimas lecturas (no un valor instantáneo), así un pico de ruido no queda como referencia.
+        </p>
+
+        <div className="baseline-strip-actions">
+          <button
+            type="button"
+            className="button button-ghost button-sm"
+            onClick={() => { onSetBaselineNow?.(); setManualBaseline(''); }}
+            disabled={baselineCandidate == null}
+            title="Mediana de las últimas lecturas · robusta ante picos puntuales"
+          >
+            Re-fijar con la lectura de ahora
+          </button>
+
+          <div className="baseline-strip-manual">
+            <input
+              className="input input-xs numeric"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="Ω exacto"
+              value={manualBaseline}
+              onChange={(e) => setManualBaseline(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (onSetBaselineManual?.(manualBaseline)) setManualBaseline('');
+                }
+              }}
+              aria-label="Valor de basal exacto en ohmios"
+            />
+            <button
+              type="button"
+              className="button button-ghost button-sm"
+              onClick={() => { if (onSetBaselineManual?.(manualBaseline)) setManualBaseline(''); }}
+              disabled={manualBaseline.trim() === ''}
+            >
+              Aplicar
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
