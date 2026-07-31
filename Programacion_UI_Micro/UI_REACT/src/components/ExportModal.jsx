@@ -1,17 +1,27 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, FileText, Table, FileType2 } from 'lucide-react';
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
+import DynamicFields from './DynamicFields';
+import { fetchFields, patientLabel, coerceValues } from '../lib/patients';
+import { renderChartPNG } from '../lib/chartImage';
 
 /**
- * Export modal · PDF / CSV / TXT.
+ * Cierre de la sesión · PDF / CSV / TXT + guardado en la nube.
  *
- * Usa los helpers puros en lib/exporters.js, compartidos con el AdminView.
- * El toggle "Guardar en la base de datos" controla si los exports también
- * persisten los datos del paciente en Supabase (por defecto sí).
+ * Acá se completan los datos de la sesión, no al empezar: la temperatura, la
+ * humedad, lo que comió y sobre todo el AGUA recién se conocen al terminar.
+ * El agua se precarga sumando las tomas marcadas como eventos durante la
+ * medición, y se puede corregir a mano.
+ *
+ * Los campos que aparecen salen del catálogo configurable (ámbito 'session'),
+ * así que se ajustan desde el panel de administración sin tocar este archivo.
+ * Los datos estables de la persona viven en su ficha de paciente.
  */
 export default function ExportModal({
   isOpen,
   onClose,
+  supabase,
+  patient,
   data,
   rateData,
   events,
@@ -22,30 +32,59 @@ export default function ExportModal({
   onShowAlert,
   onSavePatient,
 }) {
-  const [nombre, setNombre]             = useState('');
-  const [edad, setEdad]                 = useState('');
-  const [sexo, setSexo]                 = useState('');
-  const [peso, setPeso]                 = useState('');
-  const [altura, setAltura]             = useState('');
-  const [circ, setCirc]                 = useState('');
-  const [menstruacion, setMenstruacion] = useState('');
-  const [notas, setNotas]               = useState('');
-  const [saveToDb, setSaveToDb]         = useState(true);
-  const [committing, setCommitting]     = useState(false);
+  const [notas, setNotas]           = useState('');
+  const [sessionFields, setFields]  = useState([]);
+  const [sessionVals, setSessionVals] = useState({});
+  const [saveToDb, setSaveToDb]     = useState(true);
+  const [committing, setCommitting] = useState(false);
+
+  // Agua total sumada de los eventos de ingesta marcados durante la sesión
+  const waterEvents = useMemo(
+    () => (events || []).filter((e) => e.kind === 'water' && Number.isFinite(Number(e.amount))),
+    [events]);
+  const waterFromEvents = useMemo(
+    () => waterEvents.reduce((acc, e) => acc + Number(e.amount), 0),
+    [waterEvents]);
+  const waterCount = waterEvents.length;
+
+  // Catálogo de campos + precarga del agua
+  useEffect(() => {
+    if (!isOpen || !supabase) return;
+    let alive = true;
+    (async () => {
+      try {
+        const all = await fetchFields(supabase);
+        if (!alive) return;
+        const ses = all.filter((f) => f.scope === 'session');
+        setFields(ses);
+        // Si hay un campo de agua y tomas marcadas, lo dejamos precargado
+        const waterField = ses.find((f) => /water|agua/i.test(f.key));
+        if (waterField && waterFromEvents > 0) {
+          setSessionVals((prev) => ({ ...prev, [waterField.key]: prev[waterField.key] ?? waterFromEvents }));
+        }
+      } catch (e) {
+        console.error('[ExportModal] fetchFields', e);
+      }
+    })();
+    return () => { alive = false; };
+  }, [isOpen, supabase, waterFromEvents]);
 
   if (!isOpen) return null;
 
   const buildPatient = () => {
-    if (!(nombre || edad || sexo || peso || altura || circ || notas)) return null;
+    const vals = coerceValues(sessionFields, sessionVals);
+    if (!patient && Object.keys(vals).length === 0 && !notas) return null;
     return {
-      nombre:        nombre || 'N/A',
-      edad:          edad || 'N/A',
-      sexo:          sexo || 'N/A',
-      peso:          peso || 'N/A',
-      altura:        altura || 'N/A',
-      circ:          circ || 'N/A',
-      menstruacion:  menstruacion || 'N/A',
-      notas:         notas || '',
+      // Identificación (del paciente asociado)
+      codigo:  patient?.code || 'N/A',
+      nombre:  patient ? [patient.last_name, patient.first_name].filter(Boolean).join(', ') || 'N/A' : 'N/A',
+      notas:   notas || '',
+      // Campos dinámicos de la sesión, con su etiqueta para los reportes
+      campos:  sessionFields
+        .filter((f) => vals[f.key] !== undefined)
+        .map((f) => ({ label: f.label, unit: f.unit, value: vals[f.key] })),
+      // Valores crudos para la base
+      sessionData: vals,
     };
   };
 
@@ -63,9 +102,15 @@ export default function ExportModal({
     samples:    (data || []).length,
   });
 
+  // El gráfico del PDF se rinde aparte, en paleta clara: el canvas en pantalla
+  // es transparente y de tema oscuro, así que sobre la hoja blanca del reporte
+  // quedaban la grilla y los ejes invisibles.
   const getChartImage = () => {
-    try { return window.mainChartInstance?.toBase64Image() || null; }
-    catch { return null; }
+    try {
+      return renderChartPNG({ measurements: data, events })
+        || window.mainChartInstance?.toBase64Image()
+        || null;
+    } catch { return null; }
   };
 
   /**
@@ -76,7 +121,7 @@ export default function ExportModal({
   const fireCloudSave = () => {
     if (!saveToDb || !onSavePatient) return;
     Promise.resolve(
-      onSavePatient({ nombre, edad, sexo, peso, altura, circ, menstruacion, notas })
+      onSavePatient({ notas, sessionData: coerceValues(sessionFields, sessionVals) })
     ).catch(() => { /* Dashboard ya togglea su propio toast de error */ });
   };
 
@@ -184,57 +229,38 @@ export default function ExportModal({
           </div>
 
           <span className="section-label" style={{ display: 'block', marginBottom: 12 }}>
-            Información clínica del paciente (opcional)
+            Datos de esta sesión
           </span>
 
           <form onSubmit={(e) => { e.preventDefault(); handleSavePatientOnly(); }} className="stack-md">
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
-              <div className="field">
-                <label className="field-label" htmlFor="ex-nombre">Nombre</label>
-                <input id="ex-nombre" className="input" type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label" htmlFor="ex-edad">Edad</label>
-                <input id="ex-edad" className="input" type="number" value={edad} onChange={(e) => setEdad(e.target.value)} placeholder="años" />
-              </div>
+            {/* Paciente asociado · viene del paso previo a la medición */}
+            <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <span>Paciente</span>
+              <span>Duración</span>
+              <strong>{patient ? patientLabel(patient) : 'Sin asociar'}</strong>
+              <strong className="numeric">{elapsedTime || '—'}</strong>
             </div>
 
-            <div className="field">
-              <span className="field-label">Sexo</span>
-              <div className="segment">
-                {['Femenino', 'Masculino', 'Otro / Prefiero no decirlo'].map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    className={`segment-item ${sexo === opt ? 'active' : ''}`}
-                    onClick={() => setSexo(opt)}
-                  >
-                    {opt.split(' ')[0]}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {!patient && (
+              <span className="field-hint">
+                Esta sesión no quedó asociada a ningún paciente. Se guarda igual, pero
+                no va a agruparse con las demás mediciones de esa persona.
+              </span>
+            )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-              <div className="field">
-                <label className="field-label" htmlFor="ex-peso">Peso (kg)</label>
-                <input id="ex-peso" className="input" type="number" step="0.1" value={peso} onChange={(e) => setPeso(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label" htmlFor="ex-altura">Altura (m)</label>
-                <input id="ex-altura" className="input" type="number" step="0.01" value={altura} onChange={(e) => setAltura(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label" htmlFor="ex-circ">Circ. suprailíaca (cm)</label>
-                <input id="ex-circ" className="input" type="number" step="0.1" value={circ} onChange={(e) => setCirc(e.target.value)} />
-              </div>
-            </div>
+            {/* Campos definidos en el panel de administración (ámbito sesión) */}
+            <DynamicFields
+              fields={sessionFields}
+              values={sessionVals}
+              onChange={(k, v) => setSessionVals((prev) => ({ ...prev, [k]: v }))}
+              columns={3}
+            />
 
-            {sexo === 'Femenino' && (
-              <div className="field">
-                <label className="field-label" htmlFor="ex-menst">Tiempo desde la última menstruación</label>
-                <input id="ex-menst" className="input" type="text" placeholder="p.ej. 15 días" value={menstruacion} onChange={(e) => setMenstruacion(e.target.value)} />
-              </div>
+            {waterFromEvents > 0 && (
+              <span className="field-hint">
+                Se sumaron <strong>{waterFromEvents} ml</strong> de las {waterCount} tomas
+                marcadas durante la sesión. Podés corregir el total a mano.
+              </span>
             )}
 
             {/* Observaciones libres · particularidades de esta sesión */}

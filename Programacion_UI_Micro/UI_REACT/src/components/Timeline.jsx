@@ -54,11 +54,16 @@ export default function Timeline({ events }) {
               // etiqueta en vez del delta numérico.
               const isDown = evt.kind === 'disconnect';
               const isUp   = evt.kind === 'reconnect';
-              const isGap  = evt.kind === 'gap';
-              const rowClass = isDown ? 'timeline-row is-disconnect'
-                             : isUp   ? 'timeline-row is-reconnect'
-                             : isGap  ? 'timeline-row is-gap'
+              const isGap   = evt.kind === 'gap';
+              const isWater = evt.kind === 'water';
+              const isVoid  = evt.kind === 'void';
+              const rowClass = isDown  ? 'timeline-row is-disconnect'
+                             : isUp    ? 'timeline-row is-reconnect'
+                             : isGap   ? 'timeline-row is-gap'
+                             : isWater ? 'timeline-row is-water'
+                             : isVoid  ? 'timeline-row is-void'
                              : 'timeline-row';
+              const ml = Number(evt.amount);
               return (
                 <motion.li
                   key={evt.id}
@@ -81,10 +86,18 @@ export default function Timeline({ events }) {
                   <span className="timeline-z numeric">
                     {isDown || isUp ? '—' : `${evt.value.toFixed(2)} Ω`}
                   </span>
-                  {isDown || isUp || isGap ? (
-                    <span className={`timeline-tag ${isDown ? 'is-down' : isGap ? 'is-gap' : 'is-up'}`}>
+                  {isDown || isUp || isGap || isWater || isVoid ? (
+                    <span className={`timeline-tag ${
+                      isDown ? 'is-down'
+                      : isGap ? 'is-gap'
+                      : isWater ? 'is-water'
+                      : isVoid ? 'is-void'
+                      : 'is-up'}`}
+                    >
                       {isDown ? 'Desconexión'
                         : isGap ? `Microcorte · ${Number(evt.change).toFixed(1)} s`
+                        : isWater ? `Ingesta${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`
+                        : isVoid ? `Micción${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`
                         : 'Reconexión'}
                     </span>
                   ) : (

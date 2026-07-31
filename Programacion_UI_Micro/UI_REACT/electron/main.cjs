@@ -7,10 +7,20 @@ const https = require('https');
 const GH_OWNER = 'lpires211002';
 const GH_REPO  = 'CHIDORI_Proyecto_final_de_carrera';
 
-// Una sola instancia: si abren la app dos veces, enfoca la ventana existente.
-if (!app.requestSingleInstanceLock()) { app.quit(); }
-
 let win = null;
+
+/**
+ * Ventana viva, o null.
+ *
+ * En macOS cerrar la ventana con el botón rojo NO cierra la app: el proceso
+ * sigue vivo y `win` queda apuntando a un BrowserWindow ya destruido. El objeto
+ * JS sigue existiendo, así que `if (win)` da true, pero cualquier método sobre
+ * él tira "TypeError: Object has been destroyed". Todo acceso a la ventana pasa
+ * por acá.
+ */
+function ventanaViva() {
+  return win && !win.isDestroyed() ? win : null;
+}
 
 /* ─────────────────────────────────────────────────────────────────────
  *  Aviso de actualizacion
@@ -64,7 +74,7 @@ async function checkForUpdates() {
   if (!rel || !rel.tag_name) return;
   if (!isNewer(rel.tag_name, app.getVersion())) return;
 
-  const { response } = await dialog.showMessageBox(win, {
+  const opciones = {
     type: 'info',
     title: 'Actualizacion disponible',
     message: `Hay una version nueva de Chidori (${rel.tag_name})`,
@@ -74,7 +84,14 @@ async function checkForUpdates() {
     buttons: ['Descargar', 'Mas tarde'],
     defaultId: 0,
     cancelId: 1,
-  });
+  };
+
+  // El chequeo corre 3 s después del arranque: para entonces la ventana puede
+  // estar cerrada. Sin ventana viva el diálogo va suelto, no colgado de ella.
+  const padre = ventanaViva();
+  const { response } = padre
+    ? await dialog.showMessageBox(padre, opciones)
+    : await dialog.showMessageBox(opciones);
 
   if (response === 0) {
     shell.openExternal(rel.html_url ||
@@ -97,6 +114,9 @@ function createWindow() {
       spellcheck: false,
     },
   });
+
+  // Soltar la referencia al cerrarse, para no quedar con un objeto destruido.
+  win.on('closed', () => { win = null; });
 
   // Cargamos la UI compilada (dist/). Origen file:// = contexto NO seguro,
   // por eso el ws:// al ESP funciona sin bloqueo de Mixed Content.
@@ -121,19 +141,35 @@ function createWindow() {
   });
 }
 
-app.on('second-instance', () => {
-  if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
-});
+/** Trae al frente la ventana existente, o abre una si no quedó ninguna. */
+function enfocarOAbrir() {
+  const w = ventanaViva();
+  if (!w) { createWindow(); return; }
+  if (w.isMinimized()) w.restore();
+  w.focus();
+}
 
-app.whenReady().then(() => {
-  createWindow();
-  // Chequeo de actualizacion diferido: no demora el arranque de la app.
-  setTimeout(() => { checkForUpdates().catch(() => {}); }, 3000);
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+/* ─────────────────────────────────────────────────────────────────────
+ *  Arranque
+ *  Una sola instancia: si abren la app dos veces, la segunda se cierra y la
+ *  primera se enfoca. El resto del arranque va dentro del else — sin eso, el
+ *  proceso que pierde el lock seguía ejecutando y abría su propia ventana
+ *  antes de que app.quit() terminara.
+ * ───────────────────────────────────────────────────────────────────── */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', enfocarOAbrir);
+
+  app.whenReady().then(() => {
+    createWindow();
+    // Chequeo de actualizacion diferido: no demora el arranque de la app.
+    setTimeout(() => { checkForUpdates().catch(() => {}); }, 3000);
+    // macOS · click en el icono del Dock con la app abierta
+    app.on('activate', enfocarOAbrir);
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}

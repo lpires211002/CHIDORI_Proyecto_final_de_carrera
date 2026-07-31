@@ -129,9 +129,12 @@ export default function CalibrationWizard({
       {step === 2 && (
         <div className="step-body">
           <p>
-            <strong>Paso 2 · Hidratación.</strong> Indique al paciente que ingiera aproximadamente
-            500 ml de líquido. El llenado vesical comenzará a producir caídas progresivas en la
-            impedancia. Avance cuando el paciente refiera sensación inicial de llenado.
+            <strong>Paso 2 · Hidratación libre.</strong> El paciente bebe a demanda, como en un
+            día normal: no se le indica una cantidad fija. Registre <strong>cada toma</strong> con
+            el botón <strong>Agua</strong> (tecla <span className="kbd">A</span>) anotando los ml, y
+            cada micción con <strong>Micción</strong> (<span className="kbd">M</span>). El llenado
+            vesical produce caídas progresivas en la impedancia. Avance cuando el paciente refiera
+            sensación inicial de llenado.
           </p>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="button button-primary" onClick={() => setStep(3)}>

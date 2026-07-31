@@ -33,6 +33,7 @@ function normEvents(rows) {
     value:  e.impedance    ?? e.value,
     change: e.impedance_change ?? e.change ?? null,
     kind:   e.kind ?? 'mark',
+    amount: e.amount_ml ?? e.amount ?? null,
   }));
 }
 
@@ -40,6 +41,11 @@ function normEvents(rows) {
 function eventLabel(kind, e) {
   if (kind === 'disconnect') return 'DESCONEXION del dispositivo';
   if (kind === 'reconnect')  return 'RECONEXION del dispositivo';
+  if (kind === 'water' || kind === 'void') {
+    const ml = Number(e?.amount);
+    const base = kind === 'water' ? 'INGESTA de agua' : 'MICCION';
+    return Number.isFinite(ml) ? `${base} · ${ml} ml` : base;
+  }
   if (kind === 'gap') {
     const secs = Number(e?.change);
     if (!Number.isFinite(secs)) return 'MICROCORTE en la transmision';
@@ -55,6 +61,35 @@ function formatMmSs(secs) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/**
+ * Texto seguro para las fuentes base del PDF.
+ *
+ * jsPDF usa las 14 fuentes estándar, que codifican en WinAnsi: los caracteres
+ * griegos no existen ahí y salen como otro glifo (la Ω se imprimía como ©).
+ * En vez de embeber una fuente completa —sumaría cientos de kB al bundle— se
+ * transliteran los pocos símbolos que usamos.
+ */
+const PDF_REEMPLAZOS = [
+  [/[ΩΩ]/g, 'ohm'],   // U+03A9 (omega griega) y U+2126 (signo ohm)
+  [/μ/g, 'u'],
+  [/Δ/g, 'delta'],
+];
+
+function pdfSafe(txt) {
+  let s = String(txt ?? '');
+  PDF_REEMPLAZOS.forEach(([re, rep]) => { s = s.replace(re, rep); });
+  return s;
+}
+
+/** Envuelve el documento para que TODO lo que se escriba pase por pdfSafe. */
+function sanitizar(pdf) {
+  const text  = pdf.text.bind(pdf);
+  const split = pdf.splitTextToSize.bind(pdf);
+  pdf.text = (t, ...rest) => text(Array.isArray(t) ? t.map(pdfSafe) : pdfSafe(t), ...rest);
+  pdf.splitTextToSize = (t, ...rest) => split(pdfSafe(t), ...rest);
+  return pdf;
+}
+
 /* ──────────────────────────────────────────────────────────────────── */
 
 export function exportPDF({
@@ -65,7 +100,7 @@ export function exportPDF({
   events,
   chartImage,
 } = {}) {
-  const pdf = new jsPDF();
+  const pdf = sanitizar(new jsPDF());
   const meas = normMeasurements(measurements);
   const evs  = normEvents(events);
   let y = 22;
@@ -82,13 +117,30 @@ export function exportPDF({
   if (patient) {
     pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Paciente', 20, y); y += 6;
     pdf.setFontSize(9.5); pdf.setTextColor(70);
-    pdf.text(`Nombre: ${patient.nombre || 'N/A'}`, 22, y); y += 5;
-    pdf.text(`Edad: ${patient.edad || 'N/A'} años`, 22, y); y += 5;
-    pdf.text(`Sexo: ${patient.sexo || 'N/A'}`, 22, y); y += 5;
-    pdf.text(`Peso: ${patient.peso || 'N/A'} kg · Altura: ${patient.altura || 'N/A'} m`, 22, y); y += 5;
-    pdf.text(`Circunferencia suprailíaca: ${patient.circ || 'N/A'} cm`, 22, y); y += 5;
-    if (patient.sexo === 'Femenino' && patient.menstruacion) {
-      pdf.text(`Última menstruación: ${patient.menstruacion}`, 22, y); y += 5;
+    pdf.text(`Código: ${patient.codigo || 'N/A'}`, 22, y); y += 5;
+    if (patient.nombre && patient.nombre !== 'N/A') {
+      pdf.text(`Nombre: ${patient.nombre}`, 22, y); y += 5;
+    }
+    y += 4;
+
+    // Campos de la sesión · vienen del catálogo configurable
+    if (Array.isArray(patient.campos) && patient.campos.length > 0) {
+      pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Datos registrados', 20, y); y += 6;
+      pdf.setFontSize(9.5); pdf.setTextColor(70);
+      patient.campos.forEach((c) => {
+        if (y > 275) { pdf.addPage(); y = 20; }
+        const val = `${c.value}${c.unit ? ` ${c.unit}` : ''}`;
+        // Los textos largos se parten para no salirse de la hoja
+        if (String(c.value).length > 60) {
+          pdf.text(`${c.label}:`, 22, y); y += 5;
+          pdf.splitTextToSize(String(c.value), 168).forEach((line) => {
+            if (y > 280) { pdf.addPage(); y = 20; }
+            pdf.text(line, 24, y); y += 5;
+          });
+        } else {
+          pdf.text(`${c.label}: ${val}`, 22, y); y += 5;
+        }
+      });
     }
     y += 6;
   }
@@ -106,10 +158,23 @@ export function exportPDF({
   pdf.text(`Eventos marcados: ${stats?.eventCount ?? evs.length}`, 22, y); y += 5;
   pdf.text(`Puntos registrados: ${stats?.samples ?? meas.length}`, 22, y); y += 10;
 
+  // Curva de la sesión · se respeta la relación de aspecto del PNG para que
+  // el trazo no salga estirado.
   if (chartImage) {
     try {
-      pdf.addImage(chartImage, 'PNG', 20, y, 170, 80);
-      y += 86;
+      const ancho = 170;
+      let alto = 80;
+      try {
+        const props = pdf.getImageProperties(chartImage);
+        if (props?.width && props?.height) {
+          alto = Math.round((ancho * props.height) / props.width);
+        }
+      } catch { /* si no se pueden leer, queda el alto por defecto */ }
+
+      if (y + alto + 12 > 285) { pdf.addPage(); y = 20; }
+      pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Curva de la sesión', 20, y); y += 6;
+      pdf.addImage(chartImage, 'PNG', 20, y, ancho, alto);
+      y += alto + 8;
     } catch { /* noop */ }
   }
 
@@ -139,6 +204,8 @@ export function exportPDF({
         // Eventos de enlace: resaltados en rojo/verde, sin valor de impedancia.
         if (e.kind === 'disconnect') pdf.setTextColor(200, 40, 40);
         else if (e.kind === 'gap')   pdf.setTextColor(190, 120, 20);
+        else if (e.kind === 'water')  pdf.setTextColor(30, 90, 170);
+        else if (e.kind === 'void')   pdf.setTextColor(120, 80, 160);
         else                          pdf.setTextColor(30, 130, 80);
         pdf.text(`#${String(e.id).padStart(2, '0')} · ${formatMmSs(e.time)} · ${label}`, 22, y);
         pdf.setTextColor(70);
@@ -181,13 +248,17 @@ export function exportTXT({
 
   if (patient) {
     txt += '=== PACIENTE ===\n';
-    txt += `Nombre: ${patient.nombre || 'N/A'}\nEdad: ${patient.edad || 'N/A'}\nSexo: ${patient.sexo || 'N/A'}\n`;
-    txt += `Peso: ${patient.peso || 'N/A'} kg\nAltura: ${patient.altura || 'N/A'} m\n`;
-    txt += `Circ. suprailíaca: ${patient.circ || 'N/A'} cm\n`;
-    if (patient.sexo === 'Femenino' && patient.menstruacion) {
-      txt += `Última menstruación: ${patient.menstruacion}\n`;
-    }
+    txt += `Código: ${patient.codigo || 'N/A'}\n`;
+    if (patient.nombre && patient.nombre !== 'N/A') txt += `Nombre: ${patient.nombre}\n`;
     txt += '\n';
+
+    if (Array.isArray(patient.campos) && patient.campos.length > 0) {
+      txt += '=== DATOS REGISTRADOS ===\n';
+      patient.campos.forEach((c) => {
+        txt += `${c.label}: ${c.value}${c.unit ? ` ${c.unit}` : ''}\n`;
+      });
+      txt += '\n';
+    }
   }
 
   txt += '=== SESIÓN ===\n';

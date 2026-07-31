@@ -180,6 +180,9 @@ a {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* La pantalla de inicio sangra con 100vw; clip evita que eso genere
+     scroll horizontal cuando hay barra vertical. */
+  overflow-x: clip;
 }
 
 .app-header {
@@ -187,7 +190,9 @@ a {
   align-items: center;
   justify-content: space-between;
   padding: 18px 32px;
-  border-bottom: 1px solid var(--hairline);
+  /* Sin línea divisoria: el fondo del header ya es opaco, así que separa solo.
+     Con la pantalla de inicio sangrando hasta arriba, la línea cortaba la
+     columna de luz por la mitad. */
   background: var(--paper);
   position: sticky;
   top: 0;
@@ -199,6 +204,32 @@ a {
   align-items: baseline;
   gap: 14px;
 }
+
+/* La marca es el atajo a la pantalla de inicio: se comporta como botón pero
+   se lee como identidad, sin caja ni relleno.
+   Ojo: nada de `disabled` acá. La regla global `button:disabled` baja la
+   opacidad al 50 % y la marca no puede verse apagada — en reposo se marca con
+   .is-home, que solo saca la respuesta al cursor. */
+.brand-home {
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  opacity: 1;
+  transition: background var(--dur-fast) var(--ease-quart);
+}
+.brand-home:hover { background: var(--ink-2); }
+.brand-home:focus-visible {
+  outline: 1px solid var(--signal-line);
+  outline-offset: 2px;
+}
+/* Ya estás en el inicio: sigue a plena luz, pero no se ofrece como acción. */
+.brand-home.is-home { cursor: default; }
+.brand-home.is-home:hover { background: transparent; }
 
 .brand-mark {
   /* Climate Crisis · exclusiva de la marca */
@@ -228,8 +259,9 @@ a {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--type-mute);
-  border-left: 1px solid var(--hairline);
-  padding-left: 14px;
+  /* Sin barra separadora: el salto de tipografía y de color ya distingue la
+     marca del subtítulo. */
+  padding-left: 2px;
 }
 
 .app-actions {
@@ -250,7 +282,9 @@ a {
 
 .app-footer {
   padding: 18px 32px;
-  border-top: 1px solid var(--hairline);
+  /* Sin línea, igual que el header: si el de arriba no la tiene, el de abajo
+     desentona. */
+  background: var(--paper);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -264,6 +298,9 @@ a {
   .app-main   { padding: 18px 18px 60px; gap: 20px; }
   .app-footer { padding: 14px 18px; flex-direction: column; gap: 8px; }
   .brand-tag  { display: none; }
+  /* La pantalla de inicio anula el padding del main para llegar a los bordes:
+     acá los valores son otros. */
+  .start-screen { margin-top: -18px; margin-bottom: -60px; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -673,6 +710,34 @@ h3 { font-size: var(--t-lg); }
 
 .vessel.alarm .vessel-fill { background: var(--alarm); }
 
+/* Sin basal · recipiente vacío y apagado, para que se lea como "todavía no
+   hay estimación" y no como "vejiga vacía". */
+.vessel.is-idle {
+  border-style: dashed;
+  border-color: var(--hairline);
+  opacity: 0.55;
+}
+.vessel-idle-msg {
+  font-size: var(--t-md);
+  color: var(--type-med);
+  line-height: 1.35;
+  margin: 2px 0 4px;
+}
+
+/* Lectura en dB · es la magnitud que sostiene la hipótesis, así que se
+   muestra junto al porcentaje y no escondida en un tooltip. */
+.vessel-db {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  font-size: var(--t-xs);
+  font-family: var(--font-mono);
+  color: var(--type-med);
+}
+.vessel-db strong { color: var(--type-hi); font-weight: 600; }
+.vessel-db .mute { color: var(--type-mute); }
+
 .vessel-grid {
   position: absolute;
   inset: 0;
@@ -890,6 +955,67 @@ h3 { font-size: var(--t-lg); }
   color: var(--type-med);
 }
 .step-summary strong { color: var(--type-hi); font-weight: 600; }
+
+/* Encabezado de sección plegable · toda la fila es el disparador, así que se
+ * comporta como botón pero se lee como un título. */
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-left: -10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--type-med);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
+}
+.collapsible-head:hover { background: var(--ink-2); color: var(--type-hi); }
+.collapsible-head:focus-visible { outline: 1px solid var(--signal-line); outline-offset: 1px; }
+.collapsible-head .field-hint { margin-left: auto; }
+
+/* Bloque de datos leídos del catálogo · cantidad de campos variable, así que
+ * cada uno es una celda autónoma en vez de dos filas paralelas. */
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px 22px;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+.fact-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fact-label {
+  font-size: var(--t-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--type-mute);
+}
+.fact-cell strong {
+  color: var(--type-hi);
+  font-weight: 600;
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+}
+.fact-cell .field-hint { margin: 0; }
+
+/* Notas libres de una sesión archivada · texto corrido, respeta los saltos
+ * de línea que escribió el clínico. */
+.notes-readout {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--signal-line);
+  border-radius: var(--r-sm);
+  color: var(--type-med);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
 
 /* ──────────────────────────────────────────────────────────────────────
  * ALARM BANNER (P0 · persistent, top-of-screen, requires acknowledge)
@@ -1118,59 +1244,295 @@ h3 { font-size: var(--t-lg); }
   font-size: var(--t-sm);
 }
 
-.empty-state {
-  padding: 56px 32px;
-  text-align: center;
-  border: 1px dashed var(--hairline-strong);
-  border-radius: var(--r-md);
-  background: var(--ink-1);
-}
 
-.empty-state h2 {
-  font-size: var(--t-xl);
-  margin-bottom: 8px;
-}
+/* ════════════════════════════════════════════════════════════════════
+ * PANTALLA DE INICIO
+ *
+ * Sin tarjeta: el marco es la columna de luz del fondo. Un borde punteado
+ * encima de un fondo así deja dos marcos compitiendo por el mismo trabajo.
+ * El contenido flota sobre el pilar, centrado y con aire.
+ * ════════════════════════════════════════════════════════════════════ */
+.start-screen {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* Contenido a la izquierda · el pilar respira a la derecha, como en un hero.
+     Centrarlo dejaba el texto encima del núcleo más brillante. */
+  justify-content: flex-start;
 
-.empty-state p {
-  color: var(--type-med);
-  max-width: 56ch;
-  margin: 0 auto 24px;
-  line-height: 1.6;
-}
+  /* Sangrado real hasta los bordes de la ventana: .app-main tiene
+     max-width 1280 y padding lateral, y sin esto el fondo quedaba encajonado.
+     .app-shell lleva overflow-x: clip para que el 100vw no genere scroll
+     horizontal cuando hay barra vertical. */
+  width: 100vw;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  /* Se come el padding de .app-main (28px arriba, 80px abajo) para llegar
+     hasta el header y el footer. */
+  margin-top: -28px;
+  margin-bottom: -80px;
 
-.empty-steps {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  margin: 28px auto 0;
-  max-width: 720px;
-  background: var(--hairline);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
+  /* .app-shell es un grid con 1fr en el main: el main ya ocupa lo que sobra
+     de la ventana. Con flex:1 la sección se estira con él, en vez de quedarse
+     en su alto mínimo y dejar un rectángulo muerto abajo. */
+  flex: 1;
+  min-height: 560px;
+
+  padding: 64px clamp(28px, 8vw, 120px);
   overflow: hidden;
+  background: var(--paper);
 }
 
-@media (max-width: 720px) {
-  .empty-steps { grid-template-columns: 1fr; }
+/* El lienzo se desborda a propósito hacia la derecha y hacia abajo: así el
+   núcleo del pilar cae fuera del eje de lectura y los filamentos entran en
+   cuadro por los bordes en vez de nacer y morir dentro. */
+.start-screen__bg {
+  position: absolute;
+  top: -12%;
+  bottom: -12%;
+  left: 22%;
+  right: -18%;
+  z-index: 0;
+  pointer-events: none;
+}
+.light-pillar {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-.empty-step {
-  background: var(--ink-1);
-  padding: 22px 20px;
-  text-align: left;
+/* Tema claro · `screen` sobre blanco da blanco y el pilar desaparecería. Con
+   `multiply` la columna se lee como una sombra de color. El !important es para
+   ganarle al style inline que escribe el componente. */
+.light-theme .light-pillar {
+  mix-blend-mode: multiply !important;
+  opacity: 0.4;
+}
+
+/* Fundido a los bordes · solo arriba y abajo, para empalmar con el header y el
+   footer. Nada en el centro: la primera versión metía ahí un radial opaco y
+   apagaba el pilar justo donde tiene más presencia. La legibilidad del texto
+   se resuelve en el texto (peso, sombra) y en el panel translúcido, no
+   matando el fondo. */
+.start-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to right,
+      var(--paper) 0%,
+      color-mix(in srgb, var(--paper) 82%, transparent) 24%,
+      color-mix(in srgb, var(--paper) 30%, transparent) 44%,
+      transparent 62%
+    ),
+    linear-gradient(
+      to bottom,
+      var(--paper) 0%,
+      color-mix(in srgb, var(--paper) 45%, transparent) 8%,
+      transparent 20%,
+      transparent 84%,
+      color-mix(in srgb, var(--paper) 55%, transparent) 95%,
+      var(--paper) 100%
+    );
+}
+
+.start-screen__content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 520px;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.start-screen__head { margin-bottom: 34px; }
+
+.start-screen__eyebrow {
+  display: block;
+  margin-bottom: 12px;
+  font-size: var(--t-xs);
+  font-family: var(--font-mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--type-hi);
+  opacity: 0.62;
+  text-shadow: 0 1px 12px var(--paper);
+}
+
+/* Sobre luz intensa el texto necesita cuerpo propio, no un fondo apagado:
+   blanco puro, y una sombra difusa del color del papel que lo despega del
+   pilar sin verse como sombra. */
+.start-screen h2 {
+  font-size: clamp(var(--t-2xl), 4.6vw, 56px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  color: #fff;
+  text-wrap: balance;
+  text-shadow:
+    0 2px 30px color-mix(in srgb, var(--paper) 90%, transparent),
+    0 1px 6px color-mix(in srgb, var(--paper) 70%, transparent);
+}
+.light-theme .start-screen h2 {
+  color: var(--type-hi);
+  text-shadow: 0 2px 26px var(--paper);
+}
+
+/* ── Requisitos ────────────────────────────────────────────────────────
+ * Enlace y paciente como filas de estado en vivo. Alineadas a la izquierda
+ * aunque el bloque esté centrado: son datos para leer, no un titular.
+ * Superficie translúcida en vez de opaca, para que el pilar se insinúe
+ * debajo sin comerse el texto. */
+.prep-list {
+  width: 100%;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--type-hi) 14%, transparent);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  /* Vidrio, no panel opaco: el pilar se ve pasar por detrás. El blur fuerte
+     es lo que sostiene la legibilidad sobre los filamentos brillantes. */
+  background: color-mix(in srgb, var(--paper) 58%, transparent);
+  backdrop-filter: blur(26px) saturate(1.1);
+  -webkit-backdrop-filter: blur(26px) saturate(1.1);
+  box-shadow:
+    0 18px 50px color-mix(in srgb, var(--paper) 70%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--type-hi) 8%, transparent);
+}
+
+.prep-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  min-height: 68px;
+}
+.prep-row + .prep-row { border-top: 1px solid color-mix(in srgb, var(--type-hi) 10%, transparent); }
+
+.prep-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  color: var(--type-mute);
+}
+.prep-row.is-ok .prep-icon {
+  color: var(--confirm);
+  border-color: var(--confirm);
+}
+.prep-row.is-pending .prep-icon { color: var(--type-mute); }
+
+.prep-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.prep-title { color: var(--type-hi); font-weight: 500; font-size: var(--t-sm); }
+.prep-meta {
+  color: var(--type-mute);
+  font-size: var(--t-xs);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.prep-row.is-ok .prep-meta { color: var(--type-med); }
+
+.prep-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ── Botón con reflejo especular (React Bits) ──────────────────────────
+ * El componente solo aporta el canvas del brillo: el relleno, la tipografía
+ * y el alto siguen saliendo de .button / .button-primary / .button-lg, para
+ * que no haya un botón con reglas propias en medio del sistema. */
+.specular-button { position: relative; }
+
+/* El canvas se pasa del borde para que el brillo pueda desbordar */
+.specular-button__fx {
+  position: absolute;
+  inset: -20px;
+  pointer-events: none;
+  z-index: 1;
+}
+.specular-button__fx canvas { display: block; width: 100%; height: 100%; }
+/* Deshabilitado no se ilumina: el reflejo insinúa que el botón responde. */
+.specular-button:disabled .specular-button__fx { display: none; }
+
+/* La etiqueta se envuelve, así que el gap del icono se muda acá */
+.specular-button__label {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
-.empty-step-num {
-  font-family: var(--font-display);
-  font-size: var(--t-2xl);
-  color: var(--signal);
+.prep-launch {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+}
+/* El botón primario es el destino de toda la pantalla: se lo trata como tal */
+.prep-launch .button-lg {
+  min-width: 240px;
+  justify-content: center;
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--signal) 30%, transparent);
+}
+.prep-launch .button-lg:disabled { box-shadow: none; }
+
+@media (max-width: 620px) {
+  .start-screen {
+    padding: 44px 20px 52px;
+    min-height: 560px;
+  }
+  /* El pilar se corre al borde: en pantalla angosta no hay lugar para
+     dejarlo a un costado del texto. */
+  .start-screen__bg { left: 0; right: -34%; }
+  .start-screen__head { margin-bottom: 26px; }
+  .prep-launch {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .prep-launch .button-lg { min-width: 0; width: 100%; }
 }
 
-.empty-step-title { color: var(--type-hi); font-weight: 500; }
-.empty-step-body  { color: var(--type-med); font-size: var(--t-xs); line-height: 1.5; }
+/* Acción secundaria · el simulador se ofrece, no compite con medir de verdad */
+.link-button {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  color: var(--type-mute);
+  font-size: var(--t-xs);
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--hairline-strong);
+  transition: color var(--dur-fast, 120ms) ease;
+}
+.link-button:hover { color: var(--type-hi); text-decoration-color: currentColor; }
+/* Sobre el pilar el gris apagado se pierde: en la pantalla de inicio sube. */
+.prep-launch .link-button { color: var(--type-med); text-shadow: 0 1px 10px var(--paper); }
+.prep-launch .link-button:hover { color: var(--type-hi); }
+.link-button:focus-visible { outline: 1px solid var(--signal-line); outline-offset: 1px; }
+
+@media (max-width: 620px) {
+  .prep-row { flex-wrap: wrap; }
+  .prep-actions { width: 100%; padding-left: 42px; }
+}
+
+
+@media (max-width: 720px) {
+  }
+
+
+
 
 /* ──────────────────────────────────────────────────────────────────────
  * DRAWER (settings)
@@ -1488,19 +1850,13 @@ code {
 
 .admin-row,
 .timeline-row,
-.empty-step {
-  animation: row-rise var(--dur-base) var(--ease-out-strong) both;
-}
 
 .admin-row:nth-child(1),
 .timeline-row:nth-child(1),
-.empty-step:nth-child(1) { animation-delay: 0ms; }
 .admin-row:nth-child(2),
 .timeline-row:nth-child(2),
-.empty-step:nth-child(2) { animation-delay: 40ms; }
 .admin-row:nth-child(3),
 .timeline-row:nth-child(3),
-.empty-step:nth-child(3) { animation-delay: 80ms; }
 .admin-row:nth-child(4),
 .timeline-row:nth-child(4) { animation-delay: 120ms; }
 .admin-row:nth-child(5),
@@ -1788,13 +2144,7 @@ code {
 
 /* ─── EMPTY STATE · steps en stack ────────────────────────────────── */
 @media (max-width: 720px) {
-  .empty-state {
-    padding: 36px 22px;
   }
-  .empty-steps {
-    grid-template-columns: 1fr;
-  }
-}
 
 /* ─── DRAWER · full width en mobile ───────────────────────────────── */
 @media (max-width: 720px) {
@@ -1950,73 +2300,206 @@ code {
   border-color: var(--hairline-strong);
 }
 
-.header-menu-pop {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 246px;
-  padding: 6px;
-  background: var(--ink-1);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-3);
-  z-index: 120;
+/* ── Overlay a pantalla completa ──────────────────────────────────────
+ * En vez de colgar un recuadro del header, el menú toma la pantalla y
+ * difumina lo de atrás: la medición queda legible pero claramente en segundo
+ * plano. El velo es tenue a propósito — no se quiere tapar una sesión en
+ * curso, solo correrla del foco. */
+/* La superficie cubre la pantalla para capturar el click de cierre y difuminar
+ * el fondo, pero el menú vive pegado al margen derecho, bajo el botón ⋯ que lo
+ * abrió: así no tapa lo que se está midiendo y se lee de dónde salió.
+ *
+ * El velo es un degradado horizontal —tenue a la izquierda, más presente
+ * detrás del menú—, para que la sesión siga visible mientras la columna de
+ * acciones tiene contraste suficiente. */
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  /* Por encima del header (60) y del contenido, pero DEBAJO de la alarma
+     preventiva (70) y de los toasts (80): si el umbral se dispara con el menú
+     abierto, el aviso tiene que verse nítido y por delante. */
+  z-index: 65;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 22px;
+  padding: 96px 40px 40px;
+
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--paper) 26%, transparent) 0%,
+    color-mix(in srgb, var(--paper) 55%, transparent) 42%,
+    color-mix(in srgb, var(--paper) 84%, transparent) 78%
+  );
+  backdrop-filter: blur(6px) saturate(0.92);
+  -webkit-backdrop-filter: blur(6px) saturate(0.92);
+
   opacity: 1;
-  transform: translateY(0);
-  transform-origin: top right;
-  transition: opacity var(--dur-fast) var(--ease-out-strong),
-              transform var(--dur-fast) var(--ease-out-strong);
+  transition: opacity var(--dur-base) var(--ease-out-strong);
 }
 @starting-style {
-  .header-menu-pop { opacity: 0; transform: translateY(-6px); }
+  .menu-overlay { opacity: 0; }
 }
 
-.header-menu-item {
+.menu-overlay__hint {
+  color: var(--type-mute);
+  font-size: var(--t-xs);
+  letter-spacing: 0.04em;
+  padding-right: 4px;
+}
+
+@media (max-width: 620px) {
+  .menu-overlay { padding: 84px 20px 32px; }
+}
+
+/* ── Lista del menú · adaptación de LineSidebar (React Bits) ──────────
+ * `--effect` (0..1) lo escribe por item el bucle rAF del componente. Todas
+ * las propiedades derivadas leen esa misma variable, así color, corrimiento
+ * y escala se mueven juntos sin transiciones CSS que se desfasen. */
+.line-menu {
+  --accent: var(--signal);
+  --marker-length: 48px;
+  --marker-gap: 20px;
+  --tick-scale: 0.42;
+  --max-shift: 14px;
+  --item-gap: 22px;
+
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 calc(var(--marker-length) + var(--marker-gap));
+  display: flex;
+  flex-direction: column;
+  gap: var(--item-gap);
+  width: min(340px, 100%);
+}
+
+.line-menu__item {
+  position: relative;
+  /* Entrada escalonada · el índice lo pasa el componente en --stagger */
+  animation: menu-item-in var(--dur-base) var(--ease-out-strong) both;
+  animation-delay: var(--stagger, 0ms);
+}
+.line-menu__item.is-danger { --accent: var(--alarm); }
+
+/* Entran desde la derecha · desde el borde del que cuelga el menú */
+@keyframes menu-item-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Ensancha el blanco del puntero para que la fila reaccione un poco antes
+   de que el cursor llegue encima. */
+.line-menu__item::before {
+  content: '';
+  position: absolute;
+  inset: -8px -32px;
+}
+
+.line-menu__button {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 4px 0;
   border: 0;
-  border-radius: var(--r-sm);
   background: transparent;
-  color: var(--type-hi);
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-quart);
+  font-family: inherit;
+  transform: translateX(calc(var(--effect, 0) * var(--max-shift)));
 }
-.header-menu-item:hover { background: var(--ink-2); }
-.header-menu-item.is-danger { color: var(--alarm); }
+.line-menu__button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 8px;
+  border-radius: var(--r-sm);
+}
 
-.header-menu-item-icon {
+.line-menu__index {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--accent) calc(var(--effect, 0) * 100%), var(--type-mute));
+  opacity: calc(0.5 + var(--effect, 0) * 0.5);
+}
+
+/* Icono · sin recuadro, para no competir con el marcador. Toma el acento con
+   la cercanía igual que el texto. */
+.line-menu__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--r-sm);
-  background: var(--ink-2);
-  border: 1px solid var(--hairline);
-  color: var(--type-med);
   flex-shrink: 0;
-}
-.header-menu-item.is-danger .header-menu-item-icon {
-  color: var(--alarm);
-  background: var(--alarm-soft);
-  border-color: var(--alarm-line);
+  width: 22px;
+  color: color-mix(in srgb, var(--accent) calc(var(--effect, 0) * 100%), var(--type-med));
+  transform: scale(calc(1 + var(--effect, 0) * 0.12));
 }
 
-.header-menu-item-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.header-menu-item-label { font-weight: 500; font-size: var(--t-sm); }
-.header-menu-item-hint {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--type-mute);
+.line-menu__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.line-menu__text {
+  font-size: var(--t-md);
+  font-weight: 500;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--accent) calc(var(--effect, 0) * 100%), var(--type-hi));
 }
-.header-menu-divider { height: 1px; background: var(--hairline); margin: 5px 4px; }
+
+.line-menu__hint {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--accent) calc(var(--effect, 0) * 45%), var(--type-mute));
+  opacity: calc(0.7 + var(--effect, 0) * 0.3);
+}
+
+/* Línea marcadora · crece y se tiñe con la cercanía del cursor */
+.line-menu__marker {
+  position: absolute;
+  top: 50%;
+  left: calc(-1 * (var(--marker-length) + var(--marker-gap)));
+  height: 1px;
+  width: var(--marker-length);
+  background-color: color-mix(in srgb, var(--accent) calc(var(--effect, 0) * 100%), var(--type-mute));
+  opacity: calc(0.45 + var(--effect, 0) * 0.55);
+  transform-origin: left center;
+  transform: translateY(-50%) scaleX(calc(0.7 + var(--effect, 0) * 0.5));
+}
+
+/* Tick corto centrado en el hueco entre dos entradas · da el ritmo que antes
+   aportaban los separadores explícitos. */
+.line-menu__item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: calc(100% + var(--item-gap) / 2);
+  left: calc(-1 * (var(--marker-length) + var(--marker-gap)));
+  height: 1px;
+  width: calc(var(--marker-length) * var(--tick-scale));
+  background-color: var(--type-mute);
+  opacity: 0.3;
+  transform-origin: left center;
+  transform: translateY(-50%) scaleX(calc(0.7 + var(--effect, 0) * 0.6));
+}
+
+@media (max-width: 620px) {
+  .line-menu {
+    --marker-length: 26px;
+    --marker-gap: 12px;
+    --item-gap: 18px;
+    width: 100%;
+  }
+  .line-menu__text { font-size: var(--t-sm); }
+}
+
+/* Sin animación: el efecto se apaga, pero el menú sigue siendo legible. */
+@media (prefers-reduced-motion: reduce) {
+  .line-menu__item { animation: none; }
+  .line-menu__button,
+  .line-menu__icon { transform: none; }
+  .line-menu__marker,
+  .line-menu__item:not(:last-child)::after { transform: translateY(-50%); }
+  .menu-overlay { backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+}
 
 /* ─── COMMAND BAR · control primario + cronómetro + acciones ──────── */
 .command-bar {
@@ -2189,28 +2672,6 @@ code {
 }
 
 /* ── Fondo animado de la pantalla previa a la medición ────────────────── */
-.empty-state { position: relative; overflow: hidden; }
-
-.empty-state-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  opacity: 0.42;            /* atenuado: no debe competir con el texto */
-  pointer-events: auto;     /* deja que las partículas sigan al mouse */
-}
-
-/* El contenido queda por encima del canvas y mantiene sus clicks. */
-.empty-state > *:not(.empty-state-bg) {
-  position: relative;
-  z-index: 1;
-}
-
-/* Tema claro · el efecto necesita menos presencia sobre fondo blanco. */
-[data-theme='light'] .empty-state-bg { opacity: 0.28; }
-
-@media (prefers-reduced-motion: reduce) {
-  .empty-state-bg { display: none; }
-}
 
 /* ── Franja de basal activo · dentro de la tarjeta de Calibración ─────── */
 .baseline-strip {
@@ -2326,8 +2787,8 @@ code {
 .spotlight-area .readout:hover { z-index: 1; }
 
 /* Tema claro · sombra menos pesada */
-[data-theme='light'] .spotlight-area .surface:hover,
-[data-theme='light'] .spotlight-area .readout-cell:hover {
+.light-theme .spotlight-area .surface:hover,
+.light-theme .spotlight-area .readout-cell:hover {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--signal, #6366f1) 30%, transparent),
     0 0 22px -8px color-mix(in srgb, var(--signal, #6366f1) 40%, transparent),
@@ -2433,3 +2894,69 @@ code {
   background: color-mix(in srgb, var(--alarm) 6%, transparent);
 }
 .timeline-tag.is-gap { color: var(--alarm); }
+
+/* Eventos del protocolo · ingesta (azul) y micción (violeta) */
+.timeline-row.is-water {
+  border-left: 3px solid var(--signal);
+  padding-left: 9px;
+  background: color-mix(in srgb, var(--signal) 6%, transparent);
+}
+.timeline-row.is-void {
+  border-left: 3px solid var(--confirm);
+  padding-left: 9px;
+  background: color-mix(in srgb, var(--confirm) 6%, transparent);
+}
+.timeline-tag.is-water { color: var(--signal); }
+.timeline-tag.is-void  { color: var(--confirm); }
+
+/* ── Formularios generados desde el catálogo de campos ────────────────── */
+.dyn-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 720px) {
+  .dyn-grid { grid-template-columns: repeat(var(--dyn-cols, 2), minmax(0, 1fr)); }
+  .dyn-grid .dyn-wide { grid-column: 1 / -1; }
+}
+.dyn-unit { color: var(--type-mute); text-transform: none; letter-spacing: 0; }
+.dyn-req  { color: var(--alarm); }
+
+/* Selector de paciente · previo a la medición */
+.patient-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.patient-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.patient-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm, 8px);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, background .15s ease;
+}
+.patient-item:hover { border-color: var(--signal-line); background: var(--signal-soft); }
+.patient-item.is-selected { border-color: var(--signal); background: var(--signal-soft); }
+.patient-item-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .06em;
+  color: var(--signal);
+}
+.patient-item-name { color: var(--type-hi); }
+.patient-item-meta { font-size: 11px; color: var(--type-mute); white-space: nowrap; }

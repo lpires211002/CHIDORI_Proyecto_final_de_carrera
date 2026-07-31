@@ -83,10 +83,13 @@ export async function commitSession(supabase, payload) {
   let { data: newSession, error: sErr } = await supabase
     .from('sessions').insert(sessionRow).select().single();
 
-  // Fallback: si la columna `notes` todavía no existe, reintentamos sin ella
-  // antes que perder la sesión entera. Ver ALTER TABLE en la guía.
-  if (sErr && /notes/i.test(sErr.message || '')) {
-    const { notes, ...legacy } = sessionRow;   // eslint-disable-line no-unused-vars
+  // Fallback: si la base todavía no corrió el SQL del protocolo, esas columnas
+  // no existen y el insert falla. Reintentamos sin ellas antes que perder la
+  // sesión entera (las muestras son irrepetibles). Ver la guía de medición.
+  const COLS_PROTOCOLO = ['notes', 'patient_id', 'session_data', 'session_number'];
+  if (sErr && COLS_PROTOCOLO.some((c) => new RegExp(`\\b${c}\\b`, 'i').test(sErr.message || ''))) {
+    const legacy = { ...sessionRow };
+    COLS_PROTOCOLO.forEach((c) => delete legacy[c]);
     ({ data: newSession, error: sErr } = await supabase
       .from('sessions').insert(legacy).select().single());
   }
@@ -108,15 +111,16 @@ export async function commitSession(supabase, payload) {
       elapsed_time:     e.time,
       impedance:        e.value,
       impedance_change: e.change,
-      kind:             e.kind || 'mark',   // 'mark' | 'disconnect' | 'reconnect'
+      kind:             e.kind || 'mark',   // mark|disconnect|reconnect|gap|water|void
+      amount_ml:        e.amount ?? null,    // ingesta / micción
     }));
     let { error: eErr } = await supabase.from('session_events').insert(evRows);
 
     // Fallback: si la columna `kind` todavía no existe en la tabla, reintentamos
     // sin ese campo. Preferimos guardar el evento (perdiendo el tipo) antes que
     // perder la sesión entera. Ver ALTER TABLE en COMO_MEDIR_CHIDORI.md.
-    if (eErr && /kind/i.test(eErr.message || '')) {
-      const legacy = evRows.map(({ kind, ...rest }) => rest);   // eslint-disable-line no-unused-vars
+    if (eErr && /(kind|amount_ml)/i.test(eErr.message || '')) {
+      const legacy = evRows.map(({ kind, amount_ml, ...rest }) => rest);   // eslint-disable-line no-unused-vars
       ({ error: eErr } = await supabase.from('session_events').insert(legacy));
     }
     if (eErr) throw eErr;

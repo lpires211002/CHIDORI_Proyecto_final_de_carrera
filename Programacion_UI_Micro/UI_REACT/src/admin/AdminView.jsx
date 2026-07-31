@@ -1,14 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import {
   Shield, ShieldOff, LogOut, X, UserCheck, UserX, RefreshCw, Search, ChevronRight,
   Activity, Pencil, Trash2, Download, FileText, Table, FileType2, Save, Menu,
+  ChevronDown,
 } from 'lucide-react';
 import { supabase, emailToUsername } from '../supabaseClient';
 import ConfirmModal from '../components/ConfirmModal';
 import ShimmerSkeleton from '../components/ShimmerSkeleton';
 import MobileMenu, { MobileMenuItem, MobileMenuSection } from '../components/MobileMenu';
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
+import FieldsPanel from './FieldsPanel';
+import SessionChart from './SessionChart';
+import DynamicFields from '../components/DynamicFields';
+import { fetchFields, coerceValues, updatePatient, patientLabel } from '../lib/patients';
 
 const sessionLayoutId = (id) => `session-card-${id}`;
 
@@ -60,7 +65,8 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
           id, created_at, patient_name, patient_age, patient_gender,
           patient_weight, patient_height, patient_iliac_circ, menstruation_info,
           initial_impedance, final_impedance, elapsed_time_str, total_events,
-          user_id
+          user_id, patient_id, session_number, session_data, notes,
+          patient:patients ( id, code, first_name, last_name, data, notes )
         `)
         .order('created_at', { ascending: false })
         .limit(200);
@@ -143,7 +149,7 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
   const refreshSession = async (sessionId) => {
     const { data, error: err } = await supabase
       .from('sessions')
-      .select('id, created_at, patient_name, patient_age, patient_gender, patient_weight, patient_height, patient_iliac_circ, menstruation_info, initial_impedance, final_impedance, elapsed_time_str, total_events, user_id')
+      .select('id, created_at, patient_name, patient_age, patient_gender, patient_weight, patient_height, patient_iliac_circ, menstruation_info, initial_impedance, final_impedance, elapsed_time_str, total_events, user_id, patient_id, session_number, session_data, notes, patient:patients ( id, code, first_name, last_name, data, notes )')
       .eq('id', sessionId)
       .maybeSingle();
     if (err || !data) return;
@@ -167,7 +173,8 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
     if (!filter.trim()) return sessions;
     const f = filter.toLowerCase();
     return sessions.filter((s) =>
-      [s.patient_name, s.owner?.display_name, s.owner?.email, s.elapsed_time_str]
+      [s.patient?.code, s.patient?.last_name, s.patient?.first_name,
+       s.patient_name, s.owner?.display_name, s.owner?.email, s.elapsed_time_str]
         .filter(Boolean).some((x) => x.toLowerCase().includes(f))
     );
   }, [sessions, filter]);
@@ -258,6 +265,13 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
           >
             Cuentas de clínicos
           </button>
+          <button
+            type="button"
+            className={`segment-item ${tab === 'fields' ? 'active' : ''}`}
+            onClick={() => setTab('fields')}
+          >
+            Campos que se miden
+          </button>
         </div>
 
         {error && (
@@ -293,6 +307,10 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
             )}
           </AnimatePresence>
           </LayoutGroup>
+        )}
+
+        {tab === 'fields' && (
+          <FieldsPanel supabase={supabase} onAlert={(m, t) => setError(t === 'success' ? null : m)} />
         )}
 
         {tab === 'accounts' && (
@@ -601,7 +619,11 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
           >
             <div>
               <div style={{ color: 'var(--type-hi)', fontWeight: 500 }}>
-                {s.patient_name || 'Paciente sin identificar'}
+                {s.patient
+                  ? `${s.patient.code}${[s.patient.last_name, s.patient.first_name].filter(Boolean).length
+                      ? ` · ${[s.patient.last_name, s.patient.first_name].filter(Boolean).join(', ')}` : ''}`
+                  : (s.patient_name || 'Sin paciente asociado')}
+                {s.session_number ? <span className="patient-item-meta"> · sesión {s.session_number}</span> : null}
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', color: 'var(--type-mute)' }}>
                 {new Date(s.created_at).toLocaleString('es-AR')}
@@ -635,79 +657,207 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
 
 /* ──────────────────────────────────────────────────────────────────── */
 
+/* Sesiones anteriores al catálogo de campos: los datos vivían en columnas
+ * fijas de `sessions`. Se muestran como "datos heredados" para no perderlos,
+ * pero no se ofrecen al cargar una sesión nueva. */
+const LEGACY_COLS = [
+  ['patient_name',       'Nombre',                 'text'],
+  ['patient_age',        'Edad',                   'number', 'años'],
+  ['patient_gender',     'Sexo',                   'text'],
+  ['patient_weight',     'Peso',                   'number', 'kg'],
+  ['patient_height',     'Altura',                 'number', 'm'],
+  ['patient_iliac_circ', 'Circ. suprailíaca',      'number', 'cm'],
+  ['menstruation_info',  'Última menstruación',    'text'],
+];
+
+const hasLegacy = (s) => LEGACY_COLS.some(([k]) => s[k] !== null && s[k] !== undefined && s[k] !== '');
+
+/**
+ * Trae TODAS las filas de una consulta, en páginas.
+ *
+ * PostgREST corta en 1000 filas por request y `.limit()` no lo sube: es un
+ * tope del servidor. Una medición de 70 min a 4 Hz son ~17.000 muestras, así
+ * que sin paginar se perdía el 94 % de la sesión (y los exports salían
+ * truncados sin avisar).
+ *
+ * `build()` tiene que devolver una consulta nueva en cada llamada: los query
+ * builders de supabase-js se consumen al ejecutarse.
+ */
+async function fetchAllRows(build, { page = 1000, max = 500000, onProgress } = {}) {
+  const out = [];
+  for (let from = 0; from < max; from += page) {
+    const { data, error } = await build().range(from, from + page - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    out.push(...data);
+    onProgress?.(out.length);
+    if (data.length < page) break;   // última página
+  }
+  return out;
+}
+
+/**
+ * Aplica los valores del formulario sin perder lo que el catálogo ya no
+ * conoce. Un campo eliminado de `field_definitions` deja huérfano su valor en
+ * el JSON: si se guardara solo lo del catálogo, esa medición se borraría al
+ * primer "Guardar". Los huérfanos se conservan; los campos vigentes sí se
+ * pisan (incluido vaciarlos).
+ *
+ * Con el catálogo vacío —todavía cargando, o falló la consulta— devuelve el
+ * original: es preferible no guardar nada a guardar `{}`.
+ */
+function mergeVals(original, catalogFields, values) {
+  if (!catalogFields || catalogFields.length === 0) return original || {};
+  const conocidas = new Set(catalogFields.map((f) => f.key));
+  const huerfanos = Object.fromEntries(
+    Object.entries(original || {}).filter(([k]) => !conocidas.has(k)),
+  );
+  return { ...huerfanos, ...coerceValues(catalogFields, values) };
+}
+
 function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDeleted }) {
   const [measurements, setMeasurements] = useState([]);
   const [events, setEvents]             = useState([]);
+  const [fields, setFields]             = useState([]);
   const [busy, setBusy]                 = useState(true);
+  const [loaded, setLoaded]             = useState(0);      // progreso de descarga
+  const [loadError, setLoadError]       = useState(null);
+  const chartRef                        = useRef(null);     // para el PNG del PDF
   const [mode, setMode]                 = useState('view'); // view | edit
   const [saving, setSaving]             = useState(false);
   const [savingError, setSavingError]   = useState(null);
   const [askDelete, setAskDelete]       = useState(false);
 
-  // Editable fields, pre-cargados desde la sesión
-  const [editFields, setEditFields] = useState({
-    patient_name:       session.patient_name       || '',
-    patient_age:        session.patient_age        ?? '',
-    patient_gender:     session.patient_gender     || '',
-    patient_weight:     session.patient_weight     ?? '',
-    patient_height:     session.patient_height     ?? '',
-    patient_iliac_circ: session.patient_iliac_circ ?? '',
-    menstruation_info:  session.menstruation_info  || '',
-    initial_impedance:  session.initial_impedance  ?? '',
-    final_impedance:    session.final_impedance    ?? '',
-    elapsed_time_str:   session.elapsed_time_str   || '',
-    total_events:       session.total_events       ?? 0,
+  const patient = session.patient || null;
+  const legacy  = hasLegacy(session);
+
+  // El catálogo se pide incluyendo los ocultos: un campo dado de baja después
+  // de la medición igual tiene que poder mostrar su etiqueta.
+  const patientFields = useMemo(() => fields.filter((f) => f.scope === 'patient'), [fields]);
+  const sessionFields = useMemo(() => fields.filter((f) => f.scope === 'session'), [fields]);
+
+  // Formulario de edición · valores dinámicos + resumen numérico de la sesión
+  const [patientVals, setPatientVals] = useState(() => ({ ...(patient?.data || {}) }));
+  const [sessionVals, setSessionVals] = useState(() => ({ ...(session.session_data || {}) }));
+  const [notes, setNotes]             = useState(session.notes || '');
+  const [editFields, setEditFields]   = useState({
+    initial_impedance: session.initial_impedance ?? '',
+    final_impedance:   session.final_impedance   ?? '',
+    elapsed_time_str:  session.elapsed_time_str  || '',
+    total_events:      session.total_events      ?? 0,
+    ...Object.fromEntries(LEGACY_COLS.map(([k]) => [k, session[k] ?? ''])),
   });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setBusy(true);
-      const [m, e] = await Promise.all([
-        supabase
-          .from('measurements')
-          .select('elapsed_time, impedance, rate')
-          .eq('session_id', session.id)
-          .order('elapsed_time', { ascending: true })
-          .limit(5000),
-        supabase
+      setLoaded(0);
+      setLoadError(null);
+
+      // Los eventos se piden con tipo y volumen; si la base todavía no tiene
+      // esas columnas (sesiones anteriores al protocolo) se reintenta con el
+      // formato viejo en vez de dejar la lista vacía.
+      const eventos = async () => {
+        const q = (cols) => fetchAllRows(() => supabase
           .from('session_events')
-          .select('event_number, elapsed_time, impedance, impedance_change')
+          .select(cols)
           .eq('session_id', session.id)
-          .order('event_number', { ascending: true }),
-      ]);
-      if (cancelled) return;
-      setMeasurements(m.data || []);
-      setEvents(e.data || []);
-      setBusy(false);
+          .order('event_number', { ascending: true }));
+        try {
+          return await q('event_number, elapsed_time, impedance, impedance_change, kind, amount_ml');
+        } catch {
+          return q('event_number, elapsed_time, impedance, impedance_change');
+        }
+      };
+
+      // Una sesión de 4 h son ~57.000 muestras: hay que paginarlas. El orden
+      // tiene que ser total o la paginación repite o saltea filas, así que se
+      // desempata por `id`; si esa columna no existe se cae al orden simple
+      // (a 4 Hz los tiempos no se repiten, es solo un seguro).
+      const muestras = async () => {
+        const build = (conId) => () => {
+          const q = supabase
+            .from('measurements')
+            .select('elapsed_time, impedance, rate')
+            .eq('session_id', session.id)
+            .order('elapsed_time', { ascending: true });
+          return conId ? q.order('id', { ascending: true }) : q;
+        };
+        const onProgress = (n) => { if (!cancelled) setLoaded(n); };
+        try {
+          return await fetchAllRows(build(true), { onProgress });
+        } catch {
+          return fetchAllRows(build(false), { onProgress });
+        }
+      };
+
+      try {
+        const [m, e, f] = await Promise.all([
+          muestras(),
+          eventos(),
+          fetchFields(supabase, { includeInactive: true }).catch(() => []),
+        ]);
+        if (cancelled) return;
+        setMeasurements(m);
+        setEvents(e);
+        setFields(f || []);
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError(err.message || 'No se pudieron cargar las mediciones.');
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [session.id]);
 
   const fmt = (n, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 
+  /** Agua total ingerida · se recalcula sumando los eventos, no se guarda suelta. */
+  const aguaTotal = useMemo(() => {
+    const ml = events
+      .filter((e) => e.kind === 'water' && Number.isFinite(Number(e.amount_ml)))
+      .reduce((acc, e) => acc + Number(e.amount_ml), 0);
+    return ml > 0 ? ml : null;
+  }, [events]);
+
   const handleSave = async () => {
     setSaving(true);
     setSavingError(null);
     try {
       const payload = {
-        patient_name:       editFields.patient_name        || null,
-        patient_age:        editFields.patient_age   === '' ? null : parseInt(editFields.patient_age),
-        patient_gender:     editFields.patient_gender      || null,
-        patient_weight:     editFields.patient_weight === '' ? null : parseFloat(editFields.patient_weight),
-        patient_height:     editFields.patient_height === '' ? null : parseFloat(editFields.patient_height),
-        patient_iliac_circ: editFields.patient_iliac_circ === '' ? null : parseFloat(editFields.patient_iliac_circ),
-        menstruation_info:  editFields.menstruation_info   || null,
-        initial_impedance:  editFields.initial_impedance === '' ? null : parseFloat(editFields.initial_impedance),
-        final_impedance:    editFields.final_impedance === '' ? null : parseFloat(editFields.final_impedance),
-        elapsed_time_str:   editFields.elapsed_time_str    || null,
-        total_events:       editFields.total_events === '' ? 0 : parseInt(editFields.total_events) || 0,
+        session_data:      mergeVals(session.session_data, sessionFields, sessionVals),
+        notes:             notes.trim() || null,
+        initial_impedance: editFields.initial_impedance === '' ? null : parseFloat(editFields.initial_impedance),
+        final_impedance:   editFields.final_impedance === '' ? null : parseFloat(editFields.final_impedance),
+        elapsed_time_str:  editFields.elapsed_time_str || null,
+        total_events:      editFields.total_events === '' ? 0 : parseInt(editFields.total_events) || 0,
       };
+      // Las columnas viejas solo se tocan si esta sesión las usaba
+      if (legacy) {
+        LEGACY_COLS.forEach(([k, , tipo]) => {
+          const v = editFields[k];
+          payload[k] = v === '' || v == null
+            ? null
+            : tipo === 'number' ? Number(v) : String(v);
+        });
+      }
+
       const { error: err } = await supabase
         .from('sessions')
         .update(payload)
         .eq('id', session.id);
       if (err) throw err;
+
+      // La ficha del paciente es compartida por todas sus sesiones: se guarda
+      // aparte, en `patients.data`.
+      if (patient?.id && patientFields.length > 0) {
+        await updatePatient(supabase, patient.id, {
+          data: mergeVals(patient.data, patientFields, patientVals),
+        });
+      }
+
       await onSessionUpdated?.(session.id);
       setMode('view');
     } catch (e) {
@@ -724,16 +874,37 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
 
   /* ── Export handlers ────────────────────────────────────────────── */
 
+  // Mismo formato que usa el export en vivo: código, nombre, notas y la lista
+  // de campos con su etiqueta. Se arma desde el catálogo, no desde columnas
+  // fijas, para que los reportes reflejen lo que realmente se midió.
   const buildPatient = () => {
-    if (!session.patient_name && !session.patient_age) return null;
+    const pData = patient?.data || {};
+    const sData = session.session_data || {};
+
+    const campos = [
+      ...patientFields
+        .filter((f) => pData[f.key] !== undefined && pData[f.key] !== '')
+        .map((f) => ({ label: f.label, unit: f.unit, value: pData[f.key] })),
+      ...sessionFields
+        .filter((f) => sData[f.key] !== undefined && sData[f.key] !== '')
+        .map((f) => ({ label: f.label, unit: f.unit, value: sData[f.key] })),
+      ...(aguaTotal != null ? [{ label: 'Agua ingerida (eventos)', unit: 'ml', value: aguaTotal }] : []),
+      // Sesiones viejas: se agregan al final para no perder el dato histórico
+      ...(legacy ? LEGACY_COLS
+        .filter(([k]) => session[k] !== null && session[k] !== undefined && session[k] !== '')
+        .map(([k, label, , unit]) => ({ label, unit, value: session[k] })) : []),
+    ];
+
+    if (!patient && campos.length === 0 && !session.notes) return null;
+
     return {
-      nombre:        session.patient_name       || 'N/A',
-      edad:          session.patient_age        ?? 'N/A',
-      sexo:          session.patient_gender     || 'N/A',
-      peso:          session.patient_weight     ?? 'N/A',
-      altura:        session.patient_height     ?? 'N/A',
-      circ:          session.patient_iliac_circ ?? 'N/A',
-      menstruacion:  session.menstruation_info  || 'N/A',
+      codigo: patient?.code || 'N/A',
+      nombre: patient
+        ? [patient.last_name, patient.first_name].filter(Boolean).join(', ') || 'N/A'
+        : (session.patient_name || 'N/A'),
+      notas:  session.notes || '',
+      campos,
+      sessionData: sData,
     };
   };
 
@@ -746,7 +917,12 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
   });
 
   const safeSlug = () => {
-    const name = (session.patient_name || 'sin_identificar')
+    // El código del paciente es el identificador del dataset; el nombre suelto
+    // solo se usa para sesiones viejas sin ficha asociada.
+    const base = patient?.code
+      ? `${patient.code}${session.session_number ? `_s${session.session_number}` : ''}`
+      : (session.patient_name || 'sin_identificar');
+    const name = base
       .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
       .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
     const date = new Date(session.created_at).toISOString().slice(0, 10);
@@ -759,6 +935,9 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     stats: buildStats(),
     measurements,
     events,
+    // El gráfico se re-rinde en paleta clara: el canvas de pantalla es
+    // transparente y de tema oscuro, ilegible sobre una hoja blanca.
+    chartImage: chartRef.current?.toPNG() ?? null,
   });
 
   const downloadCSV = () => exportCSV({
@@ -796,7 +975,11 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
           <div className="modal-head" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
               <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {session.patient_name || 'Sesión sin identificar'}
+                {session.patient
+                  ? `${session.patient.code}${[session.patient.last_name, session.patient.first_name].filter(Boolean).length
+                      ? ` · ${[session.patient.last_name, session.patient.first_name].filter(Boolean).join(', ')}` : ''}`
+                  : (session.patient_name || 'Sesión sin paciente asociado')}
+                {session.session_number ? ` · sesión ${session.session_number}` : ''}
               </h3>
               <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
                 {new Date(session.created_at).toLocaleString('es-AR')} ·
@@ -810,6 +993,8 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                   type="button"
                   className="button button-ghost button-sm"
                   onClick={() => { setMode('edit'); setSavingError(null); }}
+                  disabled={busy}
+                  title={busy ? 'Cargando los campos configurados…' : 'Editar esta sesión'}
                 >
                   <Pencil size={13} />
                   Editar
@@ -876,6 +1061,12 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
             {savingError && (
               <div className="auth-feedback err">{savingError}</div>
             )}
+            {loadError && (
+              <div className="auth-feedback err">
+                {loadError} · Se muestran {measurements.length.toLocaleString('es-AR')} muestras
+                de las descargadas hasta el corte.
+              </div>
+            )}
 
             {mode === 'view' ? (
               <>
@@ -898,27 +1089,63 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                   </div>
                 </div>
 
-                {/* Datos del paciente · solo si hay alguno */}
-                {(session.patient_age || session.patient_gender || session.patient_weight) && (
-                  <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                    <span>Edad</span>
-                    <span>Sexo</span>
-                    <span>Peso</span>
-                    <span>Altura</span>
-                    <strong className="numeric">{session.patient_age ?? '—'} años</strong>
-                    <strong>{session.patient_gender || '—'}</strong>
-                    <strong className="numeric">{fmt(session.patient_weight, 1)} kg</strong>
-                    <strong className="numeric">{fmt(session.patient_height, 2)} m</strong>
+                {/* La curva primero: es la lectura de la sesión. El resto son
+                    los datos que la contextualizan, y el volcado crudo va
+                    plegado al final. */}
+                <SessionChart ref={chartRef} measurements={measurements} events={events} busy={busy} loaded={loaded} />
+
+                <FieldGrid
+                  title="Ficha del paciente"
+                  fields={patientFields}
+                  values={patient?.data}
+                  empty={patient ? 'Sin datos cargados en la ficha.' : null}
+                />
+
+                <FieldGrid
+                  title="Datos de esta sesión"
+                  fields={sessionFields}
+                  values={session.session_data}
+                  extra={aguaTotal != null
+                    ? [{ label: 'Agua ingerida', unit: 'ml', value: aguaTotal, hint: 'sumada de los eventos' }]
+                    : []}
+                  empty="No se completaron los datos de la sesión al exportar."
+                />
+
+                {/* Sesiones anteriores al catálogo de campos */}
+                {legacy && (
+                  <FieldGrid
+                    title="Datos heredados"
+                    hint="Cargados con el formato anterior, antes de los campos configurables."
+                    extra={LEGACY_COLS
+                      .filter(([k]) => session[k] !== null && session[k] !== undefined && session[k] !== '')
+                      .map(([k, label, , unit]) => ({ label, unit, value: session[k] }))}
+                  />
+                )}
+
+                {session.notes && (
+                  <div>
+                    <span className="section-label">Notas de la sesión</span>
+                    <p className="notes-readout">{session.notes}</p>
                   </div>
                 )}
 
-                <MeasurementsTable busy={busy} measurements={measurements} fmt={fmt} />
                 {events.length > 0 && <EventsList events={events} fmt={fmt} />}
+                <MeasurementsTable busy={busy} measurements={measurements} fmt={fmt} loaded={loaded} />
               </>
             ) : (
               <EditForm
                 editFields={editFields}
                 setEditFields={setEditFields}
+                patientFields={patientFields}
+                patientVals={patientVals}
+                setPatientVals={setPatientVals}
+                sessionFields={sessionFields}
+                sessionVals={sessionVals}
+                setSessionVals={setSessionVals}
+                notes={notes}
+                setNotes={setNotes}
+                patient={patient}
+                legacy={legacy}
                 saving={saving}
                 onSave={handleSave}
               />
@@ -933,7 +1160,8 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
         body={
           <>
             <p style={{ marginBottom: 10 }}>
-              Esta acción elimina la sesión <strong>{session.patient_name || 'sin identificar'}</strong>,
+              Esta acción elimina la sesión de{' '}
+              <strong>{patientLabel(patient) || session.patient_name || 'paciente sin identificar'}</strong>,
               todas sus mediciones ({measurements.length} puntos) y eventos asociados ({events.length}).
               No se puede deshacer.
             </p>
@@ -951,139 +1179,347 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
 
 /* ──────────────────────────────────────────────────────────────────── */
 
-function MeasurementsTable({ busy, measurements, fmt }) {
+/**
+ * Tabla de muestras · virtualizada.
+ *
+ * Están TODAS las filas disponibles, pero solo se montan en el DOM las que
+ * entran en la ventana visible más un margen. Una sesión de 4 h son ~57.000
+ * muestras: pintarlas todas congela el navegador varios segundos y no aporta
+ * nada, porque solo se ven doce a la vez.
+ */
+const ROW_H = 26;   // alto fijo · es lo que permite calcular qué filas mostrar
+
+/**
+ * Sección plegable.
+ *
+ * El detalle de una sesión es largo (curva + miles de muestras + eventos):
+ * el listado crudo se guarda plegado para que lo primero que se vea sea la
+ * lectura de la medición, no la planilla.
+ */
+function Collapsible({ title, meta, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
-      <span className="section-label">Mediciones ({measurements.length})</span>
-      <div className="surface" style={{ marginTop: 8, maxHeight: 280, overflowY: 'auto' }}>
+      <button
+        type="button"
+        className="collapsible-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronDown
+          size={14}
+          style={{
+            transform: `rotate(${open ? 0 : -90}deg)`,
+            transition: 'transform var(--dur-fast, 120ms) ease',
+            flexShrink: 0,
+          }}
+        />
+        <span className="section-label" style={{ margin: 0 }}>{title}</span>
+        {meta && <span className="field-hint" style={{ margin: 0 }}>{meta}</span>}
+      </button>
+      {open && <div style={{ marginTop: 8 }}>{children}</div>}
+    </div>
+  );
+}
+
+function MeasurementsTable({ busy, measurements, fmt, loaded = 0 }) {
+  const VIEW_H  = 280;
+  const OVERSCAN = 12;
+  const [scrollTop, setScrollTop] = useState(0);
+
+  const total  = measurements.length;
+  const first  = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
+  const count  = Math.ceil(VIEW_H / ROW_H) + OVERSCAN * 2;
+  const visible = measurements.slice(first, first + count);
+
+  const cols = '1fr 1fr 1fr';
+  const cell = { padding: '0 14px', display: 'flex', alignItems: 'center', height: ROW_H };
+
+  return (
+    <Collapsible
+      title={`Mediciones (${total.toLocaleString('es-AR')})`}
+      meta={busy
+        ? (loaded > 0 ? `descargando ${loaded.toLocaleString('es-AR')}…` : 'descargando…')
+        : 'ver la tabla de muestras'}
+    >
+      <div className="surface" style={{ overflow: 'hidden' }}>
+        {/* Encabezado fuera del scroll: queda fijo sin trucos de sticky */}
+        {!busy && total > 0 && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: cols,
+            fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)',
+            color: 'var(--type-mute)', borderBottom: '1px solid var(--hairline)',
+          }}>
+            <span style={{ ...cell, height: 30 }}>t (s)</span>
+            <span style={{ ...cell, height: 30, justifyContent: 'flex-end' }}>Z (Ω)</span>
+            <span style={{ ...cell, height: 30, justifyContent: 'flex-end' }}>dZ/dt (Ω/min)</span>
+          </div>
+        )}
+
         {busy && (
           <div style={{ padding: '14px 18px' }}>
             <ShimmerSkeleton rows={5} height={12} gap={10} />
           </div>
         )}
-        {!busy && measurements.length === 0 && (
+
+        {!busy && total === 0 && (
           <div style={{ padding: 20, color: 'var(--type-mute)', fontSize: 'var(--t-xs)' }}>
             Sin mediciones registradas.
           </div>
         )}
-        {!busy && measurements.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
-            <thead>
-              <tr style={{ color: 'var(--type-mute)' }}>
-                <th style={{ textAlign: 'left',  padding: '8px 14px' }}>t (s)</th>
-                <th style={{ textAlign: 'right', padding: '8px 14px' }}>Z (Ω)</th>
-                <th style={{ textAlign: 'right', padding: '8px 14px' }}>dZ/dt (Ω/min)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {measurements.map((m, i) => (
-                <tr key={i} style={{ borderTop: '1px solid var(--hairline)' }}>
-                  <td style={{ padding: '6px 14px', color: 'var(--type-med)' }}>{fmt(m.elapsed_time, 1)}</td>
-                  <td style={{ padding: '6px 14px', textAlign: 'right', color: 'var(--type-hi)' }}>{fmt(m.impedance, 3)}</td>
-                  <td style={{ padding: '6px 14px', textAlign: 'right', color: 'var(--type-med)' }}>{fmt(m.rate, 2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        {!busy && total > 0 && (
+          <div
+            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            style={{ maxHeight: VIEW_H, overflowY: 'auto' }}
+          >
+            {/* Espaciador del alto real: mantiene la barra de scroll honesta */}
+            <div style={{ height: total * ROW_H, position: 'relative' }}>
+              <div style={{
+                position: 'absolute', top: first * ROW_H, left: 0, right: 0,
+                fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)',
+              }}>
+                {visible.map((m, i) => (
+                  <div
+                    key={first + i}
+                    style={{
+                      display: 'grid', gridTemplateColumns: cols,
+                      borderTop: '1px solid var(--hairline)',
+                    }}
+                  >
+                    <span style={{ ...cell, color: 'var(--type-med)' }}>{fmt(m.elapsed_time, 1)}</span>
+                    <span style={{ ...cell, justifyContent: 'flex-end', color: 'var(--type-hi)' }}>{fmt(m.impedance, 3)}</span>
+                    <span style={{ ...cell, justifyContent: 'flex-end', color: 'var(--type-med)' }}>{fmt(m.rate, 2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
       </div>
-    </div>
+    </Collapsible>
   );
 }
 
 function EventsList({ events, fmt }) {
+  // Mismo código visual que la línea de tiempo en vivo: una sesión archivada
+  // se lee igual que una recién tomada.
+  // [clase de fila, clase del tag, texto]
+  const tag = (e) => {
+    const ml = Number(e.amount_ml);
+    switch (e.kind) {
+      case 'disconnect': return ['is-disconnect', 'is-down', 'Desconexión'];
+      case 'reconnect':  return ['is-reconnect', 'is-up', 'Reconexión'];
+      case 'gap':        return ['is-gap', 'is-gap', `Microcorte · ${fmt(e.impedance_change, 1)} s`];
+      case 'water':      return ['is-water', 'is-water', `Ingesta${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`];
+      case 'void':       return ['is-void', 'is-void', `Micción${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`];
+      default:           return null;
+    }
+  };
+
+  return (
+    <Collapsible
+      title={`Eventos marcados (${events.length})`}
+      meta="marcas, ingestas, micciones y cortes"
+      defaultOpen={events.length <= 12}
+    >
+      <div className="surface">
+        <ol className="timeline" style={{ padding: '0 18px', maxHeight: 300, overflowY: 'auto' }}>
+          {events.map((e) => {
+            const t = tag(e);
+            const sinZ = e.kind === 'disconnect' || e.kind === 'reconnect';
+            return (
+              <li className={`timeline-row${t ? ` ${t[0]}` : ''}`} key={e.event_number}>
+                <span className="timeline-id">#{String(e.event_number).padStart(2, '0')} · {fmt(e.elapsed_time, 0)} s</span>
+                <span className="timeline-z numeric">{sinZ ? '—' : `${fmt(e.impedance)} Ω`}</span>
+                {t ? (
+                  <span className={`timeline-tag ${t[1]}`}>{t[2]}</span>
+                ) : (
+                  <span className={`timeline-delta numeric ${e.impedance_change == null ? '' : (e.impedance_change < 0 ? 'neg' : 'pos')}`}>
+                    {e.impedance_change != null
+                      ? `${e.impedance_change > 0 ? '+' : ''}${fmt(e.impedance_change)} Ω`
+                      : '—'}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    </Collapsible>
+  );
+}
+
+/**
+ * Bloque de solo lectura generado desde el catálogo.
+ *
+ * `fields` + `values` dibuja los campos configurados; `extra` permite sumar
+ * valores calculados (el agua total) o heredados sin inventarles una
+ * definición en la tabla.
+ */
+function FieldGrid({ title, hint, fields = [], values = {}, extra = [], empty = null }) {
+  const v = values || {};
+  const items = [
+    ...fields
+      .filter((f) => v[f.key] !== undefined && v[f.key] !== null && v[f.key] !== '')
+      .map((f) => ({ label: f.label, unit: f.unit, value: v[f.key], type: f.type })),
+    ...extra,
+  ];
+
+  if (items.length === 0) {
+    if (!empty) return null;
+    return (
+      <div>
+        <span className="section-label">{title}</span>
+        <span className="field-hint" style={{ display: 'block', marginTop: 6 }}>{empty}</span>
+      </div>
+    );
+  }
+
+  const render = (it) => {
+    if (it.type === 'boolean' || typeof it.value === 'boolean') return it.value ? 'Sí' : 'No';
+    return `${it.value}${it.unit ? ` ${it.unit}` : ''}`;
+  };
+
+  // Cada campo es una celda con su etiqueta arriba: así el bloque tolera
+  // cualquier cantidad de campos (el catálogo es abierto) sin desalinearse.
   return (
     <div>
-      <span className="section-label">Eventos marcados ({events.length})</span>
-      <div className="surface" style={{ marginTop: 8 }}>
-        <ol className="timeline" style={{ padding: '0 18px' }}>
-          {events.map((e) => (
-            <li className="timeline-row" key={e.event_number}>
-              <span className="timeline-id">#{String(e.event_number).padStart(2, '0')} · {fmt(e.elapsed_time, 0)} s</span>
-              <span className="timeline-z numeric">{fmt(e.impedance)} Ω</span>
-              <span className={`timeline-delta numeric ${e.impedance_change == null ? '' : (e.impedance_change < 0 ? 'neg' : 'pos')}`}>
-                {e.impedance_change != null
-                  ? `${e.impedance_change > 0 ? '+' : ''}${fmt(e.impedance_change)} Ω`
-                  : '—'}
-              </span>
-            </li>
-          ))}
-        </ol>
+      <span className="section-label">{title}</span>
+      {hint && <span className="field-hint" style={{ display: 'block', marginTop: 4 }}>{hint}</span>}
+      <div className="fact-grid">
+        {items.map((it) => (
+          <div className="fact-cell" key={it.label}>
+            <span className="fact-label">{it.label}</span>
+            <strong className={typeof it.value === 'number' ? 'numeric' : ''}>{render(it)}</strong>
+            {it.hint && <span className="field-hint">{it.hint}</span>}
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function EditForm({ editFields, setEditFields, saving, onSave }) {
+/**
+ * Edición de una sesión archivada.
+ *
+ * Los formularios salen del catálogo de campos, igual que en la toma de datos:
+ * lo que se agregue o quite desde "Campos que se miden" aparece acá solo. La
+ * ficha del paciente se guarda en `patients` (la comparten todas sus sesiones)
+ * y el resto en la sesión.
+ */
+function EditForm({
+  editFields, setEditFields,
+  patientFields, patientVals, setPatientVals,
+  sessionFields, sessionVals, setSessionVals,
+  notes, setNotes, patient, legacy, saving, onSave,
+}) {
   const set = (k) => (e) => setEditFields((prev) => ({ ...prev, [k]: e.target.value }));
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSave(); }} className="stack-md">
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-name">Nombre del paciente</label>
-          <input id="ed-name" className="input" type="text" value={editFields.patient_name} onChange={set('patient_name')} />
+      {patient ? (
+        <div>
+          <span className="section-label">Ficha de {patientLabel(patient)}</span>
+          <span className="field-hint" style={{ display: 'block', margin: '4px 0 10px' }}>
+            Estos datos son del paciente: al cambiarlos se actualizan en todas sus sesiones.
+          </span>
+          <DynamicFields
+            fields={patientFields}
+            values={patientVals}
+            onChange={(k, v) => setPatientVals((p) => ({ ...p, [k]: v }))}
+            columns={3}
+          />
         </div>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-age">Edad (años)</label>
-          <input id="ed-age" className="input" type="number" value={editFields.patient_age} onChange={set('patient_age')} />
-        </div>
+      ) : (
+        <span className="field-hint">
+          Esta sesión no está asociada a ninguna ficha de paciente.
+        </span>
+      )}
+
+      <hr className="hairline" />
+
+      <div>
+        <span className="section-label">Datos de esta sesión</span>
+        <span className="field-hint" style={{ display: 'block', margin: '4px 0 10px' }}>
+          Los que cambian entre mediciones: peso, temperatura, humedad, comidas.
+          El agua se totaliza sola con los eventos marcados.
+        </span>
+        <DynamicFields
+          fields={sessionFields}
+          values={sessionVals}
+          onChange={(k, v) => setSessionVals((p) => ({ ...p, [k]: v }))}
+          columns={3}
+        />
       </div>
 
       <div className="field">
-        <span className="field-label">Sexo</span>
-        <div className="segment">
-          {['Femenino', 'Masculino', 'Otro / Prefiero no decirlo'].map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className={`segment-item ${editFields.patient_gender === opt ? 'active' : ''}`}
-              onClick={() => setEditFields((p) => ({ ...p, patient_gender: opt }))}
-            >
-              {opt.split(' ')[0]}
-            </button>
-          ))}
-        </div>
+        <label className="field-label" htmlFor="ed-notes">Notas de la sesión</label>
+        <textarea
+          id="ed-notes"
+          className="input"
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Particularidades de la medición, incidencias, observaciones…"
+          style={{ resize: 'vertical', minHeight: 68, lineHeight: 1.5, fontFamily: 'inherit' }}
+        />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-weight">Peso (kg)</label>
-          <input id="ed-weight" className="input" type="number" step="0.1" value={editFields.patient_weight} onChange={set('patient_weight')} />
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-height">Altura (m)</label>
-          <input id="ed-height" className="input" type="number" step="0.01" value={editFields.patient_height} onChange={set('patient_height')} />
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-iliac">Circ. suprailíaca (cm)</label>
-          <input id="ed-iliac" className="input" type="number" step="0.1" value={editFields.patient_iliac_circ} onChange={set('patient_iliac_circ')} />
-        </div>
-      </div>
-
-      {editFields.patient_gender === 'Femenino' && (
-        <div className="field">
-          <label className="field-label" htmlFor="ed-menst">Tiempo desde la última menstruación</label>
-          <input id="ed-menst" className="input" type="text" value={editFields.menstruation_info} onChange={set('menstruation_info')} />
-        </div>
+      {legacy && (
+        <>
+          <hr className="hairline" />
+          <div>
+            <span className="section-label">Datos heredados</span>
+            <span className="field-hint" style={{ display: 'block', margin: '4px 0 10px' }}>
+              Cargados con el formato anterior. Se pueden corregir, pero conviene
+              pasarlos a los campos configurables.
+            </span>
+            <div className="dyn-grid" style={{ '--dyn-cols': 3 }}>
+              {LEGACY_COLS.map(([k, label, tipo, unit]) => (
+                <div className="field" key={k}>
+                  <label className="field-label" htmlFor={`ed-${k}`}>
+                    {label}{unit ? <span className="dyn-unit"> ({unit})</span> : null}
+                  </label>
+                  <input
+                    id={`ed-${k}`}
+                    className={`input ${tipo === 'number' ? 'numeric' : ''}`}
+                    type={tipo === 'number' ? 'number' : 'text'}
+                    step={tipo === 'number' ? 'any' : undefined}
+                    value={editFields[k]}
+                    onChange={set(k)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 14 }}>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-iz">Z basal (Ω)</label>
-          <input id="ed-iz" className="input" type="number" step="0.01" value={editFields.initial_impedance} onChange={set('initial_impedance')} />
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-fz">Z final (Ω)</label>
-          <input id="ed-fz" className="input" type="number" step="0.01" value={editFields.final_impedance} onChange={set('final_impedance')} />
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-dur">Duración (mm:ss)</label>
-          <input id="ed-dur" className="input" type="text" value={editFields.elapsed_time_str} onChange={set('elapsed_time_str')} placeholder="00:00" />
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor="ed-evts">Eventos totales</label>
-          <input id="ed-evts" className="input" type="number" value={editFields.total_events} onChange={set('total_events')} />
+      <hr className="hairline" />
+
+      <div>
+        <span className="section-label">Resumen de la medición</span>
+        <span className="field-hint" style={{ display: 'block', margin: '4px 0 10px' }}>
+          Se calculan al cerrar la sesión: corregirlos acá no altera las muestras registradas.
+        </span>
+        <div className="dyn-grid" style={{ '--dyn-cols': 4 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ed-iz">Z basal (Ω)</label>
+            <input id="ed-iz" className="input numeric" type="number" step="0.01" value={editFields.initial_impedance} onChange={set('initial_impedance')} />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ed-fz">Z final (Ω)</label>
+            <input id="ed-fz" className="input numeric" type="number" step="0.01" value={editFields.final_impedance} onChange={set('final_impedance')} />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ed-dur">Duración (mm:ss)</label>
+            <input id="ed-dur" className="input numeric" type="text" value={editFields.elapsed_time_str} onChange={set('elapsed_time_str')} placeholder="00:00" />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ed-evts">Eventos totales</label>
+            <input id="ed-evts" className="input numeric" type="number" value={editFields.total_events} onChange={set('total_events')} />
+          </div>
         </div>
       </div>
 

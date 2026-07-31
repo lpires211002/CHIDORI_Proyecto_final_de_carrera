@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun,
   Settings as SettingsIcon, Cpu, LogOut, Shield, Menu,
-  ZapOff,
+  ZapOff, GlassWater, Toilet,
 } from 'lucide-react';
 
 import SettingsPanel     from './components/SettingsPanel';
@@ -21,12 +21,14 @@ import Toasts            from './components/Toasts';
 import EmptyState        from './components/EmptyState';
 import SpotlightArea     from './components/SpotlightArea';
 import LineTabs          from './components/LineTabs';
+import PatientGate       from './components/PatientGate';
 import ConnectionGate    from './components/ConnectionGate';
 import useCloudSync      from './components/useCloudSync';
 import usePendingSync    from './components/usePendingSync';
 
 import { supabase, emailToUsername } from './supabaseClient';
 import { commitSession, queuePendingSession } from './lib/sessionSync';
+import { countSessions } from './lib/patients';
 
 /* ─────────────────────────────────────────────────────────────────────
  * CONGRUENCIA CON EL FIRMWARE · Chidori_ESP32C3_WiFiManager
@@ -155,6 +157,17 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // Tension de lectura (Vpp del detector) reportada por el firmware · referencia
   const [voltage, setVoltage]           = useState(null);
   const [voltageData, setVoltageData]   = useState([]);   // serie graficable
+  /* Captura de volumen para eventos del protocolo (ingesta / micción). */
+  const [volumeModal, setVolumeModal]   = useState(null);  // 'water' | 'void' | null
+  const [volumeInput, setVolumeInput]   = useState('');
+  /* Protocolo · la sesión se ata a un paciente ANTES de medir. */
+  const [activePatient, setActivePatient] = useState(null);
+  const [sessionData, setSessionData]     = useState({});
+  const [gateOpen, setGateOpen]           = useState(false);
+  // Sesiones ya registradas del paciente · para anunciar "sesión N" antes de
+  // empezar. El protocolo son 4-6 por persona, así que saber en cuál se está
+  // parado importa.
+  const [patientSessionCount, setPatientSessionCount] = useState(0);
   const voltageBufRef = useRef([]);
   const lastVoltageRef = useRef(null);
   const [currentValue, setCurrentValue] = useState(null);
@@ -175,6 +188,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [confirmReset, setConfirmReset]     = useState(false);
+  // Volver a inicio desde la marca · misma operación que reiniciar, pero se
+  // confirma aparte para poder explicar por qué se pregunta.
+  const [confirmHome, setConfirmHome]       = useState(false);
   const [setupTab, setSetupTab]             = useState('config'); // 'config' | 'events'
   const [toasts, setToasts]                 = useState([]);
   const [signalStale, setSignalStale]       = useState(false);
@@ -326,7 +342,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         eventCount: cur.eventCount,
         data: dataBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
         rate: rateBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
-        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change), e.kind || 'mark']),
+        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change), e.kind || 'mark', e.amount ?? null]),
       };
       localStorage.setItem(SESSION_BACKUP_KEY, JSON.stringify(payload));
     } catch (err) {
@@ -351,7 +367,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     rateBufRef.current = ratePts;
     setData(dataPts.slice());
     setRateData(ratePts.slice());
-    setEvents((b.events || []).map(([id, time, value, change, kind]) => ({ id, time, value, change, kind: kind || 'mark' })));
+    setEvents((b.events || []).map(([id, time, value, change, kind, amount]) => ({ id, time, value, change, kind: kind || 'mark', amount: amount ?? null })));
     setEventCount(b.eventCount || 0);
     setInitialValue(b.initialValue ?? null);
     const last = dataPts[dataPts.length - 1];
@@ -586,13 +602,25 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   useEffect(() => {
     const onKey = (e) => {
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      // Un modal abierto se queda con el teclado
+      if (volumeModal || gateOpen) return;
+      const k = e.key.toLowerCase();
       if (e.code === 'Space') { e.preventDefault(); toggleMeasuring(); }
-      else if (e.key.toLowerCase() === 'e') { e.preventDefault(); handleMarkEvent(); }
+      else if (k === 'e') { e.preventDefault(); handleMarkEvent(); }
+      // Protocolo · A abre la carga de volumen, M registra micción directa
+      else if (k === 'a') {
+        e.preventDefault();
+        if (measuring) { setVolumeInput(''); setVolumeModal('water'); }
+      }
+      else if (k === 'm') {
+        e.preventDefault();
+        if (measuring) addProtocolEvent('void', NaN);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measuring, startTime, pausedDuration, data, initialValue, currentValue, eventCount, wsStatus, isSimulator]);
+  }, [measuring, startTime, pausedDuration, data, initialValue, currentValue, eventCount, wsStatus, isSimulator, volumeModal, gateOpen]);
 
   /* Al iniciar o reanudar, la referencia de "última muestra" se reinicia:
    * el tiempo en pausa no es un microcorte. */
@@ -636,6 +664,26 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     toast(`Simulando corte de ${SIM_GAP_SAMPLES} muestras (${ms / 1000} s)…`, 'info');
   };
 
+  // Cuántas sesiones lleva el paciente elegido · falla en silencio porque es
+  // informativo: sin internet igual se puede medir.
+  useEffect(() => {
+    if (!activePatient?.id) { setPatientSessionCount(0); return; }
+    let vivo = true;
+    countSessions(supabase, activePatient.id)
+      .then((n) => { if (vivo) setPatientSessionCount(n); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [activePatient?.id]);
+
+  /** Antes de la primera muestra hay que tener paciente asociado. */
+  const requirePatient = () => {
+    // También en simulador: sirve para ensayar el protocolo completo antes
+    // de medir con una persona real.
+    if (activePatient) return true;
+    setGateOpen(true);
+    return false;
+  };
+
   const toggleSimulator = () => {
     if (measuring) { toast('Detenga la medición antes de alternar el simulador', 'warn'); return; }
     const next = !isSimulator;
@@ -665,6 +713,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       toast('Sin conexión. Active el simulador o configure el dispositivo.', 'warn');
       return;
     }
+
+    // Protocolo · una sesión NUEVA exige paciente asociado (salvo simulador).
+    if (!measuring && !startTime && !requirePatient()) return;
 
     // Marca la acción para que el reconciliador no la pise con un STATUS en vuelo.
     lastUserActionRef.current = Date.now();
@@ -746,6 +797,39 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return true;
   };
 
+  /** Registra un evento del protocolo con volumen asociado (ml).
+   *  kind: 'water' (ingesta) | 'void' (micción) */
+  const addProtocolEvent = (kind, ml) => {
+    if (!measuring || !startTime) return;
+    const elapsed = (Date.now() - startTime - pausedDuration) / 1000;
+    setEventCount((n) => {
+      const next = n + 1;
+      setEvents((prev) => [{
+        id: next,
+        time: elapsed,
+        value: currentValue || 0,
+        change: null,
+        kind,
+        amount: Number.isFinite(ml) ? ml : null,
+      }, ...prev]);
+      return next;
+    });
+    const etiqueta = kind === 'water' ? 'Ingesta' : 'Micción';
+    toast(`${etiqueta} registrada${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`, 'success');
+  };
+
+  const confirmVolume = () => {
+    const ml = parseFloat(volumeInput);
+    // En micción el volumen es opcional (a veces se mide después, con balanza)
+    if (volumeModal === 'water' && (!Number.isFinite(ml) || ml <= 0)) {
+      toast('Ingresá el volumen en ml', 'warn');
+      return;
+    }
+    addProtocolEvent(volumeModal, ml);
+    setVolumeModal(null);
+    setVolumeInput('');
+  };
+
   const handleMarkEvent = () => {
     if (!measuring || !startTime) return;
     const elapsed = (Date.now() - startTime - pausedDuration) / 1000;
@@ -804,6 +888,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setRateData([]);
     setEvents([]);
     setInitialValue(null);
+    setActivePatient(null);
+    setSessionData({});
     setVoltage(null);
     setVoltageData([]);
     voltageBufRef.current = [];
@@ -823,7 +909,22 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setPersistedSessionId(null);
     simulatedZRef.current = 150.0;
     setConfirmReset(false);
+    setConfirmHome(false);
     toast('Sesión reiniciada', 'info');
+  };
+
+  /**
+   * Volver a la pantalla de inicio desde la marca del header.
+   *
+   * "Inicio" es el estado en reposo, así que implica descartar la sesión en
+   * memoria: es la misma operación que Reiniciar. Si hay algo que perder
+   * —midiendo o con muestras cargadas— pasa por confirmación; si no, va
+   * directo, porque no hay nada que confirmar.
+   */
+  const goHome = () => {
+    if (idle) return;
+    if (measuring || hasAnyData) { setConfirmHome(true); return; }
+    handleReset();
   };
 
   const handleSaveCalibration = (calib) => {
@@ -852,15 +953,12 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       throw new Error('no measurements');
     }
 
+    // Los datos de la persona viven en su ficha (tabla patients); acá solo
+    // van el vínculo, las observaciones y los campos variables de la sesión.
     const patientPayload = {
-      patient_name:       patientInfo.nombre || null,
-      patient_age:        patientInfo.edad === '' || patientInfo.edad == null ? null : parseInt(patientInfo.edad),
-      patient_gender:     patientInfo.sexo || null,
-      patient_weight:     patientInfo.peso === '' || patientInfo.peso == null ? null : parseFloat(patientInfo.peso),
-      patient_height:     patientInfo.altura === '' || patientInfo.altura == null ? null : parseFloat(patientInfo.altura),
-      patient_iliac_circ: patientInfo.circ === '' || patientInfo.circ == null ? null : parseFloat(patientInfo.circ),
-      menstruation_info:  patientInfo.menstruacion || null,
-      notes:              patientInfo.notas || null,   // observaciones libres
+      notes:        patientInfo.notas || null,
+      patient_id:   activePatient?.id ?? null,
+      session_data: patientInfo.sessionData ?? {},
     };
 
     // Sesión ya commiteada: solo update del paciente + stats finales
@@ -923,6 +1021,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   })();
 
   const hasAnyData = data.length > 0;
+  // Reposo · todavía no empezó ninguna sesión. Manda la pantalla de
+  // preparación: no hay cronómetro, ni eventos, ni nada que exportar.
+  const idle = !hasAnyData && !measuring;
   const primaryButtonLabel = measuring ? 'Pausar' : (startTime ? 'Reanudar' : 'Iniciar adquisición');
 
   // Estado mostrado en el CloudSyncBadge. Se sobreescribe a 'pending'
@@ -959,9 +1060,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         : 'Sin enlace al microcontrolador';
 
   // Acciones secundarias · viven en el menú ⋯ (desktop) y en el MobileMenu.
+  // Acciones del menú ⋯ · sin separadores: el ritmo de ticks del marcador ya
+  // separa las entradas (ver HeaderMenu).
   const overflowItems = [
     ...(isAdmin && onSwitchToAdmin
-      ? [{ icon: Shield, label: 'Panel de administración', hint: 'Volver a la vista admin', onClick: onSwitchToAdmin }, { divider: true }]
+      ? [{ icon: Shield, label: 'Panel de administración', hint: 'Volver a la vista admin', onClick: onSwitchToAdmin }]
       : []),
     {
       icon: Cpu,
@@ -981,8 +1084,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       hint: theme === 'dark' ? 'Más legible con luz ambiente' : 'Más cómodo en quirófano',
       onClick: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
     },
-    { divider: true },
-    { icon: LogOut, label: 'Cerrar sesión', danger: true, onClick: onSignOut },
+    { icon: LogOut, label: 'Cerrar sesión', hint: 'Salir de la cuenta', danger: true, onClick: onSignOut },
   ];
 
   return (
@@ -995,12 +1097,22 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       />
 
       <header className="app-header">
-        <div className="brand">
+        {/* En reposo no se usa `disabled`: la regla global lo bajaría al 50 %
+            de opacidad y la marca no puede verse apagada. Se marca con una
+            clase, y goHome ya corta solo. */}
+        <button
+          type="button"
+          className={`brand brand-home ${idle ? 'is-home' : ''}`}
+          onClick={goHome}
+          aria-disabled={idle || undefined}
+          aria-label={idle ? 'Chidori · ya está en la pantalla de inicio' : 'Volver a la pantalla de inicio'}
+          title={idle ? 'Pantalla de inicio' : 'Volver a la pantalla de inicio'}
+        >
           <span className="brand-mark">Chidori</span>
           <span className="brand-tag">
             {isAdmin ? 'Modo medición · sesión administrativa' : 'Bioimpedancia vesical · v2'}
           </span>
-        </div>
+        </button>
 
         <div className="app-actions">
           <span
@@ -1031,6 +1143,19 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             onUpload={pendingSync.flush}
           />
 
+          {activePatient && (
+            <button
+              type="button"
+              className="pill pill-live"
+              onClick={() => setGateOpen(true)}
+              title="Paciente de esta sesión · click para cambiar"
+              style={{ cursor: 'pointer' }}
+            >
+              <span className="pill-dot" />
+              {activePatient.code}
+            </button>
+          )}
+
           <span className="pill pill-off" title={`Sesión iniciada como ${displayName}`}>
             <span className="pill-dot" />
             {displayName}
@@ -1052,12 +1177,18 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       </header>
 
       <main className="app-main">
-        <ConnectionGate
-          wsStatus={wsStatus}
-          isSimulator={isSimulator}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onReconnect={connectWebSocket}
-        />
+        {/* El banner solo aparece con una sesión en curso: en reposo la
+            tarjeta de preparación ya muestra el estado del enlace, y anunciarlo
+            en los dos lados era ruido. Durante la medición sí hace falta, es
+            cuando el corte importa. */}
+        {!idle && (
+          <ConnectionGate
+            wsStatus={wsStatus}
+            isSimulator={isSimulator}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onReconnect={connectWebSocket}
+          />
+        )}
 
         {/* Sesión interrumpida recuperable · solo si todavía no hay datos nuevos */}
         {recovery && !hasAnyData && (
@@ -1080,7 +1211,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           </div>
         )}
 
-        {/* ── Barra de comando · control primario + cronómetro + acciones ── */}
+        {/* ── Barra de comando · control primario + cronómetro + acciones ──
+            Oculta en reposo: sin sesión el cronómetro marca 00:00 y Marcar,
+            Agua, Micción, Reiniciar y Exportar no tienen sobre qué operar. El
+            arranque vive en la tarjeta de preparación. */}
+        {!idle && (
         <section className="command-bar">
           <div className="command-primary">
             <button
@@ -1101,6 +1236,28 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               <Bookmark size={15} />
               Marcar
             </button>
+            {/* Protocolo experimental · ingesta y micción */}
+            <button
+              type="button"
+              className="button"
+              onClick={() => { setVolumeInput(''); setVolumeModal('water'); }}
+              disabled={!measuring}
+              title="Registrar ingesta de agua (A)"
+            >
+              <GlassWater size={15} />
+              Agua
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => addProtocolEvent('void', NaN)}
+              disabled={!measuring}
+              title="Registrar micción (M) · el volumen se puede cargar después"
+            >
+              <Toilet size={15} />
+              Micción
+            </button>
+
             {/* Solo en simulador · prueba de la detección de microcortes */}
             {isSimulator && (
               <button
@@ -1124,13 +1281,21 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             </button>
           </div>
         </section>
+        )}
 
-        {!hasAnyData && !measuring ? (
+        {idle ? (
           <EmptyState
             wsStatus={wsStatus}
             isSimulator={isSimulator}
+            wsConfig={wsConfig}
+            patient={activePatient}
+            sessionCount={patientSessionCount}
+            canStart={wsStatus === 'CONNECTED' || isSimulator}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onToggleSimulator={toggleSimulator}
+            onReconnect={connectWebSocket}
+            onPickPatient={() => setGateOpen(true)}
+            onStart={toggleMeasuring}
           />
         ) : (
           /* Foco + borde luminoso sobre las tarjetas reales de medición.
@@ -1152,10 +1317,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               </div>
 
               <div className="monitor-side">
+                {/* Ya no depende del umbral de alarma: la escala es la
+                    hipótesis de los 1,5 dB sobre el basal. */}
                 <BladderVisual
                   initialValue={initialValue}
                   currentValue={currentValue}
-                  alarmThreshold={thresholdPreview}
                 />
 
                 {/* Resumen de alarma · vivo, siempre a la vista */}
@@ -1308,6 +1474,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
           <span><span className="kbd">Espacio</span> Iniciar / Pausar</span>
           <span><span className="kbd">E</span> Marcar evento</span>
+          <span><span className="kbd">A</span> Ingesta de agua</span>
+          <span><span className="kbd">M</span> Micción</span>
         </div>
         <span>Chidori · Sesión de {displayName}</span>
       </footer>
@@ -1377,7 +1545,66 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         linkQuality={linkQuality}
       />
 
+      {gateOpen && (
+        <PatientGate
+          supabase={supabase}
+          onCancel={() => setGateOpen(false)}
+          onError={(msg) => toast(msg, 'warn')}
+          onReady={({ patient, sessionData: sd }) => {
+            setActivePatient(patient);
+            setSessionData(sd || {});
+            setGateOpen(false);
+            toast(`Sesión asociada a ${patient.code}`, 'success');
+          }}
+        />
+      )}
+
+      {/* Captura rápida de volumen · ingesta y micción del protocolo */}
+      {volumeModal && (
+        <div className="modal-veil" onClick={() => setVolumeModal(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 380 }}>
+            <div className="modal-head">
+              <h3>Registrar ingesta</h3>
+              <button type="button" className="icon-button" onClick={() => setVolumeModal(null)} aria-label="Cerrar">×</button>
+            </div>
+            <div className="stack-md" style={{ padding: '18px 22px 22px' }}>
+              <div className="field">
+                <label className="field-label" htmlFor="vol-ml">Volumen (ml)</label>
+                <input
+                  id="vol-ml"
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="10"
+                  autoFocus
+                  placeholder="p. ej. 250"
+                  value={volumeInput}
+                  onChange={(e) => setVolumeInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); confirmVolume(); }
+                    if (e.key === 'Escape') setVolumeModal(null);
+                  }}
+                />
+                <span className="field-hint">
+                  Queda marcado en el minuto exacto de la sesión.
+                </span>
+              </div>
+              <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="button button-ghost" onClick={() => setVolumeModal(null)}>
+                  Cancelar
+                </button>
+                <button type="button" className="button button-primary" onClick={confirmVolume}>
+                  Registrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ExportModal
+        supabase={supabase}
+        patient={activePatient}
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         data={data}
@@ -1407,6 +1634,32 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         onCancel={() => setConfirmReset(false)}
         onConfirm={handleReset}
         holdMs={1500}
+      />
+
+      <ConfirmModal
+        open={confirmHome}
+        title={measuring ? 'Hay una medición en curso' : 'Volver al inicio'}
+        body={
+          <>
+            <p style={{ marginBottom: 10 }}>
+              {measuring
+                ? <>La adquisición está corriendo. Volver al inicio la <strong>detiene</strong> y
+                    descarta las {data.length.toLocaleString('es-AR')} muestras que hay en memoria.</>
+                : <>Se descartan las {data.length.toLocaleString('es-AR')} muestras que hay en memoria
+                    y la sesión queda cerrada.</>}
+            </p>
+            <p style={{ marginBottom: 10 }}>
+              {persistedSessionId
+                ? 'Lo que ya se guardó en la nube queda archivado allí.'
+                : 'Todavía no se guardó nada en la nube. Si querés conservarla, cancelá y usá Exportar.'}
+            </p>
+            <p>Mantenga presionado el botón para confirmar.</p>
+          </>
+        }
+        actionLabel="Mantener para volver al inicio"
+        onCancel={() => setConfirmHome(false)}
+        onConfirm={handleReset}
+        holdMs={measuring ? 1800 : 1200}
       />
     </div>
   );
