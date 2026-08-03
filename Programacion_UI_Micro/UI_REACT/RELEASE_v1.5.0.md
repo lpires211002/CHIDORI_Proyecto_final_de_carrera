@@ -43,6 +43,26 @@ Ahora las lecturas se paginan de a 1000 hasta agotar la tabla, con orden total
 
 ---
 
+## 🐛 Corrección · la app crasheaba al reabrirla (macOS)
+
+`A JavaScript error occurred in the main process · TypeError: Object has been destroyed`
+
+En macOS, cerrar la ventana con el botón rojo no cierra la aplicación: el proceso
+sigue vivo. La referencia a la ventana quedaba apuntando a un objeto ya destruido
+—el wrapper de JavaScript sigue existiendo, así que la comprobación de "existe"
+daba verdadero— y cualquier llamada sobre él tiraba la excepción.
+
+Se disparaba al volver a abrir la app con la ventana cerrada, o al abrirla dos
+veces. Ahora todo acceso a la ventana verifica que siga viva, y si no queda
+ninguna se abre una nueva.
+
+Se corrigieron además dos casos de la misma familia que todavía no habían
+aparecido: el aviso de actualización (que corre 3 s después del arranque y podía
+encontrar la ventana ya cerrada) y el bloqueo de instancia única (el proceso que
+perdía el bloqueo seguía ejecutándose y alcanzaba a abrir su propia ventana).
+
+---
+
 ## 🧪 Protocolo experimental
 
 **Ficha de paciente.** La sesión se asocia a un paciente *antes* de empezar a

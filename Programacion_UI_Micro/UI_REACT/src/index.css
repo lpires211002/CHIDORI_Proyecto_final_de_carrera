@@ -1468,6 +1468,43 @@ h3 { font-size: var(--t-lg); }
   gap: 8px;
 }
 
+/* Aviso de lista cacheada · dentro del selector de paciente */
+.cache-aviso {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--signal);
+  border-radius: var(--r-sm);
+  background: var(--ink-2);
+}
+.cache-aviso strong {
+  color: var(--type-hi);
+  font-size: var(--t-xs);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.cache-aviso span { color: var(--type-med); font-size: var(--t-xs); line-height: 1.5; }
+
+/* Aviso de orden · el equipo y la nube son redes distintas */
+.prep-orden {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--signal) 34%, transparent);
+  border-left: 2px solid var(--signal);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--signal) 9%, transparent);
+  text-align: left;
+}
+.prep-orden strong { color: var(--type-hi); font-size: var(--t-sm); font-weight: 600; }
+.prep-orden span   { color: var(--type-med); font-size: var(--t-xs); line-height: 1.55; }
+.prep-orden span strong { font-size: inherit; }
+
 .prep-launch {
   display: flex;
   align-items: center;

@@ -7,6 +7,9 @@
  * respaldo durable independiente de todo esto.
  */
 
+import { sincronizarPendientes } from './patients';
+import { esLocal } from './patientsCache';
+
 const DB_NAME = 'chidori';
 const STORE   = 'pendingSessions';
 
@@ -143,13 +146,29 @@ export async function flushPendingSessions(supabase) {
   if (flushing) return { synced: 0, remaining: await countPendingSessions() };
   flushing = true;
   try {
+    // Primero los pacientes creados offline: una sesión encolada puede apuntar
+    // a un id `local:...` que todavía no existe en la base. Si se commiteara
+    // así, el insert fallaría por la foreign key y la sesión quedaría trabada
+    // para siempre en la cola.
+    let mapaPacientes = {};
+    try { mapaPacientes = await sincronizarPendientes(supabase); } catch { /* sin internet */ }
+
     let list;
     try { list = await idbAll(); } catch { return { synced: 0, remaining: 0 }; }
 
     let synced = 0;
     for (const item of list) {
       try {
-        await commitSession(supabase, item);
+        const pid = item.patientPayload?.patient_id;
+        const arreglado = esLocal(pid)
+          ? { ...item, patientPayload: { ...item.patientPayload, patient_id: mapaPacientes[pid] ?? null } }
+          : item;
+
+        // El paciente local todavía no subió: se deja la sesión para el
+        // próximo intento en vez de guardarla sin atribuir.
+        if (esLocal(pid) && !mapaPacientes[pid]) continue;
+
+        await commitSession(supabase, arreglado);
         await idbDelete(item.localId);
         synced += 1;
       } catch {

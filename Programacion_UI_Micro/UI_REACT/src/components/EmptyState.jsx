@@ -44,6 +44,13 @@ export default function EmptyState({
   const reconectando = wsStatus === 'CONNECTING';
   const listo        = enlazado && Boolean(patient);
 
+  // El Chidori es un access point sin salida a internet: mientras estás
+  // enlazado a él no se puede leer la lista de pacientes de Supabase. Hay que
+  // elegir el paciente ANTES de cambiar de red, y la pantalla tiene que
+  // decirlo — si no, el clínico descubre el problema recién al apretar Iniciar.
+  const sinInternet = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const ordenAlReves = !patient && (enlazado || sinInternet) && !isSimulator;
+
   const destino = wsConfig
     ? `${wsConfig.host}:${wsConfig.port}`
     : 'sin dirección configurada';
@@ -125,7 +132,9 @@ export default function EmptyState({
               <span className="prep-meta">
                 {patient
                   ? `${patientLabel(patient)} · sesión ${sessionCount + 1}`
-                  : 'sin seleccionar · la sesión queda sin atribuir'}
+                  : sinInternet
+                    ? 'la lista se lee de la nube · sin internet'
+                    : 'sin seleccionar · la sesión queda sin atribuir'}
               </span>
             </div>
 
@@ -140,6 +149,20 @@ export default function EmptyState({
             </div>
           </div>
         </div>
+
+        {/* El orden importa y no es obvio: la ficha vive en la nube, el equipo
+            es una red sin internet. */}
+        {ordenAlReves && (
+          <div className="prep-orden" role="note">
+            <strong>El paciente se elige antes de enlazar el equipo.</strong>
+            <span>
+              La red <strong>Chidori</strong> no tiene salida a internet, y la lista de
+              pacientes se lee de la nube. Volvé a tu WiFi habitual, elegí el paciente,
+              y recién ahí conectate al equipo. La medición se guarda igual sin internet:
+              queda en cola y sube sola cuando vuelve.
+            </span>
+          </div>
+        )}
 
         <div className="prep-launch">
           {/* Acción principal de la pantalla · el reflejo del borde responde

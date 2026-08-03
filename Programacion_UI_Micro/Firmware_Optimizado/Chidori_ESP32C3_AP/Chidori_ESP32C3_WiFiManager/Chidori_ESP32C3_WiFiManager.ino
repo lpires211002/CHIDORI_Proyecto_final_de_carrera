@@ -90,9 +90,22 @@
 /* ================= MUESTREO ================= */
 #define FREQ                50000.0   // frecuencia de inyección AD9833
 #define SAMPLE_INTERVAL_US  1428      // ~700 Hz
-#define AVG_SAMPLES         128       // 128 @ 700 Hz ≈ 183 ms por Z
+#define AVG_SAMPLES         192       // 192 @ 700 Hz ≈ 274 ms por Z cruda
 #define TX_INTERVAL_MS      250       // ~4 Hz hacia el frontend
-#define CANT_MUESTRAS       10        // moving average sobre Z
+
+/* Cadena de filtrado sobre Z · MEDIANA y despues MEDIA.
+ *
+ * La media sola NO rechaza impulsos: un unico spike de +5 ohm se reparte y
+ * contamina las CANT_MUESTRAS salidas siguientes con +0.5 ohm. Sobre un rango
+ * util de ~4.6 ohm (la caida de 1.5 dB) eso es un 11 % de error arrastrado.
+ * La mediana lo descarta entero, y recien despues se promedia para bajar el
+ * ruido gaussiano. El orden importa: promediar primero ya habria mezclado el
+ * spike con sus vecinos.
+ *
+ * Costo: MEDIANA_N * AVG_SAMPLES / 700 Hz de latencia extra (~1.4 s). El
+ * llenado vesical es de escala de minutos, asi que sobra. */
+#define MEDIANA_N           5         // ventana de la mediana (impar)
+#define CANT_MUESTRAS       12        // media movil posterior
 #define WARMUP_MUESTRAS     5         // no transmitir hasta estabilizar
 // Si el scheduler se atrasa más de esto, re-sincroniza (evita ráfagas)
 #define MAX_LAG_INTERVALS   4
@@ -132,6 +145,10 @@ WebSocketsServer webSocket(81);
 float muestras[CANT_MUESTRAS];
 int   size_m    = 0;
 float average_Z = 0;
+
+/* Ventana de la mediana · previa a la media movil */
+float med_buf[MEDIANA_N];
+int   med_n = 0;
 
 // Ultima tension pico-pico del detector (la que alimenta el calculo de Z).
 // Se transmite junto con Z como dato de referencia/diagnostico. Es solo una
@@ -187,6 +204,7 @@ void wifiWatchdog();
 void startNetworkServices();
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
 void adquirir_y_promediar();
+float Calcular_mediana(float Z);
 void Calcular_promedio(float Z);
 void checkButton();
 void resetMedicion();
@@ -319,6 +337,12 @@ void Inicializar_AP() {
                     IPAddress(255, 255, 255, 0));
 
   bool ok = WiFi.softAP(AP_SSID, AP_PASSWORD);
+
+  // Power save OFF: con el modem dormido entre beacons, los paquetes salen en
+  // rafagas y el frontend ve huecos de cientos de ms. Es la causa clasica de
+  // los microcortes de este tipo. En AP consume mas, pero el equipo mide
+  // enchufado a bateria durante sesiones de horas: la continuidad importa mas.
+  WiFi.setSleep(false);
 
   // TX power 8.5 dBm: fix de antena del C3 Super Mini + evita brown-out USB.
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
@@ -494,20 +518,25 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
 
 /* ================= ADQUISICIÓN ================= */
 void adquirir_y_promediar() {
-  adc_sum += analogRead(ADC_PIN);
+  // analogReadMilliVolts aplica la curva de calibracion de fabrica (eFuse).
+  // analogRead() * 3.3 / 4095 asumia un ADC lineal, y el del ESP32-C3 no lo es:
+  // el error dependia del punto de trabajo y se propagaba a Vpp y a Z.
+  adc_sum += analogReadMilliVolts(ADC_PIN);
   adc_count++;
 
   if (adc_count < AVG_SAMPLES) return;
 
-  float avg_adc = (float)adc_sum / AVG_SAMPLES;
+  float avg_mv = (float)adc_sum / AVG_SAMPLES;   // ya en milivolts calibrados
   adc_sum   = 0;
   adc_count = 0;
 
-  float voltage = ADC(avg_adc);
+  float voltage = avg_mv / 1000.0f;
   float Vpp     = Amp2Vpp(voltage + VShotcky);
   float Z       = Vpp / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);
   last_Vpp      = Vpp;                     // para el TX (dato de referencia)
 
+  // MEDIANA primero (mata impulsos), MEDIA despues (baja ruido gaussiano)
+  Z = Calcular_mediana(Z);
   Calcular_promedio(Z);
   Chidori.Z = average_Z;
 
@@ -538,6 +567,32 @@ void adquirir_y_promediar() {
     }
     Serial.print("Z = "); Serial.println(msg);
   }
+}
+
+/* Mediana movil de MEDIANA_N · rechazo de impulsos.
+ *
+ * Mientras la ventana no esta llena devuelve el valor tal cual: al arrancar es
+ * preferible responder que filtrar, y el WARMUP ya descarta esos primeros
+ * valores. Ordena una copia (N es chico, la insercion directa es mas barata
+ * que cualquier algoritmo "listo"). */
+float Calcular_mediana(float Z) {
+  if (med_n < MEDIANA_N) {
+    med_buf[med_n++] = Z;
+    if (med_n < MEDIANA_N) return Z;
+  } else {
+    for (int i = 0; i < MEDIANA_N - 1; i++) med_buf[i] = med_buf[i + 1];
+    med_buf[MEDIANA_N - 1] = Z;
+  }
+
+  float tmp[MEDIANA_N];
+  for (int i = 0; i < MEDIANA_N; i++) tmp[i] = med_buf[i];
+  for (int i = 1; i < MEDIANA_N; i++) {
+    float v = tmp[i];
+    int j = i - 1;
+    while (j >= 0 && tmp[j] > v) { tmp[j + 1] = tmp[j]; j--; }
+    tmp[j + 1] = v;
+  }
+  return tmp[MEDIANA_N / 2];
 }
 
 void Calcular_promedio(float Z) {
@@ -577,6 +632,7 @@ void checkButton() {
 void resetMedicion() {
   size_m        = 0;
   average_Z     = 0;
+  med_n         = 0;     // sin esto, la sesion nueva arranca con Z de la anterior
   adc_sum       = 0;
   adc_count     = 0;
   First_Measure = true;

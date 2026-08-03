@@ -5,6 +5,7 @@ import {
   fetchFields, fetchPatients, createPatient, nextPatientCode,
   countSessions, patientLabel, coerceValues, missingRequired,
 } from '../lib/patients';
+import { describirAntiguedad } from '../lib/patientsCache';
 
 /**
  * Paso previo a la medición: elegir (o crear) el paciente y completar los
@@ -26,6 +27,8 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
   const [patients, setPatients] = useState([]);
   const [search, setSearch]     = useState('');
   const [loading, setLoading]   = useState(true);
+  // Etiqueta de antigüedad si la lista salió del caché · null si vino de la nube
+  const [desdeCache, setDesdeCache] = useState(null);
 
   const [selected, setSelected]       = useState(null);
   const [sessionCount, setSessionCount] = useState(0);
@@ -45,7 +48,8 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
         const [fs, ps] = await Promise.all([fetchFields(supabase), fetchPatients(supabase)]);
         if (!alive) return;
         setFields(fs);
-        setPatients(ps);
+        setPatients(ps.filas);
+        setDesdeCache(ps.deCache ? (describirAntiguedad(ps.cache) || 'sin fecha') : null);
       } catch (e) {
         onError?.('No se pudieron cargar los pacientes. ¿Corriste el SQL de configuración?');
         console.error('[PatientGate]', e);
@@ -124,6 +128,20 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
                 sesiones repetidas de una misma persona queden agrupadas.
               </span>
 
+              {/* Enlazado al equipo no hay internet: se trabaja con la última
+                  lista descargada. Hay que decirlo, o parecería que faltan
+                  pacientes. */}
+              {desdeCache && (
+                <div className="cache-aviso" role="note">
+                  <strong>Lista guardada · {desdeCache}</strong>
+                  <span>
+                    Sin conexión a la nube. Podés elegir y crear pacientes igual: se
+                    suben solos cuando vuelva internet. Si el paciente que buscás fue
+                    creado en otra máquina, todavía no está acá.
+                  </span>
+                </div>
+              )}
+
               <div className="field">
                 <div className="row" style={{ gap: 8 }}>
                   <input
@@ -163,7 +181,9 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
                           </span>
                         )}
                       </span>
-                      <span className="patient-item-meta">Seleccionar →</span>
+                      <span className="patient-item-meta">
+                        {p._pendiente ? 'sin subir · ' : ''}Seleccionar →
+                      </span>
                     </button>
                   ))}
                 </div>

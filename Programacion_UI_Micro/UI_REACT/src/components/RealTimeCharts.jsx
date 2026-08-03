@@ -228,9 +228,14 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
             bodyFont:   { family: 'Montserrat', size: 11 },
             callbacks: {
               title: (c) => `t = ${c[0].parsed.x.toFixed(1)} s`,
-              label: (c) => (modeRef.current === 'z'
-                ? `Z = ${c.parsed.y.toFixed(2)} Ω`
-                : `dZ/dt = ${c.parsed.y.toFixed(2)} Ω/min`),
+              // Un caso por modo. Antes eran dos ramas y el modo 'v' caía en
+              // el else: la tensión se rotulaba como "dZ/dt ... Ω/min".
+              label: (c) => {
+                const v = c.parsed.y;
+                if (modeRef.current === 'z') return `Z = ${v.toFixed(2)} Ω`;
+                if (modeRef.current === 'v') return `V = ${v.toFixed(4)} V`;
+                return `dZ/dt = ${v.toFixed(2)} Ω/min`;
+              },
             },
           },
         },
