@@ -154,6 +154,11 @@ int   med_n = 0;
 // Se transmite junto con Z como dato de referencia/diagnostico. Es solo una
 // asignacion por ciclo: no altera el muestreo ni el calculo.
 float last_Vpp  = 0.0f;
+/* Continua LEIDA en A0 (promedio calibrado de AVG_SAMPLES lecturas), en volts.
+ * Es el dato tal como entra: sin el x2 ni la compensacion del Schottky. Se
+ * transmite aparte para poder contrastarlo con el tester en el propio pin —
+ * la Vpp reconstruida no es medible en ningun nodo del circuito. */
+float last_Vadc = 0.0f;
 
 float CORRIENTE_INYECTADA;
 float GANANCIA_RECEPTOR;
@@ -531,6 +536,7 @@ void adquirir_y_promediar() {
   adc_count = 0;
 
   float voltage = avg_mv / 1000.0f;
+  last_Vadc     = voltage;                 // crudo de A0, sin reconstruir
   float Vpp     = Amp2Vpp(voltage + VShotcky);
   float Z       = Vpp / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);
   last_Vpp      = Vpp;                     // para el TX (dato de referencia)
@@ -557,11 +563,14 @@ void adquirir_y_promediar() {
   // ── TX cada TX_INTERVAL_MS · sin String (cero fragmentación) ──
   if (millis() - last_tx_ms >= TX_INTERVAL_MS) {
     last_tx_ms = millis();
-    // Formato: "<Z> <Vpp>"  (ej: "22.30942 1.5234")
-    // La UI toma el 1er valor como impedancia y el 2do como tension de lectura.
-    // Sigue siendo un unico snprintf sin String: costo identico al anterior.
-    char msg[32];
-    snprintf(msg, sizeof(msg), "%.5f %.4f", Chidori.Z, last_Vpp);
+    // Formato: "<Z> <Vpp> <Vadc>"  (ej: "22.30942 1.5234 0.5617")
+    //   Z    · impedancia calculada
+    //   Vpp  · pico a pico reconstruido en la salida del receptor (deriva de Vadc)
+    //   Vadc · CONTINUA MEDIDA EN A0, en volts · contrastable con el tester
+    // La UI muestra Vadc como tension de lectura: es el unico de los tres que
+    // corresponde a un nodo real del circuito.
+    char msg[48];
+    snprintf(msg, sizeof(msg), "%.5f %.4f %.4f", Chidori.Z, last_Vpp, last_Vadc);
     if (wifiUp && webSocket.connectedClients() > 0) {
       webSocket.broadcastTXT(msg);
     }

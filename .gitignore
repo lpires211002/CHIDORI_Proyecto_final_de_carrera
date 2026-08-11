@@ -1,3 +1,12 @@
 # macOS
 .DS_Store
 **/.DS_Store
+
+# KiCad · archivos de bloqueo y respaldos que genera al abrir un proyecto.
+# No son parte del diseño y cambian en cada sesión de edición.
+*.lck
+*.kicad_prl
+*-backups/
+*.kicad_sch-bak
+*.kicad_pcb-bak
+fp-info-cache

@@ -18,6 +18,7 @@ export default function StatsGrid({
   currentValue,
   rate,
   voltage = null,
+  voltageIsRaw = false,
   zHistory,
   rateHistory,
   stale = false,
@@ -91,8 +92,12 @@ export default function StatsGrid({
         </div>
       </div>
 
-      {/* Tensión de lectura · dato crudo del detector, referencia/diagnóstico.
-          Solo aparece si el firmware la reporta (protocolo "<Z> <Vpp>"). */}
+      {/* Tensión de lectura · diagnóstico.
+          Con el firmware nuevo es la CONTINUA MEDIDA en A0: el único de los
+          valores de la cadena que corresponde a un nodo real y se puede
+          contrastar con el tester. Con firmware viejo llega la Vpp
+          reconstruida, que no es medible en ningún punto — de ahí el rótulo
+          distinto. */}
       {voltage != null && (
         <div className="readout-cell">
           <span className="readout-label">Tensión de lectura</span>
@@ -100,7 +105,9 @@ export default function StatsGrid({
             <NumberTicker value={voltage} decimals={4} stiffness={140} damping={24} />
             <span className="readout-unit" style={{ marginLeft: 6 }}>V</span>
           </span>
-          <span className="readout-delta mute">Vpp del detector</span>
+          <span className="readout-delta mute">
+            {voltageIsRaw ? 'continua medida en A0' : 'Vpp reconstruida'}
+          </span>
         </div>
       )}
     </div>

@@ -424,7 +424,7 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
             {mode === 'z'
               ? 'Impedancia · módulo del tejido vesical'
               : mode === 'v'
-                ? 'Tensión de lectura · Vpp del detector'
+                ? 'Tensión de lectura · continua en A0'
                 : 'dZ/dt · velocidad de llenado'}
           </span>
         </div>

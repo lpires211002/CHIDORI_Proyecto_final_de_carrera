@@ -157,6 +157,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // Tension de lectura (Vpp del detector) reportada por el firmware · referencia
   const [voltage, setVoltage]           = useState(null);
   const [voltageData, setVoltageData]   = useState([]);   // serie graficable
+  // true si el firmware manda la continua cruda de A0 (3er campo). Cambia el
+  // rótulo: no es lo mismo un valor medido que uno reconstruido.
+  const [voltageIsRaw, setVoltageIsRaw] = useState(false);
   /* Captura de volumen para eventos del protocolo (ingesta / micción). */
   const [volumeModal, setVolumeModal]   = useState(null);  // 'water' | 'void' | null
   const [volumeInput, setVolumeInput]   = useState('');
@@ -585,13 +588,25 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const s = rawData.trim();
     if (s === '' || s === 'PONG') return;          // liveness · sin efecto
     if (s.startsWith('STATUS')) { applyDeviceStatus(s); return; }
-    // Formato del firmware: "<Z>" (viejo) o "<Z> <Vpp>" (nuevo, tension de lectura).
+    // Formato del firmware, por versión:
+    //   "<Z>"                  · viejo
+    //   "<Z> <Vpp>"            · + tensión reconstruida
+    //   "<Z> <Vpp> <Vadc>"     · + continua medida en A0
+    //
+    // Se muestra Vadc cuando viene, porque es el único de los tres que
+    // corresponde a un nodo real: se puede contrastar con el tester en el pin.
+    // La Vpp es una reconstrucción (×2 + caída del Schottky) y no es medible
+    // en ningún punto del circuito.
     const parts = s.split(/\s+/);
     const v = Number(parts[0]);                     // estricto: "1.2.3" → NaN
     if (Number.isFinite(v)) {
-      if (parts.length > 1) {
-        const volt = Number(parts[1]);
-        if (Number.isFinite(volt)) { setVoltage(volt); lastVoltageRef.current = volt; }
+      const vadc = parts.length > 2 ? Number(parts[2]) : NaN;
+      const vpp  = parts.length > 1 ? Number(parts[1]) : NaN;
+      const volt = Number.isFinite(vadc) ? vadc : vpp;
+      if (Number.isFinite(volt)) {
+        setVoltage(volt);
+        lastVoltageRef.current = volt;
+        setVoltageIsRaw(Number.isFinite(vadc));
       }
       handleIncomingData(v);
     }
@@ -1306,6 +1321,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               <div className="monitor-main">
                 <StatsGrid
                   voltage={voltage}
+                  voltageIsRaw={voltageIsRaw}
                   initialValue={initialValue}
                   currentValue={currentValue}
                   rate={rate}
