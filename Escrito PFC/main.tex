@@ -1,0 +1,493 @@
+\documentclass[12pt,a4paper]{article}
+
+% ---------- PAQUETES ----------
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{csquotes}
+\usepackage[backend=bibtex,style=ieee]{biblatex}
+
+\addbibresource{referencias.bib}
+
+\linespread{1.15}\selectfont
+\setlength{\parindent}{0pt}
+
+% Anchos de numeración del índice
+\makeatletter
+\renewcommand*\l@section{\@dottedtocline{1}{0em}{2.5em}}
+\renewcommand*\l@subsection{\@dottedtocline{2}{2.5em}{3.5em}}
+\renewcommand*\l@subsubsection{\@dottedtocline{3}{6em}{4.5em}}
+\makeatother
+
+% ---------- DOCUMENTO ----------
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{1.2cm}
+
+    {\fontsize{22}{27}\selectfont\bfseries
+    Chidori: Diseño, desarrollo e investigación de un equipo médico de medición de
+    bioimpedancia vesical para la prevención de eventos de incontinencia urinaria\par}
+
+    \vspace{1.4cm}
+
+    \includegraphics[page=1,viewport=180 615 415 715,clip,width=0.35\textwidth]
+    {Anteproyecto.pdf}
+
+    \vspace{1.5cm}
+
+    {\normalsize\itshape
+    Proyecto final de Carrera para la obtención del título de Bioingeniero\par}
+
+    \vspace{1.2cm}
+
+    {\large
+    \textbf{Autores:}\par
+    Gonzalez Martin, Juan Bautista (63549)\par
+    Pires, Luca Federico (63042)\par
+    Tombesi, Rosario (63528)\par}
+
+    \vspace{1.2cm}
+
+    {\large
+    \textbf{Tutor:} Gustavo Panza\par
+    \vspace{0.35cm}
+    \textbf{Co-tutor:} Rodrigo Cardenas\par}
+
+    \vfill
+
+    \begin{flushleft}
+        {\large Fecha de entrega: }
+    \end{flushleft}
+\end{titlepage}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+
+\pagenumbering{arabic}
+
+\section{Introducción}
+
+\subsection{Motivación}
+
+La incontinencia urinaria es la pérdida involuntaria de orina y constituye una condición que
+puede afectar a personas de todas las edades, con un impacto significativo sobre la salud, la
+autonomía y la calidad de vida de quienes la padecen \cite{abrams2002standardisation}. Esta
+afección presenta una alta prevalencia en la población adulta y es entre dos y cuatro veces más
+frecuente en mujeres que en hombres. Además, su incidencia aumenta progresivamente con la edad
+y, debido a su elevada prevalencia e impacto negativo en personas mayores de 65 años, es
+considerada un síndrome geriátrico \cite{robles2006incontinencia}.
+
+Si bien la incontinencia urinaria se asocia con mayor frecuencia al envejecimiento, puede
+presentarse en individuos de cualquier grupo etario. En las mujeres, el embarazo, el parto y la
+menopausia constituyen factores de riesgo relevantes, mientras que en los hombres suele asociarse
+con patologías prostáticas. Asimismo, diversas enfermedades neurológicas, como las lesiones
+medulares, la esclerosis múltiple y la enfermedad de Parkinson, pueden alterar el control vesical
+y favorecer la aparición de esta condición \cite{leslie2024incontinence}.
+
+Las terapias y los tratamientos utilizados actualmente en pacientes con incontinencia urinaria
+pueden clasificarse en distintas categorías complementarias entre sí. En primer lugar, se
+encuentran las terapias conservadoras, orientadas a disminuir los síntomas mediante modificaciones
+en el estilo de vida. Entre las principales medidas se incluyen cambios en la dieta, abandono del
+tabaquismo, descenso de peso y ejercicios de fortalecimiento del suelo pélvico. Asimismo, suelen
+implementarse micciones programadas con el objetivo de prevenir episodios de incontinencia. Sin
+embargo, aunque estas estrategias pueden resultar efectivas en ciertos casos, los horarios fijos
+pueden ser rígidos y poco adaptables a las necesidades particulares y al contexto cotidiano de
+cada paciente.
+
+En segundo lugar, existen tratamientos farmacológicos, principalmente indicados ante determinados
+síntomas de urgencia. Los fármacos utilizados incluyen antimuscarínicos y agonistas $\beta_3$, los
+cuales pueden contribuir a reducir los episodios de incontinencia. No obstante, su uso puede
+asociarse con efectos adversos, especialmente relevantes en adultos mayores, como sequedad bucal,
+constipación, visión borrosa y mareos \cite{eau2025femaleLUTS}.
+
+Finalmente, cuando las alternativas conservadoras y farmacológicas no resultan efectivas, pueden
+considerarse procedimientos invasivos. Según el tipo de incontinencia y la condición del paciente,
+estos incluyen la neuromodulación sacra, la administración intravesical de toxina botulínica y
+distintas cirugías correctivas. Si bien estos procedimientos pueden mejorar significativamente los
+síntomas, algunos se caracterizan por ser costosos, invasivos y estar asociados con posibles
+complicaciones \cite{eau2025femaleLUTS}.
+
+En la práctica clínica, especialmente en pacientes adultos mayores, es frecuente recurrir a
+productos absorbentes como estrategia de contención. Sin embargo, esta solución también presenta
+limitaciones, ya que puede representar una carga económica sostenida y no aborda el mecanismo que
+origina la pérdida de orina.
+
+A pesar de la variedad de tratamientos disponibles, persisten desafíos asociados con su
+implementación y efectividad a largo plazo. Muchas alternativas presentan limitaciones vinculadas
+con su costo, invasividad, efectos adversos o escasa adaptabilidad a pacientes con movilidad
+reducida o deterioro cognitivo. Estas dificultades evidencian la necesidad de desarrollar nuevas
+estrategias que permitan mejorar el monitoreo y la gestión de la condición de manera accesible,
+segura y adaptada a las necesidades de cada paciente.
+
+En este contexto, la bioimpedancia eléctrica surge como una alternativa prometedora para el
+monitoreo no invasivo y continuo del estado vesical. Esta técnica se basa en la medición de las
+propiedades eléctricas de los tejidos biológicos mediante la inyección de corrientes alternas de
+baja amplitud y el análisis de la respuesta eléctrica obtenida. Debido a que los tejidos y fluidos
+corporales presentan propiedades eléctricas diferentes, los cambios en el volumen de orina dentro
+de la vejiga pueden producir variaciones medibles en la impedancia eléctrica de la región abdominal
+\cite{abbey1983bladder,liao2011bladder}.
+
+El desarrollo de dispositivos portátiles basados en bioimpedancia podría permitir la implementación
+de sistemas de monitoreo continuo, de bajo costo y potencialmente utilizables en entornos
+domiciliarios o clínicos. No obstante, la medición de bioimpedancia vesical presenta desafíos
+relacionados con la variabilidad anatómica entre individuos, el movimiento corporal, la ubicación
+de los electrodos y la influencia de otros tejidos abdominales sobre la señal obtenida
+\cite{palla2023review}.
+
+El presente proyecto propone estudiar la bioimpedancia como herramienta no invasiva para estimar el
+estado de llenado vesical y anticipar la necesidad de micción. Su relevancia radica en aportar
+evidencia científica sobre un enfoque accesible, continuo y objetivo, con potencial para mejorar el
+manejo de pacientes con incontinencia urinaria. El trabajo parte de un prototipo desarrollado
+previamente y aborda su rediseño electrónico, la mejora de la calidad de señal, la recolección
+experimental de datos y la evaluación de métodos de predicción personalizados.
+
+\subsection{Objetivos}
+
+\subsubsection{Objetivo general}
+
+Desarrollar y validar un dispositivo médico portátil y económico para el monitoreo no invasivo del
+llenado vesical mediante bioimpedancia eléctrica, optimizando un prototipo existente y realizando un
+estudio experimental orientado a la generación de una base de datos poblacional que permita analizar
+la relación entre la impedancia y el volumen vesical, así como explorar técnicas de predicción del
+momento de la micción para la prevención de episodios de incontinencia urinaria.
+
+\subsubsection{Objetivos específicos}
+
+El presente trabajo tiene como objetivo el rediseño y la optimización de un sistema de medición de
+bioimpedancia orientado al monitoreo del llenado vesical. Para ello, se propone desarrollar una nueva
+placa electrónica que incorpore un esquema de filtrado en la etapa de adquisición de la señal, con el
+fin de reducir el nivel de ruido y mejorar la sensibilidad y estabilidad general del dispositivo.
+Asimismo, se buscará optimizar la portabilidad del sistema mediante la reducción del consumo
+energético y del tamaño de la placa electrónica.
+
+Además, se plantea desarrollar una interfaz gráfica que facilite la interacción con el usuario y
+permita una visualización clara e intuitiva de los resultados. En paralelo, se construirá una base
+de datos experimental a partir de mediciones obtenidas durante pruebas controladas. Esta base
+permitirá implementar y evaluar modelos de análisis de datos orientados a predecir el estado de
+llenado vesical a partir de cambios en la bioimpedancia.
+
+El trabajo también tiene como finalidad investigar y definir métricas cuantitativas para evaluar la
+confiabilidad, estabilidad y desempeño del sistema, estableciendo criterios objetivos para su
+validación. Se buscará realizar pruebas experimentales en distintos escenarios de uso con el propósito
+de analizar la seguridad y eficacia del sistema, considerando su potencial aplicación clínica. Como
+objetivo de máxima, se propone publicar los resultados obtenidos en una revista científica o congreso
+relacionado con las áreas de bioingeniería y bioimpedancia.
+
+\section{Marco teórico}
+
+\subsection{Vejiga urinaria}
+
+\subsubsection{Anatomía y fisiología}
+
+La vejiga urinaria es un órgano muscular hueco ubicado en la cavidad pélvica y constituye la víscera
+más anterior de la pelvis. Su función principal es almacenar temporalmente la orina producida por los
+riñones hasta que pueda ser eliminada mediante la micción. Cuando se encuentra vacía permanece dentro
+de la pelvis, por detrás de la sínfisis del pubis; a medida que se llena, se distiende y asciende hacia
+la cavidad abdominal \cite{drake2015gray,shermadou2023bladder}.
+
+En estado de vaciamiento presenta una forma aproximadamente piramidal y puede describirse mediante un
+vértice, una base o fondo, un cuerpo y un cuello. El vértice se orienta hacia la sínfisis del pubis y
+se continúa con el ligamento umbilical medio, remanente del uraco que se dirige hacia el ombligo. La
+base se orienta en dirección posteroinferior y el cuerpo constituye la región principal de
+almacenamiento. Inferiormente, la vejiga se estrecha para formar el cuello vesical, que se continúa con
+la uretra \cite{drake2015gray,shermadou2023bladder}.
+
+Los dos uréteres ingresan por la región posterior de la vejiga y la uretra se origina en su extremo
+inferior. Los orificios ureterales y el orificio uretral interno delimitan sobre la superficie interna
+una región triangular denominada trígono vesical. El trayecto oblicuo de los uréteres a través de la
+pared vesical contribuye a limitar el reflujo de orina hacia el tracto urinario superior cuando la
+vejiga se llena o se contrae durante la micción \cite{lanzotti2023physiology}. Esta pared se encuentra
+revestida internamente por urotelio y contiene una capa de músculo liso denominada músculo detrusor,
+cuya contracción coordinada permite expulsar la orina \cite{drake2015gray}.
+
+La función vesical comprende una fase de almacenamiento y otra de vaciamiento o micción. Durante el
+llenado, la distensibilidad de la pared permite que el volumen aumente con una elevación relativamente
+pequeña de la presión intravesical, propiedad denominada acomodación o \textit{compliance} vesical. La
+capacidad funcional varía entre individuos; en el adulto, el volumen que puede almacenarse cómodamente
+es, en promedio, de 300 a 400~mL \cite{drake2015gray,lanzotti2023physiology}.
+
+A medida que la vejiga se llena, la distensión de su pared activa receptores sensitivos que informan
+el estado de llenado a la médula espinal y a los centros encefálicos. Durante el almacenamiento, la
+actividad simpática y somática mantiene relajado el detrusor y cerrada la salida uretral. Cuando el
+grado de llenado y el contexto permiten iniciar la micción, aumenta la actividad parasimpática, se
+contrae el detrusor y disminuye la resistencia uretral. Esto requiere la relajación coordinada del
+cuello vesical y del esfínter uretral externo, este último formado por músculo estriado y sujeto al
+control voluntario. De este modo, circuitos espinales y encefálicos coordinan la expulsión de la orina
+\cite{fowler2008neural,lanzotti2023physiology}.
+
+
+\subsubsection{Incontinencia urinaria}
+
+La International Continence Society define la incontinencia urinaria como la queja de cualquier pérdida
+involuntaria de orina \cite{abrams2002standardisation}. Se trata de un síntoma y no de una etiología
+única. Las formas clínicas más frecuentes son:
+
+\begin{itemize}
+    \item \textbf{Incontinencia urinaria de esfuerzo:} pérdida asociada con un esfuerzo, ejercicio,
+    tos o estornudo, generalmente vinculada con hipermovilidad uretral o insuficiencia esfinteriana.
+    \item \textbf{Incontinencia urinaria de urgencia:} pérdida precedida o acompañada por una necesidad
+    súbita y difícil de posponer. Puede presentarse dentro del síndrome de vejiga hiperactiva.
+    \item \textbf{Incontinencia mixta:} coexistencia de síntomas de esfuerzo y de urgencia.
+    \item \textbf{Incontinencia por rebosamiento o asociada con retención:} pérdida relacionada con un
+    vaciado insuficiente y un volumen residual elevado.
+    \item \textbf{Incontinencia funcional:} incapacidad de llegar al sanitario o utilizarlo a tiempo
+    por limitaciones motoras, cognitivas o ambientales, aun cuando el tracto urinario pueda conservar
+    su función.
+\end{itemize}
+
+Desde el punto de vista fisiopatológico, la incontinencia puede deberse a alteraciones del detrusor o
+del tracto de salida vesical. Entre las primeras se encuentran la hiperactividad del detrusor y la
+disminución de la acomodación; entre las segundas, la hipermovilidad uretral y la incompetencia
+esfinteriana. Por ello, la pérdida involuntaria de orina debe entenderse como un síntoma que puede
+responder a mecanismos y enfermedades diferentes, cuya identificación es necesaria para orientar el
+tratamiento \cite{chiang2013incontinencia}.
+
+El monitoreo del llenado no corrige por sí mismo la causa de la incontinencia; busca aportar una señal anticipatoria para personas que
+conservan capacidad de almacenamiento y pueden beneficiarse de una indicación de vaciado. Esto puede
+ser especialmente útil cuando la percepción de plenitud está disminuida.
+
+
+\subsubsection{Tratamientos y estrategias de manejo actuales}
+
+El abordaje se selecciona según el subtipo, la gravedad, las comorbilidades y las preferencias del
+paciente. Las intervenciones conservadoras suelen constituir la primera línea e incluyen educación,
+ajustes en la ingesta de líquidos, reducción de peso cuando está indicada, entrenamiento vesical y
+ejercicios supervisados de la musculatura del piso pélvico. Existe evidencia de beneficio del
+entrenamiento del piso pélvico en mujeres con incontinencia de esfuerzo y mixta
+\cite{eau2025femaleLUTS,dumoulin2018pelvic}.
+
+En la incontinencia de urgencia pueden emplearse antimuscarínicos o agonistas $\beta_3$. La elección
+requiere valorar contraindicaciones, adherencia y efectos adversos, particularmente en personas mayores.
+Cuando las medidas previas son insuficientes se consideran, según el cuadro, toxina botulínica
+intradetrusor, neuromodulación, agentes de relleno uretral o procedimientos quirúrgicos. Los productos
+absorbentes y la micción asistida o programada ayudan a contener o prevenir episodios, pero no tratan
+necesariamente el mecanismo subyacente \cite{eau2025femaleLUTS}.
+
+El intervalo entre micciones cambia con la ingesta, la diuresis, la actividad y
+otros factores. Una estimación continua del llenado mediante bioimpedanciapodría permitir avisos personalizados; su utilidad
+clínica, sin embargo, deberá demostrarse mediante estudios comparativos y no puede inferirse únicamente
+del desempeño electrónico.
+
+\subsection{Bioimpedancia eléctrica}
+
+\subsubsection{Principios generales}
+
+La bioimpedancia caracteriza la oposición que presenta un tejido al paso de corriente.
+Para una excitación sinusoidal en régimen estacionario, se define como
+
+\begin{equation}
+    Z(\omega)=\frac{\underline{V}(\omega)}{\underline{I}(\omega)}
+             =R(\omega)+jX(\omega),
+\end{equation}
+
+donde $R$ es la componente resistiva, $X$ la reactancia y $\omega=2\pi f$. Su módulo y fase resultan
+
+\begin{equation}
+    |Z|=\sqrt{R^2+X^2}, \qquad
+    \phi=\tan^{-1}\left(\frac{X}{R}\right).
+\end{equation}
+
+Los líquidos intra y extracelulares aportan caminos conductivos, mientras que las membranas celulares
+se comportan aproximadamente como elementos capacitivos. Por esta razón la impedancia depende de la
+frecuencia. A bajas frecuencias la corriente circula principalmente por el espacio extracelular; al
+aumentar la frecuencia, la reactancia de membrana disminuye y una fracción mayor atraviesa el medio
+intracelular \cite{grimnes2015bioimpedance}. El tejido es heterogéneo y anisótropo, de modo que un
+modelo concentrado representa un comportamiento macroscópico y no una descripción anatómica exacta.
+
+El modelo equivalente presentado por Al-Rawi et al. representa el medio extracelular mediante
+$R_o$ y el intracelular mediante $R_i$, mientras que $C_{in}$ modela el comportamiento capacitivo de
+la membrana celular. Esta disposición permite visualizar cómo el aumento de la frecuencia reduce la
+reactancia capacitiva y habilita una mayor contribución del camino intracelular
+\cite{alrawi2013howland}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.70\textwidth]{figuras/alrawi2013/modelo-equivalente.png}
+    \caption{Modelo eléctrico equivalente simplificado del tejido biológico. $R_o$ representa la
+    resistencia extracelular, $R_i$ la resistencia intracelular y $C_{in}$ la capacitancia de la
+    membrana celular. Reproducida de Al-Rawi et al. \cite{alrawi2013howland}.}
+    \label{fig:modelo_equivalente_alrawi}
+\end{figure}
+
+Una representación habitual es el modelo de Cole--Cole:
+
+\begin{equation}
+ Z(\omega)=R_{\infty}+\frac{R_0-R_{\infty}}
+ {1+(j\omega\tau)^{1-\alpha}},
+\end{equation}
+
+donde $R_0$ y $R_{\infty}$ son los límites resistivos de baja y alta frecuencia, $\tau$ es una constante
+de tiempo y $\alpha$ describe la dispersión de los tiempos de relajación \cite{cole1940permeability}.
+Este modelo es especialmente útil en espectroscopía. En una medición a frecuencia única, se sigue la 
+evolución temporal de un punto del espectro y no es posible identificar de forma independiente todos sus parámetros.
+
+\subsubsection{Métodos de medición}
+
+La medición de impedancia eléctrica en el cuerpo se realiza principalmente mediante el método
+corriente--tensión: se inyecta una corriente alterna de amplitud conocida y se mide la tensión
+resultante sobre la superficie corporal. Según la cantidad y función de los electrodos, pueden
+distinguirse tres configuraciones \cite{noyori2022review}:
+
+\begin{itemize}
+    \item \textbf{Bipolar:} utiliza dos electrodos, ambos compartidos para inyectar corriente y medir
+    tensión. Es la configuración más simple y compacta, pero la impedancia medida incluye directamente
+    las interfaces electrodo--piel.
+    \item \textbf{Tripolar:} emplea un electrodo de corriente, uno de tensión y un tercero común a
+    ambas funciones. Permite medir el potencial en un punto distinto del de inyección y conserva una
+    implementación relativamente sencilla, aunque el electrodo compartido mantiene la influencia de
+    la impedancia de contacto.
+    \item \textbf{Tetrapolar:} utiliza dos electrodos para inyectar corriente y otros dos exclusivamente
+    para medir la diferencia de potencial. Esta separación reduce la contribución de las interfaces de
+    sensado y es la configuración más utilizada en estudios experimentales sobre seres humanos.
+\end{itemize}
+
+En la configuración tetrapolar, los electrodos de tensión se conectan a una entrada de impedancia muy
+alta, por lo que la corriente que circula a través de ellos es despreciable. La impedancia se estima
+como
+
+\begin{equation}
+    Z_{T}=\frac{V_{\mathrm{med}}}{I_{\mathrm{iny}}}.
+\end{equation}
+
+De esta manera, la impedancia de contacto electrodo--piel, generalmente mayor que la del tejido, tiene
+un efecto mucho menor sobre la tensión registrada y se obtiene una mejor relación señal--ruido que con
+las configuraciones bipolar y tripolar. Esta ventaja justifica la elección del método tetrapolar para
+el monitoreo vesical. Sin embargo, no se eliminan por completo los errores asociados con el desbalance
+de los contactos, las capacitancias parásitas y la distribución no uniforme de sensibilidad; por ello,
+la geometría debe mantenerse constante entre mediciones
+\cite{grimnes2015bioimpedance,noyori2022review}.
+
+
+\subsubsection{Relación entre bioimpedancia y llenado vesical}
+
+La orina presenta una conductividad eléctrica mayor que la de muchos de los tejidos circundantes. Al llenarse
+la vejiga aumenta su tamaño, sustituye parte del volumen ocupado por otros tejidos y modifica la
+distribución de las líneas de corriente en el abdomen inferior. En configuraciones apropiadas, este
+cambio produce una disminución de la impedancia. Esta relación se estudia desde los
+primeros trabajos de medición resistiva del volumen vesical y fue posteriormente evaluada de forma no
+invasiva en seres humanos \cite{waltz1971bladder,abbey1983bladder,liao2011bladder}.
+
+Li et al. desarrollaron en 2013 un sistema tetrapolar que inyectaba una corriente sinusoidal de
+1~mA pico a pico a 50~kHz y estimaba la impedancia mediante amplificación diferencial y demodulación
+sensible a fase. Los autores indicaron que la impedancia abdominal de interés se encontraba
+aproximadamente entre 10 y 30~$\Omega$ y que el cambio asociado con el llenado podía ser inferior a
+1~$\Omega$. Esto exige una cadena de adquisición capaz de resolver variaciones pequeñas sobre un valor
+basal mayor. En una prueba preliminar con un voluntario observaron una tendencia decreciente en la bioimpedancia durante la
+acumulación de orina, consistente con el aumento de un volumen conductor dentro de la vejiga
+\cite{li2013monitoring}.
+
+Estudios posteriores aportaron evidencia con diseños más amplios. En ocho voluntarios, Li et al.
+hallaron una correlación negativa entre la tensión medida y el tiempo de acumulación para tres
+ubicaciones evaluadas \cite{li2019electrode}. Otros desarrollos emplearon arreglos de ocho electrodos
+y regresión lineal \cite{noyori2021device}. También se desarrollaron dispositivos tetrapolares
+portátiles que emplean algoritmos de aprendizaje profundo para reducir interferencias y artefactos en
+la señal \cite{dheman2023bladder}.
+
+La medición superficial no registra únicamente la vejiga, sino también la contribución eléctrica de
+la piel, la grasa, los músculos, otros órganos y los fluidos atravesados por la corriente. La magnitud observada también depende de la distancia
+entre electrodos, antropometría, postura, respiración, movimiento, temperatura, sudoración y composición
+de la orina. En consecuencia, una tendencia decreciente es fisiológicamente plausible, pero no basta
+para asumir una conversión universal entre ohmios y mililitros. Revisiones recientes coinciden en que la bioimpedancia es
+prometedora para monitoreo continuo, aunque su robustez fuera de condiciones controladas sigue siendo
+un desafío \cite{li2013monitoring,palla2023review,noyori2022review}.
+
+\subsubsection{Frecuencia de excitación}
+
+La impedancia de los tejidos depende de la frecuencia de excitación debido al comportamiento capacitivo
+de las membranas celulares y a la interfaz entre los electrodos y la piel. A frecuencias bajas, la
+corriente circula principalmente por el medio extracelular y aumenta la influencia de la impedancia de
+contacto. Al elevar la frecuencia, disminuye la reactancia de las membranas y aumenta la contribución de
+los caminos intracelulares; sin embargo, también adquieren mayor importancia las capacitancias parásitas,
+el ancho de banda de los amplificadores y los errores de fase \cite{grimnes2015bioimpedance}.
+
+La revisión de Noyori et al. indica que la mayoría de los estudios de monitoreo vesical en seres humanos
+empleó señales sinusoidales entre 10 y 100~kHz. Otros trabajos describen información útil de los tejidos
+en un intervalo más amplio, aproximadamente entre 10 y 300~kHz
+\cite{noyori2022review,li2013monitoring}. Estos valores representan rangos explorados en la literatura y
+no garantizan por sí solos el funcionamiento correcto de cualquier circuito dentro de toda la banda.
+
+En este trabajo se seleccionó una frecuencia fija de 50~kHz porque se encuentra dentro del intervalo más
+utilizado en estudios humanos y constituye un compromiso entre sensibilidad fisiológica y complejidad
+electrónica. Frente a frecuencias menores, reduce la influencia relativa de la interfaz electrodo--piel;
+frente a frecuencias mayores, permite controlar
+mejor los efectos parásitos y las limitaciones de ancho de banda.
+
+\subsection{Fundamentos del sistema de medición}
+
+\subsubsection{Cadena de adquisición}
+
+Un sistema tetrapolar de bioimpedancia comprende un generador sinusoidal, una fuente de corriente, dos
+electrodos de inyección, dos de medición, amplificación diferencial, filtrado, demodulación y conversión
+analógico--digital. La fuente debe mantener una corriente aproximadamente constante frente a cambios de
+carga, mientras que la etapa de adquisición debe recuperar una pequeña tensión diferencial en presencia
+de ruido y modo común. El filtrado y la demodulación permiten extraer la amplitud de la señal \cite{alrawi2013howland}.
+
+Como la medición requiere aplicar una corriente al cuerpo, su amplitud debe seleccionarse de acuerdo con
+los límites de seguridad establecidos por la norma IEC~60601-1. Estos límites dependen de la frecuencia
+de la señal, del tipo de parte aplicada y de las condiciones de funcionamiento del equipo, por lo que su
+cumplimiento debe verificarse antes de realizar mediciones en seres humanos \cite{iec60601}.
+
+\subsubsection{Electrodos}
+
+Los electrodos superficiales conectan el circuito electrónico con la conducción iónica del cuerpo. La
+interfaz electrodo--piel presenta una impedancia resistiva y capacitiva que depende del material, el área,
+el gel, la preparación de la piel y la presión de contacto. Los electrodos de Ag/AgCl con hidrogel ofrecen
+un contacto estable para registrar tensión, mientras que una mayor superficie en los electrodos de
+inyección ayuda a distribuir la corriente. Para obtener mediciones comparables deben mantenerse la
+ubicación, la separación y las condiciones de colocación.
+
+\subsubsection{Posicionamiento de electrodos}
+
+La ubicación de los electrodos determina qué regiones contribuyen en mayor medida a la tensión medida.
+Por ello, una disposición reproducible en el abdomen inferior debe favorecer la sensibilidad a los
+cambios de la vejiga y reducir la variación causada por desplazamientos \cite{li2019electrode}.
+
+En el estudio de Li et al., la simulación bidimensional comparó cuatro pares de electrodos de inyección
+y tres pares de medición para volúmenes vesicales entre 0 y 600~mL. La configuración posteriormente
+validada en ocho voluntarios ubicó los electrodos de inyección $S1$ y $S2$ a ambos lados del punto medio
+entre el ombligo y la sínfisis del pubis, separados 3~cm de la línea media, y los electrodos de medición
+$M3$ y $M4$ sobre los laterales del abdomen al mismo nivel, como se ilustra en la
+Figura~\ref{fig:electrodos_li2019}. Este par produjo la mayor variación relativa media de tensión
+($27{,}5\pm14{,}7$~\%), significativamente superior a las otras dos posiciones ensayadas
+\cite{li2019electrode}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[height=0.33\textheight]{figuras/li2019/posicion-electrodos.png}
+    \caption{Ubicación de los electrodos de inyección $S1$--$S2$ y de medición $M3$--$M4$ empleada
+    en el estudio experimental. Reproducida de Li et al. \cite{li2019electrode}, bajo licencia
+    CC BY 4.0.}
+    \label{fig:electrodos_li2019}
+\end{figure}
+
+Esta configuración constituye un punto de partida y no una ubicación universal, ya que el espesor
+adiposo, la geometría pélvica y la posición de la vejiga modifican la distribución de corriente. Su
+aplicación en el prototipo requiere evaluar repetibilidad y sensibilidad entre distintos sujetos
+\cite{li2019electrode}.
+
+\subsection{Modelos predictivos}
+
+
+
+\section{Metodologia}
+
+
+
+\section{Resultados}
+
+
+
+\section{Conclusiones}
+
+
+
+\printbibliography
+
+\end{document}
