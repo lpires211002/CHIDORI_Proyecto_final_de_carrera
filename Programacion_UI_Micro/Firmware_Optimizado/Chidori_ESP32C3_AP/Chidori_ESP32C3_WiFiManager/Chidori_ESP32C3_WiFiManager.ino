@@ -23,8 +23,13 @@
 //      muestras juntas.
 //   6. Cero String en el camino crítico → sin fragmentación de heap
 //      en sesiones largas.
-//   7. Diagnóstico: línea de estado cada 10 s por serial (RSSI, heap,
-//      clientes WS) y comando WS "STATUS".
+//   7. Diagnóstico: línea de estado cada 10 s por serial (uptime, RSSI
+//      real de la estación, heap, clientes WS), comando WS "STATUS",
+//      motivo del último reset al boot (detecta brown-outs en sesiones
+//      largas) y log con timestamp de asociación/caída de la Mac al AP.
+//   8. Limpieza (ago 2026): eliminado TODO el código muerto de la era
+//      STA/WiFiManager (onWiFiEvent de STA nunca registrado, watchdog
+//      no-op, globales de backoff sin uso). Cero cambio funcional.
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -63,6 +68,8 @@
 #include <SPI.h>
 #include <stdint.h>
 #include <math.h>
+#include <esp_wifi.h>     // esp_wifi_ap_get_sta_list → RSSI real de la estación
+#include <esp_system.h>   // esp_reset_reason → diagnóstico de reinicios
 
 /* ================= PINES ================= */
 #define BUZZER       5
@@ -126,12 +133,10 @@ const char*    MDNS_HOSTNAME          = "chidori";
 const char*    AP_SSID                = "Chidori";        // red que crea el ESP
 const char*    AP_PASSWORD            = "chidori123";     // WPA2, min 8 chars
 
-// Reconexión runtime: backoff entre reintentos
-const uint32_t WIFI_RETRY_MIN_MS      = 5000;
-const uint32_t WIFI_RETRY_MAX_MS      = 30000;
-// Si está INACTIVO y lleva más de esto sin WiFi → reboot preventivo
-// (nunca se reinicia en medio de una medición)
-const uint32_t WIFI_DEAD_REBOOT_MS    = 180000;
+// Canal WiFi del AP. 1 = comportamiento de siempre (default del core).
+// Si hay interferencia (muchos routers vecinos en canal 1), probar 6 u 11:
+// cambia SOLO la frecuencia de radio, nada del protocolo ni de la app.
+const uint8_t  AP_CHANNEL             = 1;
 
 // Heartbeat WS: ping cada 15 s, espera pong 3 s, 2 fallos = desconectar.
 // ESTO es lo que elimina los clientes fantasma de los page-refresh.
@@ -178,13 +183,6 @@ const int DEBOUNCE_STOP_CUENTAS  = 150;  // 1.5 s de hold para PARAR (anti-corte
 
 bool First_Measure = true;
 
-/* ── Estado WiFi runtime (manejado por eventos + loop) ── */
-volatile bool wifiUp            = false;  // seteado por eventos WiFi
-volatile bool wifiNeedsServices = false;  // re-arrancar mDNS tras reconectar
-uint32_t      wifiRetryDelayMs  = WIFI_RETRY_MIN_MS;
-unsigned long wifiNextRetryMs   = 0;
-unsigned long wifiDownSinceMs   = 0;
-
 /* ================= MÁQUINA DE ESTADOS =================
  * La alarma se evalúa ÚNICAMENTE en el frontend. El firmware es un
  * sensor "dumb": mide y transmite. ALARMA queda por compatibilidad. */
@@ -205,7 +203,8 @@ void ad9833SetFrequency(double freqHz);
 void ad9833Begin(double freqHz);
 void Inicializar_AP();
 void onWiFiEvent(WiFiEvent_t event);
-void wifiWatchdog();
+int8_t apStationRSSI();
+const char* resetReasonName(esp_reset_reason_t r);
 void startNetworkServices();
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
 void adquirir_y_promediar();
@@ -222,6 +221,12 @@ void setup() {
   Serial.begin(115200);
   delay(3000);
   Serial.println("\n=== ESP32-C3 CHIDORI · ACCESS POINT ===");
+
+  // ★ DIAGNÓSTICO: por qué arrancó el chip. Si durante una medición larga
+  // el serial muestra un boot nuevo con "BROWNOUT", la causa de la
+  // desconexión es ALIMENTACIÓN (batería/cable), no WiFi.
+  Serial.print("Motivo del reset: ");
+  Serial.println(resetReasonName(esp_reset_reason()));
 
   pinMode(BUZZER, OUTPUT);
   pinMode(BUTTON, INPUT);            // pull-down externo 2.2k en PCB
@@ -252,7 +257,6 @@ void setup() {
 /* ================= LOOP PRINCIPAL ================= */
 void loop() {
   webSocket.loop();
-  wifiWatchdog();
   statusTick();
 
   // Antirrebote del botón cada 10 ms
@@ -334,6 +338,11 @@ void Inicializar_AP() {
   // El ESP crea su PROPIA red WiFi. La Mac se conecta directo a 'Chidori'
   // y abre la UI apuntando a 192.168.4.1:81. No depende de ningun router,
   // hotspot ni credenciales: funciona igual en cualquier lugar.
+  // ★ DIAGNÓSTICO: log con timestamp cada vez que una estación (la Mac)
+  // se asocia o se cae del AP. Registrado ANTES de levantar el AP para
+  // no perder el evento AP_START.
+  WiFi.onEvent(onWiFiEvent);
+
   WiFi.mode(WIFI_AP);
 
   // IP fija del AP: SIEMPRE 192.168.4.1 (lo que va en la UI).
@@ -341,7 +350,13 @@ void Inicializar_AP() {
                     IPAddress(192, 168, 4, 1),
                     IPAddress(255, 255, 255, 0));
 
-  bool ok = WiFi.softAP(AP_SSID, AP_PASSWORD);
+  bool ok = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL);
+
+  if (!ok) {
+    Serial.println("No se pudo iniciar el Access Point. Reiniciando...");
+    delay(2000);
+    ESP.restart();
+  }
 
   // Power save OFF: con el modem dormido entre beacons, los paquetes salen en
   // rafagas y el frontend ve huecos de cientos de ms. Es la causa clasica de
@@ -352,19 +367,13 @@ void Inicializar_AP() {
   // TX power 8.5 dBm: fix de antena del C3 Super Mini + evita brown-out USB.
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
 
-  if (!ok) {
-    Serial.println("No se pudo iniciar el Access Point. Reiniciando...");
-    delay(2000);
-    ESP.restart();
-  }
-
   Serial.println("Access Point activo");
   Serial.print("   Red WiFi: ");  Serial.println(AP_SSID);
   Serial.print("   Clave:    ");  Serial.println(AP_PASSWORD);
+  Serial.print("   Canal:    ");  Serial.println(AP_CHANNEL);
   Serial.print("   IP:       ");  Serial.println(WiFi.softAPIP());
   Serial.println("   En la Mac: conectate a la red 'Chidori' y abri la UI con IP 192.168.4.1 puerto 81");
 
-  wifiUp = true;
   startNetworkServices();
 }
 
@@ -375,7 +384,7 @@ void startNetworkServices() {
     MDNS.addService("ws", "tcp", 81);
     Serial.print("✅ mDNS → ws://"); Serial.print(MDNS_HOSTNAME); Serial.println(".local:81");
     Serial.print("   (si .local falla, usar la IP directa: ");
-    Serial.print(WiFi.localIP()); Serial.println(":81)");
+    Serial.print(WiFi.softAPIP()); Serial.println(":81)");
   } else {
     Serial.println("⚠ mDNS no inició · usar la IP directa");
   }
@@ -391,33 +400,58 @@ void startNetworkServices() {
   }
 }
 
-/* Eventos del driver WiFi (corren en otra task → solo flags) */
+/* Eventos del driver WiFi · SOLO LOG DIAGNÓSTICO (modo AP).
+ * En AP no hay reconexión que manejar: el ESP no hace nada, solo deja
+ * constancia con timestamp de cuándo la Mac se asocia o se cae, para
+ * poder correlacionar las desconexiones de las mediciones largas.
+ * (Mismo patrón que el ejemplo oficial WiFiClientEvents del core.) */
 void onWiFiEvent(WiFiEvent_t event) {
   switch (event) {
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      if (wifiUp) {
-        wifiUp          = false;
-        wifiDownSinceMs = millis();
-        wifiNextRetryMs = millis() + WIFI_RETRY_MIN_MS;
-        wifiRetryDelayMs = WIFI_RETRY_MIN_MS;
-      }
+    case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+      Serial.print("[wifi ");   Serial.print(millis() / 1000);
+      Serial.println(" s] estación ASOCIADA al AP (la Mac entró a la red)");
       break;
-    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      if (!wifiUp) {
-        wifiUp            = true;
-        wifiNeedsServices = true;   // mDNS se re-arranca desde el loop
-      }
+    case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+      Serial.print("[wifi ");   Serial.print(millis() / 1000);
+      Serial.println(" s] ⚠ estación DESASOCIADA del AP (la Mac se fue de la red)");
+      break;
+    case ARDUINO_EVENT_WIFI_AP_START:
+      Serial.print("[wifi ");   Serial.print(millis() / 1000);
+      Serial.println(" s] AP iniciado");
+      break;
+    case ARDUINO_EVENT_WIFI_AP_STOP:
+      Serial.print("[wifi ");   Serial.print(millis() / 1000);
+      Serial.println(" s] ⚠⚠ AP DETENIDO (esto NO debería pasar nunca)");
       break;
     default:
       break;
   }
 }
 
-/* Reconexión no bloqueante con backoff. La medición NUNCA se frena:
- * el ADC y el AD9833 siguen, solo se pausa la transmisión. */
-void wifiWatchdog() {
-  // En modo AP no hay reconexion que vigilar: el Access Point esta siempre
-  // activo mientras el ESP tenga alimentacion. (no-op para no tocar el loop)
+/* RSSI real del enlace: señal con la que el AP escucha a la primera
+ * estación conectada (la Mac). 0 = sin estaciones. Valores típicos:
+ * -30 excelente · -60 buena · -75 al límite · -85 casi inutilizable. */
+int8_t apStationRSSI() {
+  wifi_sta_list_t stations;
+  if (esp_wifi_ap_get_sta_list(&stations) != ESP_OK) return 0;
+  if (stations.num < 1) return 0;
+  return stations.sta[0].rssi;
+}
+
+/* Nombre legible del motivo del último reset (diagnóstico de cortes) */
+const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:  return "POWERON (encendido normal)";
+    case ESP_RST_SW:       return "SW (reinicio por software)";
+    case ESP_RST_BROWNOUT: return "BROWNOUT ⚠ (caída de alimentación: revisar batería/cable USB)";
+    case ESP_RST_PANIC:    return "PANIC ⚠ (crash del firmware)";
+    case ESP_RST_INT_WDT:  return "INT_WDT ⚠ (watchdog de interrupciones)";
+    case ESP_RST_TASK_WDT: return "TASK_WDT ⚠ (watchdog de tareas)";
+    case ESP_RST_WDT:      return "WDT ⚠ (otro watchdog)";
+    case ESP_RST_DEEPSLEEP:return "DEEPSLEEP";
+    case ESP_RST_EXT:      return "EXT (pin de reset)";
+    default:               return "DESCONOCIDO";
+  }
 }
 
 /* Línea de diagnóstico cada 10 s */
@@ -427,8 +461,10 @@ void statusTick() {
 
   Serial.print("[status] estado=");
   Serial.print(Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO");
+  Serial.print(" · up="); Serial.print(millis() / 1000); Serial.print("s");
   Serial.print(" · modo=AP ip="); Serial.print(WiFi.softAPIP());
   Serial.print(" · stations="); Serial.print(WiFi.softAPgetStationNum());
+  Serial.print(" · rssi="); Serial.print(apStationRSSI());
   Serial.print(" · clientesWS="); Serial.print(webSocket.connectedClients());
   Serial.print(" · heap="); Serial.print(ESP.getFreeHeap());
   Serial.print(" · Z="); Serial.println(Chidori.Z, 3);
@@ -515,7 +551,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
     snprintf(buf, sizeof(buf),
              "STATUS estado=%s rssi=%d heap=%u Z=%.3f v=%.4f",
              Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO",
-             wifiUp ? (int)WiFi.RSSI() : 0,
+             (int)apStationRSSI(),   // antes: WiFi.RSSI(), que en modo AP es basura
              (unsigned)ESP.getFreeHeap(), Chidori.Z, last_Vpp);
     webSocket.sendTXT(num, buf);
   }
@@ -571,7 +607,7 @@ void adquirir_y_promediar() {
     // corresponde a un nodo real del circuito.
     char msg[48];
     snprintf(msg, sizeof(msg), "%.5f %.4f %.4f", Chidori.Z, last_Vpp, last_Vadc);
-    if (wifiUp && webSocket.connectedClients() > 0) {
+    if (webSocket.connectedClients() > 0) {   // en AP el radio está siempre up
       webSocket.broadcastTXT(msg);
     }
     Serial.print("Z = "); Serial.println(msg);

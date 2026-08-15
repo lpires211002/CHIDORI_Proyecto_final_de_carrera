@@ -171,6 +171,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // empezar. El protocolo son 4-6 por persona, así que saber en cuál se está
   // parado importa.
   const [patientSessionCount, setPatientSessionCount] = useState(0);
+  /* Sesión "armada": ya se entró al panel de medición al menos una vez.
+   * Se mantiene aunque no haya datos, para que Reiniciar deje el cronómetro en
+   * cero SIN devolverte a la pantalla de preparación (y obligarte a rehacer
+   * enlace y paciente). Solo la marca del header lo desarma. */
+  const [armado, setArmado] = useState(false);
   const voltageBufRef = useRef([]);
   const lastVoltageRef = useRef(null);
   const [currentValue, setCurrentValue] = useState(null);
@@ -734,6 +739,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
     // Marca la acción para que el reconciliador no la pise con un STATUS en vuelo.
     lastUserActionRef.current = Date.now();
+    setArmado(true);          // a partir de acá Reiniciar no devuelve al inicio
 
     if (!measuring) {
       let sTime = startTime;
@@ -891,7 +897,18 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     });
   }, [wsStatus, measuring, startTime, pausedDuration, currentValue, isSimulator]);
 
-  const handleReset = () => {
+  /**
+   * Descarta la sesión en memoria y deja el cronómetro en 00:00, en pausa.
+   *
+   * @param mantenerSetup  true  · Reiniciar · conserva paciente y basal, se
+   *                               queda en el panel listo para dar play. Es el
+   *                               caso de "algo salió mal, arranco de nuevo":
+   *                               no tiene sentido rehacer la conexión ni la
+   *                               calibración para volver a medir a la misma
+   *                               persona.
+   *                       false · Volver al inicio · suelta todo.
+   */
+  const resetSesion = ({ mantenerSetup } = { mantenerSetup: false }) => {
     lastUserActionRef.current = Date.now();
     sendCommand('RESET');
     setMeasuring(false);
@@ -902,8 +919,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setData([]);
     setRateData([]);
     setEvents([]);
-    setInitialValue(null);
-    setActivePatient(null);
+    if (!mantenerSetup) {
+      setInitialValue(null);
+      setActivePatient(null);
+      setArmado(false);
+    }
     setSessionData({});
     setVoltage(null);
     setVoltageData([]);
@@ -925,8 +945,13 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     simulatedZRef.current = 150.0;
     setConfirmReset(false);
     setConfirmHome(false);
-    toast('Sesión reiniciada', 'info');
+    toast(mantenerSetup
+      ? 'Mediciones descartadas · mismo paciente, listo para empezar'
+      : 'Sesión reiniciada', 'info');
   };
+
+  /** Reiniciar · misma persona, mismo setup, cronómetro en cero. */
+  const handleReset = () => resetSesion({ mantenerSetup: true });
 
   /**
    * Volver a la pantalla de inicio desde la marca del header.
@@ -939,7 +964,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const goHome = () => {
     if (idle) return;
     if (measuring || hasAnyData) { setConfirmHome(true); return; }
-    handleReset();
+    resetSesion({ mantenerSetup: false });
   };
 
   const handleSaveCalibration = (calib) => {
@@ -1038,7 +1063,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const hasAnyData = data.length > 0;
   // Reposo · todavía no empezó ninguna sesión. Manda la pantalla de
   // preparación: no hay cronómetro, ni eventos, ni nada que exportar.
-  const idle = !hasAnyData && !measuring;
+  const idle = !hasAnyData && !measuring && !armado;
   const primaryButtonLabel = measuring ? 'Pausar' : (startTime ? 'Reanudar' : 'Iniciar adquisición');
 
   // Estado mostrado en el CloudSyncBadge. Se sobreescribe a 'pending'
@@ -1636,17 +1661,26 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
       <ConfirmModal
         open={confirmReset}
-        title="Reiniciar la sesión"
+        title="Empezar de nuevo"
         body={
           <>
             <p style={{ marginBottom: 10 }}>
-              Esta acción borra los datos en memoria y cierra la sesión actual. Los datos
-              ya enviados a la nube quedan archivados allí.
+              Se descartan las {data.length.toLocaleString('es-AR')} muestras en memoria
+              y los {eventCount} eventos. El cronómetro vuelve a 00:00 y queda en pausa,
+              listo para arrancar.
+            </p>
+            <p style={{ marginBottom: 10 }}>
+              <strong>Se conservan el paciente{activePatient ? ` (${activePatient.code})` : ''} y
+              el basal{initialValue != null ? ` (${initialValue.toFixed(2)} Ω)` : ''}</strong>, así
+              no hay que rehacer el enlace ni la calibración.
+              {persistedSessionId
+                ? ' Lo ya guardado en la nube queda archivado allí.'
+                : ' Todavía no se guardó nada en la nube.'}
             </p>
             <p>Mantenga presionado el botón para confirmar.</p>
           </>
         }
-        actionLabel="Mantener para reiniciar"
+        actionLabel="Mantener para empezar de nuevo"
         onCancel={() => setConfirmReset(false)}
         onConfirm={handleReset}
         holdMs={1500}
@@ -1674,7 +1708,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         }
         actionLabel="Mantener para volver al inicio"
         onCancel={() => setConfirmHome(false)}
-        onConfirm={handleReset}
+        onConfirm={() => resetSesion({ mantenerSetup: false })}
         holdMs={measuring ? 1800 : 1200}
       />
     </div>
