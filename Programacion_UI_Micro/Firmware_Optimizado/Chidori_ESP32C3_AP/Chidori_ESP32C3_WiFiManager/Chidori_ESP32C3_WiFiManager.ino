@@ -30,6 +30,12 @@
 //   8. Limpieza (ago 2026): eliminado TODO el código muerto de la era
 //      STA/WiFiManager (onWiFiEvent de STA nunca registrado, watchdog
 //      no-op, globales de backoff sin uso). Cero cambio funcional.
+//   9. El mensaje de datos lleva el RELOJ DEL EQUIPO (millis) y un número
+//      de SECUENCIA. El frontend ya no timestampea por hora de llegada:
+//      la curva queda con el tiempo real de medición aunque el WiFi
+//      entregue los datos en ráfagas, y las muestras perdidas se cuentan
+//      por salto de secuencia en vez de estimarse por la duración del
+//      hueco. Formato: "<Z> <Vpp> <Vadc> <t_ms> <seq>".
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -164,6 +170,19 @@ float last_Vpp  = 0.0f;
  * transmite aparte para poder contrastarlo con el tester en el propio pin —
  * la Vpp reconstruida no es medible en ningun nodo del circuito. */
 float last_Vadc = 0.0f;
+
+/* Numero de secuencia de las Z producidas · SE INCREMENTA SIEMPRE que se
+ * calcula una Z valida (pasado el warmup), se transmita o no.
+ *
+ * Es lo que permite al frontend contar las muestras REALMENTE perdidas: si
+ * entre dos mensajes recibidos la secuencia salta de 1500 a 1512, se perdieron
+ * 11 muestras, sin importar cuanto tardaron en llegar. Antes se estimaba el
+ * hueco multiplicando su duracion por una frecuencia supuesta de 4 Hz, lo que
+ * contaba como perdido todo lo que en realidad solo venia demorado.
+ *
+ * NO se reinicia en cada START: es monotono desde el arranque del equipo, asi
+ * que reanudar una medicion pausada no lo hace saltar para atras. */
+uint32_t z_seq = 0;
 
 float CORRIENTE_INYECTADA;
 float GANANCIA_RECEPTOR;
@@ -596,17 +615,36 @@ void adquirir_y_promediar() {
     Serial.print("⭐ Z_ref calibrada: "); Serial.print(Chidori.Ref, 3); Serial.println(" Ω");
   }
 
+  // Una Z valida mas. Se cuenta ACA, antes del gate de transmision, para que
+  // la secuencia refleje lo MEDIDO y no lo enviado: asi el frontend distingue
+  // "dato que llego tarde" de "dato que nunca llego".
+  z_seq++;
+
   // ── TX cada TX_INTERVAL_MS · sin String (cero fragmentación) ──
   if (millis() - last_tx_ms >= TX_INTERVAL_MS) {
     last_tx_ms = millis();
-    // Formato: "<Z> <Vpp> <Vadc>"  (ej: "22.30942 1.5234 0.5617")
+    // Formato: "<Z> <Vpp> <Vadc> <t_ms> <seq>"
+    //   (ej: "22.30942 1.5234 0.5617 184532 671")
     //   Z    · impedancia calculada
     //   Vpp  · pico a pico reconstruido en la salida del receptor (deriva de Vadc)
     //   Vadc · CONTINUA MEDIDA EN A0, en volts · contrastable con el tester
-    // La UI muestra Vadc como tension de lectura: es el unico de los tres que
-    // corresponde a un nodo real del circuito.
-    char msg[48];
-    snprintf(msg, sizeof(msg), "%.5f %.4f %.4f", Chidori.Z, last_Vpp, last_Vadc);
+    //   t_ms · millis() del ESP · RELOJ DEL EQUIPO, no del navegador
+    //   seq  · numero de Z producidas desde el arranque (ver z_seq)
+    //
+    // POR QUE t_ms · hasta ahora el frontend le ponia a cada muestra la hora en
+    // que LLEGABA. Con el WiFi tartamudeando (medido: cortes de 1-2 s cada ~6 s
+    // por el escaneo de redes de la laptop), los datos se acumulan y llegan en
+    // rafaga, y la curva quedaba dibujada con huecos y apelotonamientos que no
+    // existieron en la medicion. Con el reloj del ESP cada muestra queda en el
+    // instante en que de verdad se midio, y el eje de tiempo pasa a ser exacto.
+    //
+    // t_ms es desde el ARRANQUE del equipo (no desde el START): es monotono, no
+    // se reinicia al reanudar una medicion pausada, y el frontend arma el tiempo
+    // de sesion restando el t_ms de la primera muestra.
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%.5f %.4f %.4f %lu %lu",
+             Chidori.Z, last_Vpp, last_Vadc,
+             (unsigned long)millis(), (unsigned long)z_seq);
     if (webSocket.connectedClients() > 0) {   // en AP el radio está siempre up
       webSocket.broadcastTXT(msg);
     }

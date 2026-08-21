@@ -29,6 +29,10 @@ import usePendingSync    from './components/usePendingSync';
 import { supabase, emailToUsername } from './supabaseClient';
 import { commitSession, queuePendingSession } from './lib/sessionSync';
 import { countSessions } from './lib/patients';
+import {
+  trendAt, robustRate, sigmaFromResiduals, isArtifact, sessionStats, median,
+  TREND_WINDOW_S, BASELINE_WINDOW_S, ALARM_PERSIST_S, RESIDUAL_BUFFER_MAX,
+} from './lib/signal';
 
 /* ─────────────────────────────────────────────────────────────────────
  * CONGRUENCIA CON EL FIRMWARE · Chidori_ESP32C3_WiFiManager
@@ -49,7 +53,11 @@ import { countSessions } from './lib/patients';
  * para que un glitch eléctrico o un frame corrupto no contamine la curva,
  * el basal ni la alarma.
  * ───────────────────────────────────────────────────────────────────── */
-const BASELINE_WINDOW   = 5;       // mediana de las primeras N como basal
+/* Basal, tendencia, tasa y alarma se calculan con los estimadores robustos
+ * de ./lib/signal (medianas sobre ventanas de tiempo). El porqué, con los
+ * números de la sesión real que motivó el cambio, está documentado ahí.
+ * BASELINE_WINDOW (mediana de las primeras 5 muestras ≈ 1,4 s) quedó
+ * reemplazado por BASELINE_WINDOW_S (mediana del primer minuto). */
 const Z_PLAUSIBLE_MIN   = 1;       // Ω · por debajo = desconexión/glitch
 const Z_PLAUSIBLE_MAX   = 100000;  // Ω · por encima = saturación/ruido
 const SPIKE_REL         = 0.30;    // salto >30% en un tick = sospechoso
@@ -67,6 +75,13 @@ const STALE_AFTER_MS    = 3000;
  * (típico de interferencia WiFi). Se registra como evento para que el vacío
  * en la curva quede documentado. */
 const GAP_THRESHOLD_MS  = 1500;
+
+/** mm:ss a partir de segundos. */
+const fmtClock = (secs) => {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
 
 /* Respaldo de sesión · snapshot periódico a localStorage para que un F5 o
  * un crash del navegador no pierdan una medición larga. */
@@ -117,6 +132,38 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
    * updaters de setState (que deben ser puros — StrictMode los invoca 2x). */
   const dataBufRef = useRef([]);
   const rateBufRef = useRef([]);
+  /* Cola de residuos (muestra − tendencia) para estimar el ruido de fondo,
+   * que es la vara con la que se decide si un desvío es movimiento. */
+  const residualBufRef = useRef([]);
+  /* Basal · se refina mientras dura BASELINE_WINDOW_S y después queda fijo.
+   * Se muestra desde la primera muestra para no dejar el readout vacío. */
+  const baselineLockedRef = useRef(false);
+  /* Instante en que la TENDENCIA cruzó el umbral de alarma hacia abajo.
+   * La alarma exige que se sostenga ALARM_PERSIST_S. */
+  const alarmBelowSinceRef = useRef(null);
+
+  /* ── Reloj del EQUIPO ────────────────────────────────────────────────
+   * El firmware manda su propio millis() con cada muestra. Con eso, cada
+   * punto queda en el instante en que se MIDIÓ y no en el que llegó al
+   * navegador: la curva deja de mostrar huecos y apelotonamientos que
+   * fabrica el WiFi (medido en la sesión del 20-ago: 496 "microcortes" de
+   * los que el 62% eran datos demorados que sí llegaron, en ráfaga).
+   *
+   * El tiempo de sesión se arma igual que con el reloj de pared: instante
+   * del primer dato como cero, menos lo que estuvo en pausa. */
+  const espT0Ref      = useRef(null);   // millis del ESP en la 1ª muestra
+  const espLastTRef   = useRef(null);   // millis del ESP en la última muestra
+  const espPausedRef  = useRef(0);      // ms acumulados en pausa, en reloj del ESP
+  const espPauseAtRef = useRef(null);   // millis del ESP al entrar en pausa
+  /* Segundos de sesión ya acumulados antes de fijar el cero del reloj del
+   * equipo (sesión recuperada de un F5): la primera muestra los descuenta. */
+  const espResumeSecRef = useRef(0);
+  /* Secuencia de muestras del firmware · un salto son muestras que el equipo
+   * midió y el navegador NO recibió. Es la cuenta exacta de pérdida, en vez
+   * de estimar el hueco por su duración suponiendo una frecuencia fija. */
+  const lastSeqRef    = useRef(null);
+  const firstSeqRef   = useRef(null);
+  const lostTotalRef  = useRef(0);
 
   /* ── Cloud sync (Supabase) ────────────────────────────────────────────
    * NUEVO MODELO · "commit explícito":
@@ -149,7 +196,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [startTime, setStartTime]       = useState(null);
   const [pausedDuration, setPausedDur]  = useState(0);
   const [pauseStart, setPauseStart]     = useState(null);
-  const [elapsedTime, setElapsedTime]   = useState('00:00');
+  /* Cronómetro de respaldo · SOLO se usa mientras no llegó ningún dato.
+   * Apenas hay muestras, el tiempo de sesión sale de ellas (ver elapsedTime). */
+  const [wallClock, setWallClock]       = useState('00:00');
   const [data, setData]                 = useState([]);
   const [rateData, setRateData]         = useState([]);
   const [events, setEvents]             = useState([]);
@@ -179,8 +228,33 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const voltageBufRef = useRef([]);
   const lastVoltageRef = useRef(null);
   const [currentValue, setCurrentValue] = useState(null);
-  const [rate, setRate]                 = useState(0);
+  /* Tendencia · mediana móvil de TREND_WINDOW_S. Es el valor que se lee, se
+   * compara contra el basal y alimenta la alarma. currentValue sigue siendo
+   * la muestra cruda y se muestra al lado como dato instantáneo. */
+  const [zTrend, setZTrend]             = useState(null);
+  /* La última muestra se apartó de la tendencia más de lo que explica el
+   * ruido → el paciente se movió. Solo informativo: no descarta nada. */
+  const [artifact, setArtifact]         = useState(false);
+  // null mientras la sesión sea demasiado corta para una pendiente honesta
+  const [rate, setRate]                 = useState(null);
   const [eventCount, setEventCount]     = useState(0);
+  /* Muestras que el equipo midió y no llegaron (contadas por secuencia). */
+  const [lostSamples, setLostSamples]   = useState(0);
+  /* Tiempo de sesión de la ÚLTIMA muestra recibida, en segundos. Es la
+   * duración real de los datos y de acá sale el cronómetro: si el equipo
+   * deja de mandar, no sigue corriendo solo. */
+  const [dataSeconds, setDataSeconds]   = useState(null);
+
+  /* ── Tiempo de sesión ────────────────────────────────────────────────
+   * Cuenta TIEMPO DE DATOS, no tiempo de pared. La sesión del 20-ago
+   * informaba 508:58 de duración con 84 minutos de datos: el cronómetro
+   * siguió corriendo siete horas después de la última muestra, y ese número
+   * es el que quedaba guardado como duración de la medición.
+   *
+   * Ahora, si el equipo deja de mandar, el cronómetro se queda quieto —que es
+   * la verdad— y el aviso de señal congelada explica por qué. El reloj de
+   * pared solo se usa antes del primer dato. */
+  const elapsedTime = dataSeconds != null ? fmtClock(dataSeconds) : wallClock;
 
   /* ── Alarm ─────────────────────────────────────────────────────────── */
   const [alarmEnabled, setAlarmEnabled] = useState(false);
@@ -297,17 +371,16 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     toast('Conexión guardada', 'success');
   };
 
-  /* ── Clock ─────────────────────────────────────────────────────────── */
+  /* Reloj de pared · corre solo mientras todavía no llegó ningún dato, para
+   * que el cronómetro no se quede clavado en 00:00 esperando la primera
+   * muestra. Apenas hay datos, manda el tiempo de datos. */
   useEffect(() => {
-    if (!measuring || !startTime) return;
+    if (!measuring || !startTime || dataSeconds != null) return;
     const interval = setInterval(() => {
-      const e = (Date.now() - startTime - pausedDuration) / 1000;
-      const m = Math.floor(e / 60);
-      const s = Math.floor(e % 60);
-      setElapsedTime(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+      setWallClock(fmtClock((Date.now() - startTime - pausedDuration) / 1000));
     }, 250);
     return () => clearInterval(interval);
-  }, [measuring, startTime, pausedDuration]);
+  }, [measuring, startTime, pausedDuration, dataSeconds]);
 
   /* ── Watchdog de señal congelada ──────────────────────────────────────
    * El firmware transmite ~4 Hz. Si estamos midiendo con enlace activo y
@@ -350,7 +423,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         eventCount: cur.eventCount,
         data: dataBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
         rate: rateBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
-        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change), e.kind || 'mark', e.amount ?? null]),
+        // El 7º campo (lost) lo agregó la versión con secuencia del firmware:
+        // los respaldos viejos no lo traen y se leen igual (queda undefined).
+        events: (events || []).map((e) => [e.id, r3(e.time), r3(e.value), e.change == null ? null : r3(e.change), e.kind || 'mark', e.amount ?? null, e.lost ?? null]),
+        lostSamples: lostTotalRef.current,
       };
       localStorage.setItem(SESSION_BACKUP_KEY, JSON.stringify(payload));
     } catch (err) {
@@ -375,8 +451,13 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     rateBufRef.current = ratePts;
     setData(dataPts.slice());
     setRateData(ratePts.slice());
-    setEvents((b.events || []).map(([id, time, value, change, kind, amount]) => ({ id, time, value, change, kind: kind || 'mark', amount: amount ?? null })));
+    setEvents((b.events || []).map(([id, time, value, change, kind, amount, lost]) => ({
+      id, time, value, change, kind: kind || 'mark', amount: amount ?? null,
+      ...(lost == null ? {} : { lost }),
+    })));
     setEventCount(b.eventCount || 0);
+    lostTotalRef.current = b.lostSamples || 0;
+    setLostSamples(b.lostSamples || 0);
     setInitialValue(b.initialValue ?? null);
     const last = dataPts[dataPts.length - 1];
     setCurrentValue(last ? last.y : null);
@@ -388,9 +469,17 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setPausedDur(0);
     setPauseStart(Date.now());
     setMeasuring(false);
-    const m = Math.floor(lastX / 60);
-    const s = Math.floor(lastX % 60);
-    setElapsedTime(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+    /* El reloj del equipo también tiene que retomar donde quedó: la primera
+     * muestra que llegue al reanudar fija el cero restándole este offset, y
+     * así los puntos nuevos siguen a los recuperados en vez de arrancar de
+     * cero y pisarlos. */
+    espT0Ref.current      = null;
+    espLastTRef.current   = null;
+    espPausedRef.current  = 0;
+    espPauseAtRef.current = null;
+    espResumeSecRef.current = lastX;
+    lastSeqRef.current    = null;   // la secuencia vieja ya no es comparable
+    setDataSeconds(lastX);   // el cronómetro sale de acá, ya sin reloj de pared
     setRecovery(null);
     toast(`Sesión recuperada · ${dataPts.length} puntos. Está en pausa: Reanudar para continuar.`, 'success');
   };
@@ -402,10 +491,18 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
   /* ── Data handler ──────────────────────────────────────────────────── */
   /**
-   * Warmup window · descartar el primer dato no es suficiente porque puede
-   * llegar uno bajo seguido de uno alto. Tomamos la MEDIANA de las primeras
-   * BASELINE_WINDOW lecturas para que outliers no contaminen la referencia.
-   * Esto es defensa secundaria: el firmware ya hace su propio warmup gate.
+   * Basal · MEDIANA DEL PRIMER MINUTO de medición.
+   *
+   * La versión anterior usaba la mediana de las primeras 5 muestras: a 3,65 Hz
+   * eso es 1,4 segundos. Si el paciente se movía justo ahí (en la sesión del
+   * 20-ago hubo un artefacto de 2,26 Ω a los 138 s), la referencia contra la
+   * que se compara TODA la sesión quedaba corrida, y con ella el delta, el
+   * porcentaje y el umbral de alarma relativo.
+   *
+   * Un minuto de mediana rechaza cualquier movimiento de hasta 30 s y cuesta
+   * 0,02 Ω de deriva fisiológica. Se informa un basal provisorio desde la
+   * primera muestra (para no dejar el readout vacío) y se refina hasta
+   * cerrarse a los BASELINE_WINDOW_S.
    */
   const baselineSamplesRef = useRef([]);
 
@@ -437,67 +534,126 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return v;
   };
 
-  const handleIncomingData = (raw) => {
+  const handleIncomingData = (raw, tMs = NaN, seq = NaN) => {
     const cur = stateRef.current;
     if (!cur.measuring) return;
 
     const val = sanitizeZ(raw);
     if (val === null) return;
 
-    let baseline = cur.initialValue;
-    if (baseline === null) {
-      baselineSamplesRef.current.push(val);
-      if (baselineSamplesRef.current.length >= BASELINE_WINDOW) {
-        // Mediana de las primeras N: robusto contra outliers
-        const sorted = [...baselineSamplesRef.current].sort((a, b) => a - b);
-        const median = sorted[Math.floor(sorted.length / 2)];
-        baseline = median;
-        setInitialValue(median);
-      } else {
-        // Aún no tenemos suficiente · ignoramos esta lectura para gráficos también
-        return;
-      }
-    }
     setCurrentValue(val);
 
-    // ── Microcorte · hueco entre muestras consecutivas ────────────────────
     const nowTs = Date.now();
     const prevTs = lastDataAtRef.current;
     lastDataAtRef.current = nowTs;
 
-    const elapsed = (nowTs - cur.startTime - cur.pausedDuration) / 1000;
+    /* ── Base de tiempo · reloj del EQUIPO si el firmware lo manda ──────
+     * Cada muestra queda en el instante en que se midió. Si el WiFi entrega
+     * cinco muestras juntas después de un tartamudeo, se dibujan separadas
+     * como se midieron, no apiladas en el momento de llegada. */
+    const prevEspT = espLastTRef.current;
+    let elapsed = null;
+    if (Number.isFinite(tMs)) {
+      if (espT0Ref.current == null) {
+        // Cero del reloj de sesión. En una sesión recuperada el cero se corre
+        // hacia atrás para que el tiempo continúe donde había quedado.
+        espT0Ref.current = tMs - (espResumeSecRef.current || 0) * 1000;
+        espResumeSecRef.current = 0;
+      }
+      // Primera muestra después de una pausa: descontar lo que duró.
+      if (espPauseAtRef.current != null) {
+        const pausedMs = tMs - espPauseAtRef.current;
+        if (pausedMs > 0) espPausedRef.current += pausedMs;
+        espPauseAtRef.current = null;
+      }
+      const rel = tMs - espT0Ref.current - espPausedRef.current;
+      // rel < 0 solo puede pasar si millis() del ESP dio la vuelta (49 días
+      // de uptime): en ese caso se cae al reloj de pared en vez de dibujar
+      // un tiempo negativo.
+      if (rel >= 0) elapsed = rel / 1000;
+      espLastTRef.current = tMs;
+    }
+    const deviceTimed = elapsed != null;
+    if (!deviceTimed) elapsed = (nowTs - cur.startTime - cur.pausedDuration) / 1000;
+    setDataSeconds(elapsed);
 
-    if (prevTs != null && nowTs - prevTs > GAP_THRESHOLD_MS) {
-      const gapSec = (nowTs - prevTs) / 1000;
-      const lost = Math.max(0, Math.round(gapSec * 4) - 1);   // ~4 Hz
-      setEventCount((n) => {
-        const next = n + 1;
-        setEvents((prevEv) => [{
-          id: next,
-          time: elapsed,
-          value: val,
-          change: gapSec,        // duración del hueco, en segundos
-          kind: 'gap',
-        }, ...prevEv]);
-        return next;
-      });
-      console.warn(`[microcorte] ${gapSec.toFixed(1)} s sin datos · ~${lost} muestras perdidas`);
+    /* ── Microcorte · muestras que el equipo midió y no llegaron ─────────
+     * Con secuencia se cuenta exacto. Sin ella (firmware viejo) se cae a la
+     * heurística anterior: hueco en la hora de llegada × frecuencia supuesta,
+     * que contaba como perdido todo lo que solo venía demorado. */
+    let gapSec = null;
+    let lost = 0;
+    if (Number.isFinite(seq)) {
+      if (firstSeqRef.current == null) firstSeqRef.current = seq;
+      const prevSeq = lastSeqRef.current;
+      if (prevSeq != null && seq > prevSeq + 1) {
+        lost = seq - prevSeq - 1;
+        gapSec = (deviceTimed && prevEspT != null)
+          ? (tMs - prevEspT) / 1000
+          : (nowTs - prevTs) / 1000;
+      }
+      lastSeqRef.current = seq;
+    } else if (prevTs != null && nowTs - prevTs > GAP_THRESHOLD_MS) {
+      gapSec = (nowTs - prevTs) / 1000;
+      lost = Math.max(0, Math.round(gapSec * 4) - 1);   // ~4 Hz, estimado
     }
 
-    // ── Buffers síncronos · la tasa se calcula acá, no dentro de un updater ──
+    if (lost > 0) {
+      lostTotalRef.current += lost;
+      setLostSamples(lostTotalRef.current);
+      // Solo se anota como evento si el agujero es visible en la curva; un
+      // par de muestras sueltas no merecen ensuciar la línea de tiempo.
+      if (gapSec != null && gapSec * 1000 > GAP_THRESHOLD_MS) {
+        setEventCount((n) => {
+          const next = n + 1;
+          setEvents((prevEv) => [{
+            id: next,
+            time: elapsed,
+            value: val,
+            change: gapSec,        // duración del hueco, en segundos
+            lost,                  // muestras perdidas · cuenta exacta
+            kind: 'gap',
+          }, ...prevEv]);
+          return next;
+        });
+        console.warn(`[microcorte] ${gapSec.toFixed(1)} s · ${lost} muestras perdidas`);
+      }
+    }
+
+    // ── Buffers síncronos · todo se calcula acá, no dentro de un updater ──
     const buf = dataBufRef.current;
     buf.push({ x: elapsed, y: val });
 
-    let computedRate = 0;
-    if (buf.length >= 2) {
-      const recent = buf.slice(-10);
-      const a = recent[0];
-      const b = recent[recent.length - 1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      computedRate = dx > 0 ? (dy / dx) * 60 : 0;
+    /* ── Tendencia · mediana móvil de 60 s ────────────────────────────────
+     * Es la señal fisiológica sin los artefactos de movimiento. Todo lo que
+     * se compara, se alarma y se reporta cuelga de acá. */
+    const trend = trendAt(buf, elapsed);
+    setZTrend(trend);
+
+    /* ── Basal · mediana del primer minuto, provisoria hasta cerrarse ──── */
+    let baseline = cur.initialValue;
+    if (!baselineLockedRef.current) {
+      baselineSamplesRef.current.push(val);
+      baseline = median(baselineSamplesRef.current);
+      setInitialValue(baseline);
+      if (elapsed - buf[0].x >= BASELINE_WINDOW_S) {
+        baselineLockedRef.current = true;
+        baselineSamplesRef.current = [];   // ya no hace falta retenerlas
+      }
     }
-    rateBufRef.current.push({ x: elapsed, y: computedRate });
+
+    /* ── Ruido de fondo y detección de movimiento ─────────────────────── */
+    if (trend != null) {
+      const resBuf = residualBufRef.current;
+      resBuf.push(val - trend);
+      if (resBuf.length > RESIDUAL_BUFFER_MAX) resBuf.shift();
+    }
+    const sigma = sigmaFromResiduals(residualBufRef.current);
+    setArtifact(isArtifact(val, trend, sigma));
+
+    /* ── Tasa robusta · dos medianas separadas por 5 min ──────────────── */
+    const computedRate = robustRate(buf, elapsed);
+    rateBufRef.current.push({ x: elapsed, y: computedRate ?? 0 });
     // Serie de tensión · misma base temporal que Z (solo si el firmware la reporta)
     if (lastVoltageRef.current != null) {
       voltageBufRef.current.push({ x: elapsed, y: lastVoltageRef.current });
@@ -512,7 +668,17 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     // NOTA · ya no insertamos en Supabase aquí. Todo queda en memoria
     // hasta que el clínico confirme el guardado desde el ExportModal.
 
-    // Edge-triggered alarm
+    /* ── Alarma · sobre la TENDENCIA y con persistencia ───────────────────
+     * Antes se evaluaba contra la muestra instantánea: en la sesión del
+     * 20-ago, con umbral en 23 Ω, el primer artefacto de movimiento (a los
+     * 138 s, Z instantánea 22,86 Ω) la habría disparado 21 minutos antes de
+     * que la tendencia se acercara siquiera al umbral.
+     *
+     * Dos cerrojos: la tendencia (inmune a excursiones de menos de 30 s) y
+     * la persistencia (el umbral tiene que sostenerse ALARM_PERSIST_S). El
+     * llenado vesical es de escala de minutos, así que exigir medio minuto
+     * de permanencia no retrasa nada clínicamente. */
+    const alarmValue = trend ?? val;
     if (cur.alarmEnabled) {
       let threshold = null;
       if (cur.alarmType === 'abs' && cur.alarmAbs) {
@@ -524,15 +690,22 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       }
       if (threshold !== null && Number.isFinite(threshold)) {
         const margin = Math.max(0.5, Math.abs(threshold) * 0.02);
-        if (val <= threshold) {
-          if (cur.alarmArmed && !cur.alarmFired) {
+        if (alarmValue <= threshold) {
+          if (alarmBelowSinceRef.current == null) alarmBelowSinceRef.current = elapsed;
+          const held = elapsed - alarmBelowSinceRef.current;
+          if (held >= ALARM_PERSIST_S && cur.alarmArmed && !cur.alarmFired) {
             setAlarmFired(true);
             setAlarmArmed(false);
           }
-        } else if (val >= threshold + margin) {
-          if (!cur.alarmArmed && !cur.alarmFired) setAlarmArmed(true);
+        } else {
+          // Volvió por encima del umbral: el reloj de persistencia se reinicia.
+          alarmBelowSinceRef.current = null;
+          if (alarmValue >= threshold + margin
+              && !cur.alarmArmed && !cur.alarmFired) setAlarmArmed(true);
         }
       }
+    } else {
+      alarmBelowSinceRef.current = null;
     }
   };
 
@@ -565,6 +738,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       // El equipo se detuvo por su cuenta (botón físico).
       setMeasuring(false);
       setPauseStart(Date.now());
+      espPauseAtRef.current = espLastTRef.current;
       toast('El dispositivo detuvo la medición', 'warn');
     }
   };
@@ -594,14 +768,19 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     if (s === '' || s === 'PONG') return;          // liveness · sin efecto
     if (s.startsWith('STATUS')) { applyDeviceStatus(s); return; }
     // Formato del firmware, por versión:
-    //   "<Z>"                  · viejo
-    //   "<Z> <Vpp>"            · + tensión reconstruida
-    //   "<Z> <Vpp> <Vadc>"     · + continua medida en A0
+    //   "<Z>"                              · viejo
+    //   "<Z> <Vpp>"                        · + tensión reconstruida
+    //   "<Z> <Vpp> <Vadc>"                 · + continua medida en A0
+    //   "<Z> <Vpp> <Vadc> <t_ms> <seq>"    · + reloj del equipo y secuencia
     //
     // Se muestra Vadc cuando viene, porque es el único de los tres que
     // corresponde a un nodo real: se puede contrastar con el tester en el pin.
     // La Vpp es una reconstrucción (×2 + caída del Schottky) y no es medible
     // en ningún punto del circuito.
+    //
+    // t_ms y seq son los que permiten dejar de timestampear por hora de
+    // llegada. Si el firmware es viejo y no los manda, todo sigue funcionando
+    // igual que antes (reloj del navegador + estimación del hueco).
     const parts = s.split(/\s+/);
     const v = Number(parts[0]);                     // estricto: "1.2.3" → NaN
     if (Number.isFinite(v)) {
@@ -613,7 +792,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         lastVoltageRef.current = volt;
         setVoltageIsRaw(Number.isFinite(vadc));
       }
-      handleIncomingData(v);
+      const tMs = parts.length > 3 ? Number(parts[3]) : NaN;
+      const seq = parts.length > 4 ? Number(parts[4]) : NaN;
+      handleIncomingData(v, tMs, seq);
     }
     // cualquier otro texto desconocido se ignora (forward-compat)
   };
@@ -752,8 +933,21 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         lastAcceptedZRef.current = null;
         consecRejectRef.current  = 0;
         baselineSamplesRef.current = [];
+        baselineLockedRef.current  = false;
+        residualBufRef.current     = [];
+        alarmBelowSinceRef.current = null;
         dataBufRef.current = [];
         rateBufRef.current = [];
+        espT0Ref.current      = null;
+        espLastTRef.current   = null;
+        espPausedRef.current  = 0;
+        espPauseAtRef.current = null;
+        espResumeSecRef.current = 0;
+        lastSeqRef.current    = null;
+        firstSeqRef.current   = null;
+        lostTotalRef.current  = 0;
+        setLostSamples(0);
+        setDataSeconds(null);
       }
       lastDataAtRef.current = Date.now();   // el watchdog cuenta desde el start
       if (pauseStart) { pDur += Date.now() - pauseStart; setPausedDur(pDur); setPauseStart(null); }
@@ -771,27 +965,34 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       sendCommand('STOP');
       setMeasuring(false);
       setPauseStart(Date.now());
+      // Marca de pausa TAMBIÉN en el reloj del equipo, para que el tiempo de
+      // sesión descuente la pausa en la misma base temporal que los datos.
+      espPauseAtRef.current = espLastTRef.current;
       writeBackup();   // snapshot fresco al pausar (el intervalo se corta acá)
     }
   };
 
   /* ── Basal manual ────────────────────────────────────────────────────
    * Permite fijar la referencia cuando el paciente YA está acomodado, en vez
-   * de depender de la calibración automática de las primeras muestras.
+   * de depender de la calibración automática del primer minuto.
+   *
+   * Usa la MISMA ventana que la tendencia (60 s) en vez de las últimas 8
+   * muestras (2,2 s) que usaba antes: si el clínico aprieta "Re-fijar" justo
+   * cuando el paciente se acomoda, no queda un artefacto como referencia de
+   * toda la sesión.
+   *
+   * Fijar el basal a mano CIERRA la calibración automática: si no, el basal
+   * progresivo del primer minuto pisaría el valor recién elegido.
    */
-  const BASELINE_MANUAL_WINDOW = 8;
 
-  /** Valor que aplicaría "Re-fijar": la MISMA mediana que usa handleSetBaselineNow.
-   *  Se expone para que el botón muestre exactamente lo que va a fijar (antes
-   *  mostraba la lectura instantánea y aplicaba otra cosa). */
+  /** Valor que aplicaría "Re-fijar" · exactamente el que se va a fijar.
+   *  Se calcula sobre el estado `data` y no sobre dataBufRef: leer un ref
+   *  durante el render no está garantizado que dispare la actualización
+   *  (y era lo que marcaba react-hooks/refs en esta función). */
   const baselineCandidate = useMemo(() => {
-    const buf = dataBufRef.current;
-    if (!buf || buf.length === 0) return null;
-    const last   = buf.slice(-BASELINE_MANUAL_WINDOW).map((p) => p.y);
-    const sorted = [...last].sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentValue]);
+    if (!data.length) return null;
+    return trendAt(data, data[data.length - 1].x);
+  }, [data]);
 
   const handleSetBaselineNow = () => {
     const buf = dataBufRef.current;
@@ -799,12 +1000,14 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       toast('Todavía no hay lecturas para fijar el basal', 'warn');
       return;
     }
-    // Mediana de las últimas muestras: evita que un pico puntual quede como referencia.
-    const last   = buf.slice(-BASELINE_MANUAL_WINDOW).map((p) => p.y);
-    const sorted = [...last].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    setInitialValue(median);
-    toast(`Basal fijado en ${median.toFixed(2)} Ω (mediana de ${last.length} lecturas)`, 'success');
+    const v = trendAt(buf, buf[buf.length - 1].x);
+    if (v == null) {
+      toast('Todavía no hay lecturas para fijar el basal', 'warn');
+      return;
+    }
+    baselineLockedRef.current = true;
+    setInitialValue(v);
+    toast(`Basal fijado en ${v.toFixed(2)} Ω (mediana de los últimos ${TREND_WINDOW_S} s)`, 'success');
   };
 
   const handleSetBaselineManual = (raw) => {
@@ -813,6 +1016,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       toast('Ingresá un valor de basal válido en Ω', 'warn');
       return false;
     }
+    baselineLockedRef.current = true;
     setInitialValue(v);
     toast(`Basal fijado en ${v.toFixed(2)} Ω`, 'success');
     return true;
@@ -915,7 +1119,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setStartTime(null);
     setPausedDur(0);
     setPauseStart(null);
-    setElapsedTime('00:00');
+    setWallClock('00:00');
     setData([]);
     setRateData([]);
     setEvents([]);
@@ -930,14 +1134,29 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     voltageBufRef.current = [];
     lastVoltageRef.current = null;
     baselineSamplesRef.current = [];
+    baselineLockedRef.current  = false;
+    residualBufRef.current     = [];
+    alarmBelowSinceRef.current = null;
     lastAcceptedZRef.current   = null;
     consecRejectRef.current    = 0;
     dataBufRef.current = [];
     rateBufRef.current = [];
     lastDataAtRef.current = null;
+    espT0Ref.current      = null;
+    espLastTRef.current   = null;
+    espPausedRef.current  = 0;
+    espPauseAtRef.current = null;
+    espResumeSecRef.current = 0;
+    lastSeqRef.current    = null;
+    firstSeqRef.current   = null;
+    lostTotalRef.current  = 0;
     try { localStorage.removeItem(SESSION_BACKUP_KEY); } catch { /* noop */ }
     setCurrentValue(null);
-    setRate(0);
+    setZTrend(null);
+    setArtifact(false);
+    setLostSamples(0);
+    setDataSeconds(null);
+    setRate(null);
     setEventCount(0);
     setAlarmFired(false);
     setAlarmArmed(true);
@@ -968,6 +1187,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   };
 
   const handleSaveCalibration = (calib) => {
+    baselineLockedRef.current = true;   // el basal calibrado manda sobre el automático
     setInitialValue(calib.zEmpty);
     setAlarmType('abs');
     setAlarmAbs(calib.zFull.toString());
@@ -993,6 +1213,13 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       throw new Error('no measurements');
     }
 
+    /* Z final ROBUSTA · mediana del último minuto, no la última muestra.
+     * La última muestra individual puede caer justo dentro de un artefacto de
+     * movimiento (en la sesión del 20-ago los hubo de hasta 4,33 Ω) y ese
+     * número es el que queda escrito en la base y en la tesis. */
+    const robust = sessionStats(dataBufRef.current);
+    const finalZ = robust.final ?? currentValue;
+
     // Los datos de la persona viven en su ficha (tabla patients); acá solo
     // van el vínculo, las observaciones y los campos variables de la sesión.
     const patientPayload = {
@@ -1007,7 +1234,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         label: 'patient-update',
         run: (client) => client.from('sessions').update({
           ...patientPayload,
-          final_impedance: currentValue,
+          final_impedance: finalZ,
           elapsed_time_str: elapsedTime,
           total_events: eventCount,
         }).eq('id', persistedSessionId).throwOnError(),
@@ -1024,7 +1251,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const payload = {
       userId,
       patientPayload,
-      stats: { initialZ: initialValue, finalZ: currentValue, elapsedStr: elapsedTime, eventCount },
+      stats: { initialZ: initialValue, finalZ, elapsedStr: elapsedTime, eventCount },
       measurements,
       events,
     };
@@ -1059,6 +1286,20 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     if (alarmType === 'diff')    return initialValue - (parseFloat(alarmDiff) || 0);
     return 0;
   })();
+
+  /* Valor sobre el que decide la alarma · la tendencia, no la muestra cruda.
+   * Los márgenes que se muestran en pantalla tienen que salir de ACÁ para que
+   * lo que lee el clínico sea lo mismo que evalúa la alarma. */
+  const alarmValueNow = zTrend ?? currentValue;
+
+  /* Porcentaje de las muestras que el equipo midió y sí llegaron. null hasta
+   * que haya algo que informar (o con firmware viejo, que no manda secuencia
+   * y por lo tanto no permite una cuenta exacta). */
+  const dataCoverage = useMemo(() => {
+    const medidas = data.length + lostSamples;
+    if (medidas === 0) return null;
+    return (data.length / medidas) * 100;
+  }, [data.length, lostSamples]);
 
   const hasAnyData = data.length > 0;
   // Reposo · todavía no empezó ninguna sesión. Manda la pantalla de
@@ -1349,6 +1590,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                   voltageIsRaw={voltageIsRaw}
                   initialValue={initialValue}
                   currentValue={currentValue}
+                  trendValue={zTrend}
+                  artifact={artifact}
                   rate={rate}
                   zHistory={data}
                   rateHistory={rateData}
@@ -1359,10 +1602,12 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
               <div className="monitor-side">
                 {/* Ya no depende del umbral de alarma: la escala es la
-                    hipótesis de los 1,5 dB sobre el basal. */}
+                    hipótesis de los 1,5 dB sobre el basal.
+                    Se alimenta de la TENDENCIA: con la muestra cruda, cada
+                    movimiento del paciente hacía saltar la vejiga en pantalla. */}
                 <BladderVisual
                   initialValue={initialValue}
-                  currentValue={currentValue}
+                  currentValue={zTrend ?? currentValue}
                 />
 
                 {/* Resumen de alarma · vivo, siempre a la vista */}
@@ -1387,7 +1632,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                       <div>
                         <span className="field-label">Margen</span>
                         <strong className="numeric">
-                          {currentValue != null ? `${(currentValue - thresholdPreview).toFixed(2)} Ω` : '—'}
+                          {alarmValueNow != null ? `${(alarmValueNow - thresholdPreview).toFixed(2)} Ω` : '—'}
                         </strong>
                       </div>
                     </div>
@@ -1496,7 +1741,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                           <strong className="numeric">{initialValue.toFixed(2)} Ω</strong>
                           <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
                           <strong className="numeric">
-                            {currentValue != null ? `${(currentValue - thresholdPreview).toFixed(2)} Ω` : '—'}
+                            {alarmValueNow != null ? `${(alarmValueNow - thresholdPreview).toFixed(2)} Ω` : '—'}
                           </strong>
                         </div>
                       )}
@@ -1504,7 +1749,21 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
                   </section>
                 </div>
               ) : (
-                <Timeline events={events} />
+                <>
+                  {/* Integridad del enlace · cuenta EXACTA, por número de
+                      secuencia del firmware. Antes se estimaba multiplicando
+                      la duración del hueco por una frecuencia supuesta, lo que
+                      contaba como perdido todo lo que solo llegaba demorado. */}
+                  {dataCoverage != null && (
+                    <p className="field-hint" style={{ margin: '0 0 12px' }}>
+                      Integridad del enlace ·{' '}
+                      <strong className="numeric">{dataCoverage.toFixed(1)}%</strong>
+                      {' '}de las muestras recibidas · {lostSamples} perdidas de{' '}
+                      {lostSamples + data.length} medidas por el equipo
+                    </p>
+                  )}
+                  <Timeline events={events} />
+                </>
               )}
             </section>
           </SpotlightArea>

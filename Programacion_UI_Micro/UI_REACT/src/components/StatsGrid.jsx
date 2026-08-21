@@ -16,6 +16,14 @@ const SPARK_WINDOW = 40;
 export default function StatsGrid({
   initialValue,
   currentValue,
+  /* Tendencia · mediana móvil de 60 s. Es lo que se muestra en grande: la
+   * muestra cruda tiene artefactos de movimiento de hasta 4 Ω sobre una señal
+   * de sesión de 1,8 Ω, así que como número principal es ilegible. El crudo
+   * no se esconde: va abajo, en chico. */
+  trendValue = null,
+  /* La última muestra se apartó de la tendencia más de lo que explica el
+   * ruido → el paciente se movió. */
+  artifact = false,
   rate,
   voltage = null,
   voltageIsRaw = false,
@@ -31,8 +39,10 @@ export default function StatsGrid({
     () => (Array.isArray(rateHistory) ? rateHistory.slice(-SPARK_WINDOW) : []),
     [rateHistory],
   );
-  const diff = (initialValue != null && currentValue != null)
-    ? currentValue - initialValue
+  // Valor principal · tendencia si ya hay, crudo mientras se llena la ventana
+  const shown = trendValue != null ? trendValue : currentValue;
+  const diff = (initialValue != null && shown != null)
+    ? shown - initialValue
     : null;
   const pct = (diff != null && initialValue) ? (diff / initialValue) * 100 : null;
 
@@ -45,11 +55,14 @@ export default function StatsGrid({
       role="group"
       aria-label={stale ? 'Lectura desactualizada · sin datos del dispositivo' : 'Lectura en vivo'}
     >
-      {/* HERO · current impedance */}
+      {/* HERO · impedancia · tendencia de 60 s */}
       <div className="readout-cell hero">
-        <span className="readout-label">Impedancia actual</span>
+        <span className="readout-label">
+          Impedancia actual
+          {trendValue != null && <span className="mute"> · tendencia 60 s</span>}
+        </span>
         <span className={`readout-value numeric ${diffStateClass}`}>
-          <NumberTicker value={currentValue} decimals={2} stiffness={170} damping={26} />
+          <NumberTicker value={shown} decimals={2} stiffness={170} damping={26} />
           <span className="readout-unit" style={{ marginLeft: 8, fontFamily: 'var(--font-mono)' }}>Ω</span>
         </span>
         {diff != null && (
@@ -64,6 +77,19 @@ export default function StatsGrid({
             </span>
           </span>
         )}
+        {/* Lectura cruda · el dato instantáneo sigue a la vista, en segundo
+            plano, junto con el aviso de movimiento. Así el clínico entiende
+            por qué el número grande no salta cuando el paciente se mueve. */}
+        {currentValue != null && trendValue != null && (
+          <span className="readout-delta mute" style={{ gap: 8 }}>
+            <span>crudo {currentValue.toFixed(2)} Ω</span>
+            {artifact && (
+              <span className="pill warn-state" title="La lectura se apartó de la tendencia más de lo que explica el ruido: el paciente se movió. No se descarta ningún dato.">
+                movimiento
+              </span>
+            )}
+          </span>
+        )}
         <div className="readout-spark">
           <Sparkline data={zSpark} width={260} height={38} state={diff < 0 ? 'neg' : diff > 0 ? 'pos' : null} />
         </div>
@@ -76,17 +102,23 @@ export default function StatsGrid({
           <NumberTicker value={initialValue} decimals={2} stiffness={220} damping={30} />
           <span className="readout-unit" style={{ marginLeft: 6 }}>Ω</span>
         </span>
-        <span className="readout-delta mute">Referencia inicial</span>
+        <span className="readout-delta mute">Mediana del primer minuto</span>
       </div>
 
-      {/* Rate · varía rápido, spring más suelto para suavizar el jitter */}
+      {/* Tasa · pendiente robusta sobre 5 min. Con 3 decimales: la señal real
+          de llenado es del orden de 0,02 Ω/min, con 2 decimales se veía
+          siempre 0,00 o -0,02 y no se distinguía nada. */}
       <div className="readout-cell">
         <span className="readout-label">Tasa</span>
         <span className={`readout-value numeric ${rateStateClass}`}>
-          <NumberTicker value={rate} decimals={2} stiffness={110} damping={22} />
+          {rate == null
+            ? <span className="mute">—</span>
+            : <NumberTicker value={rate} decimals={3} stiffness={110} damping={22} />}
           <span className="readout-unit" style={{ marginLeft: 6 }}>Ω/min</span>
         </span>
-        <span className="readout-delta mute">Δ por minuto</span>
+        <span className="readout-delta mute">
+          {rate == null ? 'Necesita ~3 min de sesión' : 'Pendiente sobre 5 min'}
+        </span>
         <div className="readout-spark">
           <Sparkline data={rateSpark} width={160} height={30} state={rate < 0 ? 'neg' : rate > 0 ? 'pos' : null} />
         </div>

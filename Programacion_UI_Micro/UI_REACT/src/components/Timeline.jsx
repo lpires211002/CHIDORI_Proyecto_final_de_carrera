@@ -94,8 +94,13 @@ export default function Timeline({ events }) {
                       : isVoid ? 'is-void'
                       : 'is-up'}`}
                     >
+                      {/* En los microcortes, `lost` es la cuenta EXACTA de
+                          muestras que el equipo midió y no llegaron (salto en
+                          el número de secuencia del firmware). Los eventos
+                          viejos no la traen y se muestran solo con la duración. */}
                       {isDown ? 'Desconexión'
-                        : isGap ? `Microcorte · ${Number(evt.change).toFixed(1)} s`
+                        : isGap ? `Microcorte · ${Number(evt.change).toFixed(1)} s${
+                            Number.isFinite(evt.lost) ? ` · ${evt.lost} muestras` : ''}`
                         : isWater ? `Ingesta${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`
                         : isVoid ? `Micción${Number.isFinite(ml) ? ` · ${ml} ml` : ''}`
                         : 'Reconexión'}
