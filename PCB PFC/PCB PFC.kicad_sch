@@ -3495,6 +3495,16 @@
 		)
 		(uuid e459aa4f-6d74-4765-8e5c-0a5bd4368c78)
 	)
+	(text "en la placa 2, el CHP2 es de 10nf"
+		(exclude_from_sim no)
+		(at 157.48 16.764 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "17a41ad0-79ee-4a36-b42a-553ccd1a392c")
+	)
 	(text "10/12/25"
 		(exclude_from_sim no)
 		(at 198.628 189.738 0)
