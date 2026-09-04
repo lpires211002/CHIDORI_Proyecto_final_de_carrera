@@ -36,6 +36,11 @@
 //      entregue los datos en ráfagas, y las muestras perdidas se cuentan
 //      por salto de secuencia en vez de estimarse por la duración del
 //      hueco. Formato: "<Z> <Vpp> <Vadc> <t_ms> <seq>".
+//  10. Z pasa a calcularse con una constante de calibracion MEDIDA en banco
+//      en vez del producto de ganancias de diseno. Las constantes viejas
+//      daban I = 288 uA y G = 200; los valores reales medidos el 2026-09-04
+//      son 450 uA y 631. La Z venia sobreestimada ~4,4x en valor absoluto y
+//      4,93x en los deltas. Ver el bloque CALIBRACION mas abajo.
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -85,15 +90,56 @@
 #define PIN_SCK      4
 #define PIN_FSYNC    7
 
-/* ================= CONSTANTES ELÉCTRICAS ================= */
-#define VPP                 0.6
-#define R1                  10000
-#define GANANCIA_GENERADOR  4.8
-
-#define GANANCIA_INA        5
-#define GANANCIA_HIGH_PASS  10
-#define GANANCIA_LOW_PASS   4
-#define VShotcky            0.2
+/* ================= CALIBRACIÓN DE LA CADENA DE MEDICIÓN =================
+ *
+ * Medida en banco el 2026-09-04. Todo pico a pico, montaje tetrapolar
+ * (inyeccion por Jack_FES1, sensado por Jack_V1), sobre sujeto humano:
+ *
+ *   corriente inyectada ........................  450 uA pp
+ *   salida del INA122 (U1 pin 6, ya x5) ........   12 mVpp
+ *   salida del ultimo opamp (U4 pin 14) ........ 1515 mVpp
+ *   Vadc en A0 .................................  480 mV
+ *
+ * De ahi:
+ *   ganancia post-INA ... 1515 / 12         = 126,25
+ *   ganancia receptor ... 5 x 126,25        = 631,2
+ *   K_CAL ............... 450 uA x 631,2    = 0,28406
+ *   deficit detector .... 1515/2 - 480 mV   = 0,277 V
+ *
+ * Los cuatro numeros son mutuamente consistentes (1515/2 - 480 = 277,5),
+ * asi que el modelo del detector queda validado en ese punto de trabajo.
+ * Z resultante de esa medicion: 1,515 / 0,28406 = 5,33 ohm, coherente con
+ * una medicion tetrapolar abdominal (Wenner sobre semiespacio homogeneo da
+ * 4,5-13 ohm para sigma 0,25-0,35 S/m y separaciones de 5-10 cm).
+ *
+ * POR QUE UNA CONSTANTE MEDIDA Y NO EL PRODUCTO DE GANANCIAS DE DISENO
+ * Las constantes anteriores eran VPP 0.6, GANANCIA_GENERADOR 4.8, R1 10k,
+ * GANANCIA_INA 5, GANANCIA_HIGH_PASS 10, GANANCIA_LOW_PASS 4, y daban
+ * I = 288 uA y G = 200. Ninguno de los dos era real:
+ *   - G = 10 x 4 x 5 solo contaba U5B, U4B y el INA. La cadena tiene
+ *     ademas U4A, U4C y U4D, que no aparecian en ninguna constante.
+ *   - el 4 de U4B era la relacion resistiva 2k/500, pero a 50 kHz la
+ *     reactancia de CHP2 (1,5 n -> 2,1 kohm) domina sobre R6 (500 ohm) y
+ *     esa etapa queda en ~0,92, no en 4.
+ *   - la corriente real medida es 450 uA, no los 288 uA calculados.
+ * El INA122 con Rg abierto si aporta exactamente x5 (G = 5 + 200k/Rg): ese
+ * era el unico termino correcto.
+ *
+ * OJO: el deficit del detector NO es constante con la amplitud. A senal
+ * chica el diodo conduce menos y el capacitor no llega al pico, asi que el
+ * deficit crece en proporcion. Los 0,277 V valen alrededor del punto de
+ * trabajo medido. Para cerrar la exactitud del instrumento hay que calibrar
+ * con resistencias patron (47, 100, 220, 470 ohm al 1 %) y reportar el
+ * residuo del ajuste.
+ *
+ * RANGO UTIL con esta calibracion: 1,95 ohm (Vadc = 0) a 15,5 ohm, donde
+ * recorta el TL084 con +-3,7 V. Una lectura pegada a 15 ohm es RECORTE, no
+ * tejido de alta impedancia; una pegada a 1,95 ohm es senal nula.
+ *
+ * Detalle completo: claude/chidori-cadena-de-ganancia.md
+ */
+#define V_DETECTOR          0.277f    // deficit del detector de envolvente [V]
+#define K_CAL               0.28406f  // I_pp [A] x ganancia del receptor
 
 #define VREF                3.3
 #define RESOLUCION          4095
@@ -184,9 +230,6 @@ float last_Vadc = 0.0f;
  * que reanudar una medicion pausada no lo hace saltar para atras. */
 uint32_t z_seq = 0;
 
-float CORRIENTE_INYECTADA;
-float GANANCIA_RECEPTOR;
-
 unsigned long t_debounce     = 0;
 unsigned long last_sample_us = 0;
 unsigned long last_tx_ms     = 0;
@@ -251,11 +294,10 @@ void setup() {
   pinMode(BUTTON, INPUT);            // pull-down externo 2.2k en PCB
   digitalWrite(BUZZER, LOW);
 
-  // Constantes derivadas
-  CORRIENTE_INYECTADA = VPP * GANANCIA_GENERADOR / R1;
-  GANANCIA_RECEPTOR   = GANANCIA_HIGH_PASS * GANANCIA_LOW_PASS * GANANCIA_INA;
-  Serial.print("I_inyectada (pp) = "); Serial.print(CORRIENTE_INYECTADA * 1000, 4); Serial.println(" mA");
-  Serial.print("Ganancia receptor = ");  Serial.println(GANANCIA_RECEPTOR);
+  // Calibracion en uso (ver el bloque CALIBRACION arriba)
+  Serial.print("K_CAL = ");             Serial.print(K_CAL, 5);
+  Serial.print(" A  ·  V_DETECTOR = "); Serial.print(V_DETECTOR, 3); Serial.println(" V");
+  Serial.println("Z = 2*(Vadc + V_DETECTOR) / K_CAL   [banco 2026-09-04]");
 
   Chidori.estado = INACTIVO;
   Chidori.Z      = 0.0f;
@@ -592,8 +634,8 @@ void adquirir_y_promediar() {
 
   float voltage = avg_mv / 1000.0f;
   last_Vadc     = voltage;                 // crudo de A0, sin reconstruir
-  float Vpp     = Amp2Vpp(voltage + VShotcky);
-  float Z       = Vpp / (CORRIENTE_INYECTADA * GANANCIA_RECEPTOR);
+  float Vpp     = Amp2Vpp(voltage + V_DETECTOR);
+  float Z       = Vpp / K_CAL;
   last_Vpp      = Vpp;                     // para el TX (dato de referencia)
 
   // MEDIANA primero (mata impulsos), MEDIA despues (baja ruido gaussiano)
