@@ -414,6 +414,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     if (dataBufRef.current.length === 0) return;
     try {
       const r3 = (n) => Math.round(n * 1000) / 1000;
+      // La tension va con 4 decimales: 3 serian 1 mV, y 1 mV son ~7 mohm.
+      const r4 = (n) => (n == null ? null : Math.round(n * 10000) / 10000);
       const payload = {
         v: 1,
         savedAt: Date.now(),
@@ -421,7 +423,8 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         pausedDuration: cur.pausedDuration,
         initialValue: cur.initialValue,
         eventCount: cur.eventCount,
-        data: dataBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
+        // 3er campo = Vadc. Los respaldos viejos traen pares y se leen igual.
+        data: dataBufRef.current.map((p) => [r3(p.x), r3(p.y), r4(p.v)]),
         rate: rateBufRef.current.map((p) => [r3(p.x), r3(p.y)]),
         // El 7º campo (lost) lo agregó la versión con secuencia del firmware:
         // los respaldos viejos no lo traen y se leen igual (queda undefined).
@@ -445,7 +448,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const restoreFromBackup = () => {
     const b = recovery;
     if (!b) return;
-    const dataPts = b.data.map(([x, y]) => ({ x, y }));
+    const dataPts = b.data.map(([x, y, v]) => ({ x, y, v: v ?? null }));
     const ratePts = (b.rate || []).map(([x, y]) => ({ x, y }));
     dataBufRef.current = dataPts;
     rateBufRef.current = ratePts;
@@ -622,7 +625,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
     // ── Buffers síncronos · todo se calcula acá, no dentro de un updater ──
     const buf = dataBufRef.current;
-    buf.push({ x: elapsed, y: val });
+    // `v` = continua cruda de A0 en volts. Se guarda JUNTO a la impedancia
+    // porque Z es un valor derivado de constantes de calibracion que ya
+    // cambiaron una vez (ver sql/calibracion.sql): con el crudo, cualquier
+    // recalibracion futura es una re-derivacion y no un retrofit.
+    buf.push({ x: elapsed, y: val, v: lastVoltageRef.current });
 
     /* ── Tendencia · mediana móvil de 60 s ────────────────────────────────
      * Es la señal fisiológica sin los artefactos de movimiento. Todo lo que
@@ -1246,6 +1253,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const measurements = data.map((p, i) => ({
       elapsed_time: p.x,
       impedance:    p.y,
+      voltage_v:    p.v ?? null,   // crudo de A0 · requiere PASO 4 de sql/calibracion.sql
       rate:         rateData[i]?.y ?? 0,
     }));
     const payload = {

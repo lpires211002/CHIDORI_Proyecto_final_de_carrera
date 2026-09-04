@@ -101,9 +101,21 @@ export async function commitSession(supabase, payload) {
   const sId = newSession.id;
 
   const CHUNK = 500;
+  // Fallback: si la base todavia no corrio el PASO 4 de sql/calibracion.sql,
+  // la columna voltage_v no existe y el insert falla. Preferimos guardar la
+  // sesion sin el crudo antes que perderla: las muestras son irrepetibles.
+  let dropVoltage = false;
   for (let i = 0; i < measurements.length; i += CHUNK) {
-    const slice = measurements.slice(i, i + CHUNK).map((m) => ({ ...m, session_id: sId }));
-    const { error: mErr } = await supabase.from('measurements').insert(slice);
+    const build = () => measurements.slice(i, i + CHUNK).map((m) => {
+      const row = { ...m, session_id: sId };
+      if (dropVoltage) delete row.voltage_v;
+      return row;
+    });
+    let { error: mErr } = await supabase.from('measurements').insert(build());
+    if (mErr && /voltage_v/i.test(mErr.message || '')) {
+      dropVoltage = true;
+      ({ error: mErr } = await supabase.from('measurements').insert(build()));
+    }
     if (mErr) throw mErr;
   }
 
