@@ -1,300 +1,389 @@
 -- ═══════════════════════════════════════════════════════════════════════
---  CHIDORI · Calibración de la cadena de medición + guardado del crudo
---  Correr en Supabase → SQL Editor.
+--  CHIDORI · Calibración de la impedancia · script único
 --
---  SE PUEDE CORRER PASO POR PASO: cada PASO es independiente e idempotente
---  (se puede repetir sin romper nada). Seleccionás el bloque, Run, mirás la
---  VERIFICACIÓN que va al final de cada paso, y recién ahí seguís.
+--  Correr en Supabase → SQL Editor → Run. Entero, de una sola vez.
+--  Reemplaza a sql/calibracion.sql y sql/reescalar.sql.
 --
---  ── QUÉ RESUELVE ──────────────────────────────────────────────────────
---  El firmware calculaba Z = Vpp / (I · G) con I = 288 µA y G = 200, ambos
---  derivados de constantes de diseño. Los valores reales, medidos en banco
---  el 2026-09-04, son I = 450 µA pp y G = 631,2. Las sesiones ya guardadas
---  están en la escala vieja y sobreestiman Z ~4,4× en valor absoluto.
+--  ── QUÉ HACE ──────────────────────────────────────────────────────────
+--  1. Crea la tabla `calibrations` con las dos calibraciones conocidas.
+--  2. Marca cada sesión con la calibración que usó el equipo al medirla.
+--  3. Copia las impedancias originales a columnas `_raw`.
+--  4. Reescala `impedance`, `rate`, `initial_impedance`, `final_impedance`
+--     e `impedance_change` a la calibración de referencia.
+--  5. Agrega `measurements.voltage_v` para guardar la continua cruda de A0.
+--  6. Rehace `v_dataset_sesiones` con la escala nueva y las banderas.
 --
---  ── CRITERIO ──────────────────────────────────────────────────────────
---  NO se toca ni un dato existente. `impedance` es el único registro de lo
---  que midió el equipo y las sesiones son irrepetibles. La corrección se
---  expone en VISTAS; las tablas quedan intactas. Si mañana aparece una
---  calibración mejor, se agrega una fila a `calibrations` y se rehace la
---  vista, sin haber destruido nada.
+--  Resultado: la app muestra TODAS las sesiones en la misma escala sin
+--  tocar el frontend, y el dato tal como salió del equipo queda en `_raw`.
+--
+--  ── ES SEGURO CORRERLO VARIAS VECES ───────────────────────────────────
+--  Todo es idempotente. La conversión NUNCA se aplica sobre un valor ya
+--  convertido: siempre se recalcula desde `_raw`. Correrlo diez veces da
+--  lo mismo que correrlo una.
+--
+--  ── QUÉ NO HACE ───────────────────────────────────────────────────────
+--  No borra ni una fila. No crea sesiones. No toca `patients`, `subjects`
+--  ni `field_definitions`. Los únicos valores que pisa son las columnas de
+--  impedancia, y solo después de haberlas copiado a `_raw`.
+--
+--  ── POR QUÉ ───────────────────────────────────────────────────────────
+--  El firmware calculaba Z = Vpp/(I·G) con I = 288 µA y G = 200, derivados
+--  de constantes de diseño. Los valores reales, medidos en banco el
+--  2026-09-04, son I = 450 µA pp y G = 631,2. Las sesiones guardadas hasta
+--  entonces sobreestiman Z ~4,4× en valor absoluto y 4,93× en los deltas.
+--  Detalle: claude/chidori-cadena-de-ganancia.md
 --
 --  ── LA CONVERSIÓN ─────────────────────────────────────────────────────
---    Z_vieja = 34,7222 · Vadc + 6,9444      (I=288 µA, G=200, Vd=0,200 V)
---    Z_nueva =  7,0408 · Vadc + 1,9503      (I=450 µA, G=631, Vd=0,277 V)
+--  De Z = 2·(Vadc + Vd)/K se despeja Vadc y se reinyecta en la otra:
+--     absolutos   : Z_b = Z_a · (K_a/K_b) + 2·(Vd_b − Vd_a)/K_b
+--     diferencias : Δ_b = Δ_a · (K_a/K_b)     ← sin offset, se cancela solo
+--  Las constantes salen de la tabla `calibrations`, no van escritas a mano:
+--  por eso este mismo archivo sirve para cualquier recalibración futura.
 --
---    absolutos : Z_nueva = 0,202774 · Z_vieja + 0,542139
---    deltas    : Δ_nueva = 0,202774 · Δ_vieja        ← SIN el offset
+--  ── ANTES DE CORRER ───────────────────────────────────────────────────
+--  1. Exportá `sessions`, `measurements` y `session_events`. El rollback
+--     está al final del archivo, pero tus sesiones son irrepetibles.
+--  2. Mirá el ÚNICO parámetro del script, acá abajo.
 --
---  El offset se cancela en cualquier diferencia. Aplicárselo a un delta le
---  mete un sesgo de +0,54 Ω. Vale para `impedance_change` y para `rate`.
---
---  La conversión es EXACTA (no aproximada) para sesiones grabadas con
---  firmware ≥ v1.6.0: la mediana y la media móvil que aplica el firmware
---  son operaciones afín-equivariantes, así que filtrar-y-convertir da lo
---  mismo que convertir-y-filtrar. La salvedad está en el PASO 3.
---
---  Detalle completo: claude/chidori-cadena-de-ganancia.md
+--  Si lo corrés por psql en vez del editor de Supabase, usá `psql -1 -f`
+--  para que todo el archivo vaya en una sola transacción.
 -- ═══════════════════════════════════════════════════════════════════════
 
 
--- ═══════════════════════════════════════════════════════════════════════
---  PASO 1 · CATÁLOGO DE CALIBRACIONES
---  La calibración pasa a ser un objeto trazable con fecha y método, no un
---  número perdido en el firmware.
--- ═══════════════════════════════════════════════════════════════════════
+-- ╔═════════════════════════════════════════════════════════════════════╗
+-- ║  ⚠  ÚNICO PARÁMETRO A REVISAR ANTES DE CORRER                       ║
+-- ║                                                                     ║
+-- ║  FLASHEO = momento en que cargaste al ESP el firmware con la         ║
+-- ║  calibración medida (el commit "Z con constante de calibracion       ║
+-- ║  medida"). Las sesiones ANTERIORES se marcan como calibración 1 y se ║
+-- ║  reescalan; las POSTERIORES como calibración 2 y NO se tocan.        ║
+-- ║                                                                     ║
+-- ║  El valor por defecto (2099) significa "todavía no flasheé": TODO lo ║
+-- ║  que hay en la base se considera escala vieja. Es lo correcto si     ║
+-- ║  corrés esto antes de flashear, que es lo recomendado.               ║
+-- ║                                                                     ║
+-- ║  SI YA FLASHEASTE Y MEDISTE, cambiá la fecha de la línea marcada     ║
+-- ║  «FLASHEO» más abajo (sección 3) por el momento real del flasheo.    ║
+-- ║  Si te equivocás, se arregla: ver "CORREGIR UNA CLASIFICACIÓN MAL"   ║
+-- ║  al final del archivo.                                              ║
+-- ╚═════════════════════════════════════════════════════════════════════╝
+
+
+-- ─── 0 · PRECONDICIONES ────────────────────────────────────────────────
+-- Si falta una tabla base, cortar acá con un mensaje claro en vez de
+-- aplicar la mitad del script.
+
+do $$
+declare faltan text := '';
+begin
+  if to_regclass('public.sessions')       is null then faltan := faltan || ' sessions';       end if;
+  if to_regclass('public.measurements')   is null then faltan := faltan || ' measurements';   end if;
+  if to_regclass('public.session_events') is null then faltan := faltan || ' session_events'; end if;
+  if faltan <> '' then
+    raise exception 'Faltan tablas base:%. Este script corre sobre una base de Chidori ya inicializada.', faltan;
+  end if;
+end $$;
+
+
+-- ─── 1 · CATÁLOGO DE CALIBRACIONES ─────────────────────────────────────
+-- La calibración pasa a ser un objeto trazable con fecha, método y
+-- limitaciones, en vez de un número perdido en el firmware.
 
 create table if not exists public.calibrations (
-  id          smallint primary key,
-  label       text    not null,
-  k_cal       numeric not null,          -- I_pp [A] × ganancia del receptor
-  v_detector  numeric not null,          -- déficit del detector de envolvente [V]
-  i_pp_a      numeric,                   -- corriente inyectada [A pp]
-  g_receiver  numeric,                   -- ganancia total del receptor
-  method      text,
-  valid_from  date,
-  notes       text,
-  created_at  timestamptz not null default now()
+  id           smallint primary key,
+  label        text    not null,
+  k_cal        numeric not null,        -- I_pp [A] × ganancia del receptor
+  v_detector   numeric not null,        -- déficit del detector de envolvente [V]
+  i_pp_a       numeric,                 -- corriente inyectada [A pp]
+  g_receiver   numeric,                 -- ganancia total del receptor
+  method       text,
+  valid_from   date,
+  notes        text,
+  is_reference boolean not null default false,
+  created_at   timestamptz not null default now()
 );
 
+alter table public.calibrations
+  add column if not exists is_reference boolean not null default false;
+
+-- Como mucho una referencia a la vez. Lo garantiza la base, no la memoria.
+create unique index if not exists calibrations_una_referencia
+  on public.calibrations ((is_reference)) where is_reference;
+
+insert into public.calibrations
+  (id, label, k_cal, v_detector, i_pp_a, g_receiver, method, valid_from, notes)
+values
+  (1, 'diseño (incorrecta)', 0.05760, 0.200, 0.000288, 200,
+      'producto de ganancias de diseño, sin medir', null,
+      'G = 10*4*5 solo contaba U5B, U4B y el INA122; faltaban U4A, U4C y U4D. El 4 de U4B era la relacion resistiva 2k/500, valida en continua: a 50 kHz la reactancia de CHP2 (1,5 n) domina sobre R6 (500 ohm) y esa etapa queda en ~0,92. La corriente era calculada, no medida. Sobreestima Z ~4,4x en absoluto y 4,93x en los deltas.'),
+  (2, 'banco 2026-09-04', 0.28406, 0.277, 0.000450, 631.2,
+      'medicion directa: 450 uA pp · 12 mVpp en U1 pin 6 · 1515 mVpp en U4 pin 14 · Vadc 480 mV',
+      date '2026-09-04',
+      'Los cuatro numeros cierran entre si (1515/2 - 480 = 277,5 mV). Z resultante 5,33 ohm, coherente con medicion tetrapolar abdominal. LIMITACION: el deficit del detector se midio a una sola amplitud y no es constante con la senal. Pendiente calibrar con resistencias patron de 1 % y reportar el residuo del ajuste.')
+on conflict (id) do update set
+  label  = excluded.label,  k_cal      = excluded.k_cal,   v_detector = excluded.v_detector,
+  i_pp_a = excluded.i_pp_a, g_receiver = excluded.g_receiver,
+  method = excluded.method, valid_from = excluded.valid_from, notes = excluded.notes;
+
+-- Marca la referencia SOLO si todavía no hay ninguna. Si forzara (id = 2)
+-- en cada corrida pisaría un cambio manual y este archivo no serviría nunca
+-- para una recalibración futura.
+--
+-- PARA CAMBIAR LA REFERENCIA más adelante (p. ej. tras calibrar con
+-- patrones), correr esto a mano y volver a correr el archivo entero:
+--     update public.calibrations set is_reference = false;
+--     update public.calibrations set is_reference = true where id = 3;
+update public.calibrations
+   set is_reference = (id = 2)
+ where not exists (select 1 from public.calibrations where is_reference);
+
+-- RLS · lectura para todos los autenticados; escritura solo superadmin, y
+-- solo si existe `profiles` (si no, se deja sin política de escritura).
 alter table public.calibrations enable row level security;
 
 drop policy if exists "calibrations_select" on public.calibrations;
 create policy "calibrations_select" on public.calibrations
   for select to authenticated using (true);
 
--- Solo superadmin toca el catálogo: define la escala del dataset entero.
-drop policy if exists "calibrations_write" on public.calibrations;
-create policy "calibrations_write" on public.calibrations
-  for all to authenticated
-  using (exists (select 1 from public.profiles p
-                  where p.id = auth.uid() and p.role = 'superadmin'))
-  with check (exists (select 1 from public.profiles p
-                       where p.id = auth.uid() and p.role = 'superadmin'));
-
-insert into public.calibrations
-  (id, label, k_cal, v_detector, i_pp_a, g_receiver, method, valid_from, notes)
-values
-  (1, 'diseño (incorrecta)', 0.05760, 0.200, 0.000288, 200,
-      'producto de ganancias de diseño, sin medir',
-      null,
-      'G = 10*4*5 solo contaba U5B, U4B y el INA122; faltaban U4A, U4C y U4D. El 4 de U4B era la relacion resistiva 2k/500, valida en continua: a 50 kHz la reactancia de CHP2 (1,5 n) domina sobre R6 (500 ohm) y esa etapa queda en ~0,92. La corriente era calculada, no medida. Sobreestima Z ~4,4x en absoluto y 4,93x en los deltas.'),
-  (2, 'banco 2026-09-04', 0.28406, 0.277, 0.000450, 631.2,
-      'medicion directa: 450 uA pp · 12 mVpp en U1 pin 6 · 1515 mVpp en U4 pin 14 · Vadc 480 mV',
-      date '2026-09-04',
-      'Los cuatro numeros cierran entre si (1515/2 - 480 = 277,5 mV). Z resultante 5,33 ohm, coherente con medicion tetrapolar abdominal. LIMITACION: el deficit del detector se midio a una sola amplitud y no es constante con la senal (a amplitud chica el diodo conduce menos y el capacitor no llega al pico). Pendiente calibrar con resistencias patron de 1 % y reportar el residuo del ajuste.')
-on conflict (id) do update set
-  label      = excluded.label,      k_cal      = excluded.k_cal,
-  v_detector = excluded.v_detector, i_pp_a     = excluded.i_pp_a,
-  g_receiver = excluded.g_receiver, method     = excluded.method,
-  valid_from = excluded.valid_from, notes      = excluded.notes;
-
--- VERIFICACIÓN · deben aparecer dos filas
---   select id, label, k_cal, v_detector, i_pp_a, g_receiver from public.calibrations order by id;
+do $$
+begin
+  execute 'drop policy if exists "calibrations_write" on public.calibrations';
+  if to_regclass('public.profiles') is not null then
+    execute $p$
+      create policy "calibrations_write" on public.calibrations
+        for all to authenticated
+        using (exists (select 1 from public.profiles p
+                        where p.id = auth.uid() and p.role = 'superadmin'))
+        with check (exists (select 1 from public.profiles p
+                             where p.id = auth.uid() and p.role = 'superadmin'))
+    $p$;
+  end if;
+end $$;
 
 
--- ═══════════════════════════════════════════════════════════════════════
---  PASO 2 · VINCULAR CADA SESIÓN A SU CALIBRACIÓN
---  Todo lo ya guardado se midió con la vieja. Lo nuevo entra con la medida.
--- ═══════════════════════════════════════════════════════════════════════
+-- ─── 2 · COLUMNAS ──────────────────────────────────────────────────────
+-- Ninguna pisa nada: todas nacen vacías.
 
 alter table public.sessions
-  add column if not exists calibration_id smallint references public.calibrations(id);
-
-update public.sessions set calibration_id = 1 where calibration_id is null;
-
-alter table public.sessions alter column calibration_id set default 2;
-
-comment on column public.sessions.calibration_id is
-  'Calibracion con la que se calculo la impedancia de esta sesion. El default 2 asume firmware con K_CAL medida: si se reflashea un firmware viejo hay que corregirlo a mano.';
-
--- VERIFICACIÓN · cuántas sesiones quedaron de cada lado
---   select calibration_id, count(*), min(created_at)::date as desde, max(created_at)::date as hasta
---     from public.sessions group by calibration_id order by calibration_id;
-
-
--- ═══════════════════════════════════════════════════════════════════════
---  PASO 3 · MARCAR LAS SESIONES CON ADC ASUMIDO LINEAL
---
---  Hasta la v1.6.0 del firmware (2026-08-03) el ADC se leia como
---  analogRead() * 3.3 / 4095, asumiendo linealidad. El ADC del ESP32-C3 NO
---  es lineal: su error depende del punto de trabajo, asi que NO se deshace
---  con una recta. Para esas sesiones la conversion del PASO 5 es
---  APROXIMADA, no exacta, y no deberian mezclarse con las nuevas en el
---  dataset sin dejarlo dicho.
--- ═══════════════════════════════════════════════════════════════════════
-
-alter table public.sessions
-  add column if not exists adc_lineal_asumido boolean not null default false;
-
-update public.sessions
-   set adc_lineal_asumido = true
- where created_at < timestamptz '2026-08-03 00:00:00-03:00';
-
-comment on column public.sessions.adc_lineal_asumido is
-  'true = firmware anterior a v1.6.0: el ADC se leia como lineal y no lo es. La conversion de escala para estas sesiones es aproximada.';
-
--- VERIFICACIÓN
---   select adc_lineal_asumido, count(*), min(created_at)::date, max(created_at)::date
---     from public.sessions group by adc_lineal_asumido;
-
-
--- ═══════════════════════════════════════════════════════════════════════
---  PASO 4 · GUARDAR EL CRUDO (impedancia Y voltaje)
---
---  Hasta ahora `measurements` guardaba solo `impedance`, que es un valor
---  DERIVADO de constantes que ya cambiaron una vez. El firmware manda la
---  continua de A0 desde la v1.6.1 y la app la descartaba. Guardandola, el
---  dataset pasa a contener el dato fisico medido, y cualquier recalibracion
---  futura es una re-derivacion en vez de un retrofit.
--- ═══════════════════════════════════════════════════════════════════════
+  add column if not exists calibration_id        smallint references public.calibrations(id),
+  add column if not exists calibration_shown     smallint references public.calibrations(id),
+  add column if not exists adc_lineal_asumido    boolean not null default false,
+  add column if not exists initial_impedance_raw numeric,
+  add column if not exists final_impedance_raw   numeric;
 
 alter table public.measurements
-  add column if not exists voltage_v numeric;
+  add column if not exists impedance_raw numeric,
+  add column if not exists rate_raw      numeric,
+  add column if not exists voltage_v     numeric;
 
+alter table public.session_events
+  add column if not exists impedance_raw        numeric,
+  add column if not exists impedance_change_raw numeric;
+
+comment on column public.sessions.calibration_id is
+  'Calibracion que uso el equipo al MEDIR esta sesion. Hecho historico: no cambia nunca.';
+comment on column public.sessions.calibration_shown is
+  'Escala en la que estan HOY las columnas de impedancia de esta sesion.';
+comment on column public.sessions.adc_lineal_asumido is
+  'true = firmware anterior a v1.6.0 (2026-08-03): el ADC se leia como lineal y el del ESP32-C3 no lo es. La conversion de escala para estas sesiones es APROXIMADA.';
+comment on column public.measurements.impedance_raw is
+  'Impedancia tal como la mando el equipo, en la escala de sessions.calibration_id. NUNCA se pisa: toda recalibracion se calcula desde aca.';
 comment on column public.measurements.voltage_v is
-  'Continua medida en A0 del ESP32, en volts, antes de convertir a impedancia. Es el dato fisico. Contrastable con tester. Vadc ~0 significa senal nula (electrodos sueltos o inyeccion apagada).';
-
-comment on column public.measurements.impedance is
-  'Impedancia en ohms EN LA ESCALA DE LA CALIBRACION DE SU SESION (sessions.calibration_id). Para comparar entre sesiones usar la vista v_measurements_cal.';
-
--- VERIFICACIÓN · la columna tiene que aparecer
---   select column_name, data_type from information_schema.columns
---    where table_schema='public' and table_name='measurements' order by ordinal_position;
+  'Continua medida en A0 del ESP32, en volts, antes de convertir a impedancia. Es el dato fisico, contrastable con tester. Vadc ~0 = senal nula.';
 
 
--- ═══════════════════════════════════════════════════════════════════════
---  PASO 5 · VISTAS CON LA ESCALA UNIFICADA
---  Todo lo que compare o exporte datos debe leer de acá, no de las tablas.
--- ═══════════════════════════════════════════════════════════════════════
+-- ─── 3 · CLASIFICAR LAS SESIONES ───────────────────────────────────────
+-- Con qué calibración midió el equipo cada sesión. Solo toca las que
+-- todavía no están clasificadas, así una re-corrida no reescribe nada.
 
-drop view if exists public.v_measurements_cal;
-create view public.v_measurements_cal as
-select
-  m.*,
-  -- valor absoluto: factor + offset
-  case when s.calibration_id = 1
-       then round((0.202774 * m.impedance + 0.542139)::numeric, 4)
-       else m.impedance::numeric end                     as impedance_ohm,
-  -- rate es ohm/min, o sea una DERIVADA: solo el factor, sin offset
-  case when s.calibration_id = 1
-       then round((0.202774 * m.rate)::numeric, 4)
-       else m.rate::numeric end                          as rate_ohm_min,
-  s.calibration_id,
-  s.adc_lineal_asumido
-from public.measurements m
-join public.sessions s on s.id = m.session_id;
+update public.sessions
+   set calibration_id = case
+         when created_at < timestamptz '2099-01-01 00:00:00-03:00'   -- ◀── FLASHEO
+              then 1     -- midió con las constantes de diseño
+              else 2     -- midió con la calibración medida
+       end
+ where calibration_id is null;
 
-drop view if exists public.v_session_events_cal;
-create view public.v_session_events_cal as
-select
-  e.*,
-  case when s.calibration_id = 1
-       then round((0.202774 * e.impedance + 0.542139)::numeric, 4)
-       else e.impedance::numeric end                     as impedance_ohm,
-  -- OJO · en los eventos kind='gap', `impedance_change` NO es una impedancia:
-  -- guarda la DURACION del hueco en segundos. Convertirla la corromperia.
-  case when e.kind = 'gap' then null
-       when s.calibration_id = 1
-       then round((0.202774 * e.impedance_change)::numeric, 4)
-       else e.impedance_change::numeric end              as impedance_change_ohm,
-  s.calibration_id,
-  s.adc_lineal_asumido
-from public.session_events e
-join public.sessions s on s.id = e.session_id;
+-- De acá en más, lo que entre nace con la calibración de referencia.
+alter table public.sessions alter column calibration_id set default 2;
 
-drop view if exists public.v_sessions_cal;
-create view public.v_sessions_cal as
-select
-  s.*,
-  case when s.calibration_id = 1
-       then round((0.202774 * s.initial_impedance + 0.542139)::numeric, 4)
-       else s.initial_impedance::numeric end             as initial_impedance_ohm,
-  case when s.calibration_id = 1
-       then round((0.202774 * s.final_impedance + 0.542139)::numeric, 4)
-       else s.final_impedance::numeric end               as final_impedance_ohm
-from public.sessions s;
-
--- VERIFICACIÓN · las viejas tienen que bajar ~4,9× y las nuevas quedar igual
---   select calibration_id, count(*),
---          round(avg(impedance)::numeric,2)     as z_guardada,
---          round(avg(impedance_ohm)::numeric,2) as z_calibrada
---     from public.v_measurements_cal group by calibration_id order by calibration_id;
+-- Hasta la v1.6.0 (2026-08-03) el firmware leía el ADC como
+-- analogRead()*3.3/4095, asumiendo linealidad. El ADC del ESP32-C3 no es
+-- lineal y su error depende del punto de trabajo, así que NO se deshace con
+-- una recta: para esas sesiones la conversión es aproximada.
+update public.sessions
+   set adc_lineal_asumido = true
+ where created_at < timestamptz '2026-08-03 00:00:00-03:00'
+   and adc_lineal_asumido is distinct from true;
 
 
--- ═══════════════════════════════════════════════════════════════════════
---  PASO 6 · DATASET EN ESCALA ÚNICA
---  Reemplaza v_dataset_sesiones para que exporte ohms comparables entre
---  sesiones, y arrastre las banderas de calidad.
--- ═══════════════════════════════════════════════════════════════════════
+-- ─── 4 · REESCALAR ─────────────────────────────────────────────────────
+-- Un solo bloque atómico: o se aplica entero o no se aplica nada, sea cual
+-- sea el cliente desde el que se corra.
 
+do $$
+declare
+  r_id  smallint;
+  r_k   numeric;
+  r_v   numeric;
+  n_ses int;
+  n_mea int;
+  n_evt int;
+begin
+  select id, k_cal, v_detector into r_id, r_k, r_v
+    from public.calibrations where is_reference;
+
+  if r_id is null then
+    raise exception 'No hay ninguna calibracion marcada como referencia (calibrations.is_reference).';
+  end if;
+
+  -- 4.a · copia del original · el guard `is null` la escribe UNA sola vez
+  --       en la vida de cada fila
+  update public.sessions       set calibration_shown     = calibration_id   where calibration_shown     is null;
+  update public.sessions       set initial_impedance_raw = initial_impedance where initial_impedance_raw is null;
+  update public.sessions       set final_impedance_raw   = final_impedance   where final_impedance_raw   is null;
+  update public.measurements   set impedance_raw         = impedance         where impedance_raw        is null;
+  update public.measurements   set rate_raw              = rate              where rate_raw             is null;
+  update public.session_events set impedance_raw         = impedance         where impedance_raw        is null;
+  update public.session_events set impedance_change_raw  = impedance_change  where impedance_change_raw is null;
+
+  -- 4.b · conversión · SIEMPRE desde `_raw`, nunca desde el valor actual,
+  --       y SIN condicionar por el estado anterior. Recalcular todo en cada
+  --       corrida da el mismo resultado (por eso es idempotente) y ademas
+  --       repara solo cualquier fila que haya quedado mal convertida.
+  update public.measurements m
+     set impedance = round((m.impedance_raw * (c.k_cal / r_k) + 2*(r_v - c.v_detector)/r_k)::numeric, 4),
+         rate      = round((m.rate_raw      * (c.k_cal / r_k))::numeric, 4)
+    from public.sessions s
+    join public.calibrations c on c.id = s.calibration_id
+   where m.session_id = s.id;
+  get diagnostics n_mea = row_count;
+
+  update public.session_events e
+     set impedance = round((e.impedance_raw * (c.k_cal / r_k) + 2*(r_v - c.v_detector)/r_k)::numeric, 4),
+         -- OJO · en kind='gap', impedance_change guarda la DURACION del
+         -- hueco en SEGUNDOS, no una impedancia. No se convierte.
+         impedance_change = case when e.kind = 'gap' then e.impedance_change_raw
+                                 else round((e.impedance_change_raw * (c.k_cal / r_k))::numeric, 4) end
+    from public.sessions s
+    join public.calibrations c on c.id = s.calibration_id
+   where e.session_id = s.id;
+  get diagnostics n_evt = row_count;
+
+  -- 4.c · `calibration_shown` queda informando en qué escala están las
+  --        columnas después de esta corrida.
+  update public.sessions s
+     set initial_impedance = round((s.initial_impedance_raw * (c.k_cal / r_k) + 2*(r_v - c.v_detector)/r_k)::numeric, 4),
+         final_impedance   = round((s.final_impedance_raw   * (c.k_cal / r_k) + 2*(r_v - c.v_detector)/r_k)::numeric, 4),
+         calibration_shown = r_id
+    from public.calibrations c
+   where c.id = s.calibration_id;
+  get diagnostics n_ses = row_count;
+
+  raise notice 'Recalculado desde _raw a la calibracion %: % sesiones, % muestras, % eventos.',
+               r_id, n_ses, n_mea, n_evt;
+end $$;
+
+
+-- ─── 5 · VISTA DEL DATASET ─────────────────────────────────────────────
+-- Se arma dinámicamente porque `subjects` puede o no existir (el SQL de
+-- pacientes dice que queda sin uso y se puede borrar).
+
+drop view if exists public.v_measurements_cal;      -- de versiones previas
+drop view if exists public.v_session_events_cal;    -- de versiones previas
+drop view if exists public.v_sessions_cal cascade;  -- de versiones previas
 drop view if exists public.v_dataset_sesiones;
-create view public.v_dataset_sesiones as
+
+do $$
+declare
+  hay_subjects boolean := to_regclass('public.subjects') is not null;
+  col_peso     text := case when exists (select 1 from information_schema.columns
+                                          where table_schema='public' and table_name='sessions'
+                                            and column_name='patient_weight')
+                            then 's.patient_weight' else 'null::numeric' end;
+  col_iliac    text := case when exists (select 1 from information_schema.columns
+                                          where table_schema='public' and table_name='sessions'
+                                            and column_name='patient_iliac_circ')
+                            then 's.patient_iliac_circ' else 'null::numeric' end;
+begin
+  execute format($v$
+    create view public.v_dataset_sesiones as
+    select
+      s.id            as session_id,
+      %s
+      -- impedancias YA en la escala de referencia
+      s.initial_impedance,
+      s.final_impedance,
+      round((s.final_impedance - s.initial_impedance)::numeric, 4) as delta_impedance,
+      -- el original, para trazabilidad
+      s.initial_impedance_raw,
+      s.final_impedance_raw,
+      s.calibration_id,
+      s.calibration_shown,
+      s.adc_lineal_asumido,
+      s.elapsed_time_str,
+      s.total_events,
+      s.notes,
+      s.created_at,
+      (select count(*) from public.session_events e where e.session_id = s.id and e.kind = 'gap')   as microcortes,
+      (select count(*) from public.session_events e where e.session_id = s.id and e.kind = 'water') as tomas_agua,
+      (select count(*) from public.session_events e where e.session_id = s.id and e.kind = 'void')  as micciones
+    from public.sessions s
+    %s
+  $v$,
+  case when hay_subjects then format($c$
+      s.session_code, sub.code as subject_code, sub.sex, sub.birth_year, sub.height_m,
+      coalesce(%s, sub.weight_kg)      as weight_kg,
+      coalesce(%s, sub.iliac_circ_cm)  as iliac_circ_cm,
+      s.temperature_c, s.humidity_pct, s.food_24h, s.water_total_ml,
+  $c$, col_peso, col_iliac)
+  else format($c$
+      %s as weight_kg,
+      %s as iliac_circ_cm,
+  $c$, col_peso, col_iliac) end,
+  case when hay_subjects then 'left join public.subjects sub on sub.id = s.subject_id' else '' end);
+end $$;
+
+
+-- ─── 6 · REPORTE FINAL ─────────────────────────────────────────────────
+-- Lo que devuelve el editor. Si algo salió mal, se ve acá.
+
 select
-  s.id                as session_id,
-  s.session_code,
-  sub.code            as subject_code,
-  sub.sex,
-  sub.birth_year,
-  sub.height_m,
-  coalesce(s.patient_weight, sub.weight_kg)         as weight_kg,
-  coalesce(s.patient_iliac_circ, sub.iliac_circ_cm) as iliac_circ_cm,
-  s.temperature_c,
-  s.humidity_pct,
-  s.food_24h,
-  s.water_total_ml,
-  -- impedancias YA CALIBRADAS · comparables entre sesiones
-  c.initial_impedance_ohm,
-  c.final_impedance_ohm,
-  round((c.final_impedance_ohm - c.initial_impedance_ohm), 4) as delta_impedance_ohm,
-  -- los valores tal como se guardaron, para trazabilidad
-  s.initial_impedance as initial_impedance_raw,
-  s.final_impedance   as final_impedance_raw,
-  s.calibration_id,
-  s.adc_lineal_asumido,
-  s.elapsed_time_str,
-  s.total_events,
-  s.notes,
-  s.created_at,
-  (select count(*) from public.session_events e
-    where e.session_id = s.id and e.kind = 'gap')   as microcortes,
-  (select count(*) from public.session_events e
-    where e.session_id = s.id and e.kind = 'water') as tomas_agua,
-  (select count(*) from public.session_events e
-    where e.session_id = s.id and e.kind = 'void')  as micciones
+  s.calibration_id                                        as midio_con,
+  s.calibration_shown                                     as escala_actual,
+  s.adc_lineal_asumido                                    as adc_aproximado,
+  count(distinct s.id)                                    as sesiones,
+  count(m.id)                                             as muestras,
+  round(avg(m.impedance_raw)::numeric, 2)                 as z_original,
+  round(avg(m.impedance)::numeric, 2)                     as z_calibrada,
+  count(m.voltage_v)                                      as con_vadc
 from public.sessions s
-left join public.subjects sub    on sub.id = s.subject_id
-left join public.v_sessions_cal c on c.id  = s.id;
-
--- VERIFICACIÓN
---   select session_id, calibration_id, adc_lineal_asumido,
---          initial_impedance_raw, initial_impedance_ohm, delta_impedance_ohm
---     from public.v_dataset_sesiones order by created_at desc limit 10;
+left join public.measurements m on m.session_id = s.id
+group by 1, 2, 3
+order by 1, 2;
 
 
 -- ═══════════════════════════════════════════════════════════════════════
---  PASO 7 · CONTROL DE INTEGRIDAD (correr después de la primera sesión
---  medida con el firmware nuevo)
+--  CORREGIR UNA CLASIFICACIÓN MAL
+--  Si una sesión quedó con la calibración equivocada, se arregla sin
+--  pérdida: `_raw` nunca se pisó. Corregí `calibration_id` y volvé a correr
+--  el archivo entero; recalcula todo desde el original.
 --
---  Con voltage_v guardado, la etiqueta de calibración se puede CONTRASTAR
---  contra el dato crudo en vez de creerle. No coinciden exacto: la Z que
---  manda el firmware pasa por mediana(5) + media móvil(12) y el Vadc que
---  manda es el instantáneo. Lo que importa es el ORDEN DE MAGNITUD del
---  desvío: chico = etiqueta correcta; ~4,9× = sesión mal etiquetada.
+--   update public.sessions
+--      set calibration_id = 2
+--    where created_at >= timestamptz '2026-09-10 00:00:00-03:00';
+--   -- y después correr este archivo de nuevo
 -- ═══════════════════════════════════════════════════════════════════════
 
---   select s.id, s.calibration_id, count(*) as n,
---          round(avg(m.impedance)::numeric, 3)                                  as z_guardada,
---          round(avg(2*(m.voltage_v + c.v_detector)/c.k_cal)::numeric, 3)       as z_esperada,
---          round((avg(m.impedance) / nullif(avg(2*(m.voltage_v + c.v_detector)/c.k_cal),0))::numeric, 3) as cociente
---     from public.measurements m
---     join public.sessions s     on s.id = m.session_id
---     join public.calibrations c on c.id = s.calibration_id
---    where m.voltage_v is not null
---    group by s.id, s.calibration_id
---    order by abs(1 - avg(m.impedance) / nullif(avg(2*(m.voltage_v + c.v_detector)/c.k_cal),0)) desc
---    limit 20;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  VOLVER ATRÁS · restaura los valores originales desde `_raw`.
+--  Las columnas agregadas pueden quedar, no molestan.
+-- ═══════════════════════════════════════════════════════════════════════
 --
---  Un cociente cerca de 1 confirma la etiqueta. Cerca de 4,93 significa que
---  esa sesión se midió con firmware viejo y quedó marcada como calibración 2:
---    update public.sessions set calibration_id = 1 where id = '<uuid>';
+--   update public.measurements   set impedance = impedance_raw, rate = rate_raw;
+--   update public.session_events set impedance = impedance_raw,
+--                                    impedance_change = impedance_change_raw;
+--   update public.sessions       set initial_impedance = initial_impedance_raw,
+--                                    final_impedance   = final_impedance_raw,
+--                                    calibration_shown = calibration_id;
