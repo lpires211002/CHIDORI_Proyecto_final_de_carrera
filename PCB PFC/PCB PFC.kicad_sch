@@ -3505,9 +3505,9 @@
 		)
 		(uuid "17a41ad0-79ee-4a36-b42a-553ccd1a392c")
 	)
-	(text "10/12/25"
+	(text "4/9/26"
 		(exclude_from_sim no)
-		(at 198.628 189.738 0)
+		(at 217.17 193.548 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3525,7 +3525,7 @@
 		)
 		(uuid "8fd0273e-e127-4016-aedd-5f7d472a92bb")
 	)
-	(text "Incorporo componentes SMD\n\n"
+	(text "Correccion de comp"
 		(exclude_from_sim no)
 		(at 224.79 170.18 0)
 		(effects
@@ -6951,7 +6951,7 @@
 				)
 			)
 		)
-		(property "Value" "10k"
+		(property "Value" "8.2k"
 			(at 185.42 37.592 90)
 			(effects
 				(font
@@ -7307,7 +7307,7 @@
 				)
 			)
 		)
-		(property "Value" "INA128"
+		(property "Value" "INA122"
 			(at 42.418 61.722 0)
 			(effects
 				(font
@@ -10240,7 +10240,7 @@
 				)
 			)
 		)
-		(property "Value" "4.7n"
+		(property "Value" "20n"
 			(at 118.11 35.56 90)
 			(effects
 				(font
@@ -10711,7 +10711,7 @@
 				)
 			)
 		)
-		(property "Value" "500"
+		(property "Value" "1k"
 			(at 201.93 105.41 90)
 			(effects
 				(font
@@ -11427,7 +11427,7 @@
 				)
 			)
 		)
-		(property "Value" "1.5n"
+		(property "Value" "10n"
 			(at 152.4 35.56 90)
 			(effects
 				(font
