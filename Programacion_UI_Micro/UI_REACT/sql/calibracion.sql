@@ -5,7 +5,7 @@
 --  Reemplaza a sql/calibracion.sql y sql/reescalar.sql.
 --
 --  ── QUÉ HACE ──────────────────────────────────────────────────────────
---  1. Crea la tabla `calibrations` con las dos calibraciones conocidas.
+--  1. Crea la tabla `calibrations` con las calibraciones conocidas.
 --  2. Marca cada sesión con la calibración que usó el equipo al medirla.
 --  3. Copia las impedancias originales a columnas `_raw`.
 --  4. Reescala `impedance`, `rate`, `initial_impedance`, `final_impedance`
@@ -29,8 +29,8 @@
 --  ── POR QUÉ ───────────────────────────────────────────────────────────
 --  El firmware calculaba Z = Vpp/(I·G) con I = 288 µA y G = 200, derivados
 --  de constantes de diseño. Los valores reales, medidos en banco el
---  2026-09-04, son I = 450 µA pp y G = 631,2. Las sesiones guardadas hasta
---  entonces sobreestiman Z ~4,4× en valor absoluto y 4,93× en los deltas.
+--  2026-09-04 y de nuevo el 2026-09-15, difieren mucho de esos. Las sesiones
+--  guardadas con las constantes de diseño sobreestiman Z ~4,4×.
 --  Detalle: claude/chidori-cadena-de-ganancia.md
 --
 --  ── LA CONVERSIÓN ─────────────────────────────────────────────────────
@@ -43,7 +43,7 @@
 --  ── ANTES DE CORRER ───────────────────────────────────────────────────
 --  1. Exportá `sessions`, `measurements` y `session_events`. El rollback
 --     está al final del archivo, pero tus sesiones son irrepetibles.
---  2. Mirá el ÚNICO parámetro del script, acá abajo.
+--  2. Mirá los dos parámetros del script, acá abajo.
 --
 --  Si lo corrés por psql en vez del editor de Supabase, usá `psql -1 -f`
 --  para que todo el archivo vaya en una sola transacción.
@@ -51,12 +51,19 @@
 
 
 -- ╔═════════════════════════════════════════════════════════════════════╗
--- ║  ⚠  ÚNICO PARÁMETRO A REVISAR ANTES DE CORRER                       ║
+-- ║  ⚠  DOS PARÁMETROS A REVISAR ANTES DE CORRER                        ║
+-- ║                                                                     ║
+-- ║  (1) CAL_REF = calibración de referencia, la escala en la que queda  ║
+-- ║  todo. Hoy es la 3 (banco del 15/09/2026). Cuando recalibres:        ║
+-- ║  agregá la fila nueva al catálogo del paso 1, cambiá el número en    ║
+-- ║  las dos líneas marcadas «CAL_REF» y volvé a correr el archivo.      ║
+-- ║  Recalcula todo desde `_raw`, no encadena conversiones.              ║
+-- ║                                                                     ║
+-- ║  (2) FLASHEO                                                        ║
 -- ║                                                                     ║
 -- ║  FLASHEO = momento en que cargaste al ESP el firmware con la         ║
--- ║  calibración medida (el commit "Z con constante de calibracion       ║
--- ║  medida"). Las sesiones ANTERIORES se marcan como calibración 1 y se ║
--- ║  reescalan; las POSTERIORES como calibración 2 y NO se tocan.        ║
+-- ║  calibración medida. Las sesiones ANTERIORES se marcan como          ║
+-- ║  calibración 1; las POSTERIORES, como la de referencia.              ║
 -- ║                                                                     ║
 -- ║  El valor por defecto (2099) significa "todavía no flasheé": TODO lo ║
 -- ║  que hay en la base se considera escala vieja. Es lo correcto si     ║
@@ -119,23 +126,21 @@ values
   (2, 'banco 2026-09-04', 0.28406, 0.277, 0.000450, 631.2,
       'medicion directa: 450 uA pp · 12 mVpp en U1 pin 6 · 1515 mVpp en U4 pin 14 · Vadc 480 mV',
       date '2026-09-04',
-      'Los cuatro numeros cierran entre si (1515/2 - 480 = 277,5 mV). Z resultante 5,33 ohm, coherente con medicion tetrapolar abdominal. LIMITACION: el deficit del detector se midio a una sola amplitud y no es constante con la senal. Pendiente calibrar con resistencias patron de 1 % y reportar el residuo del ajuste.')
+      'Los cuatro numeros cierran entre si (1515/2 - 480 = 277,5 mV). Z resultante 5,33 ohm, coherente con medicion tetrapolar abdominal. LIMITACION: el deficit del detector se midio a una sola amplitud y no es constante con la senal. Pendiente calibrar con resistencias patron de 1 % y reportar el residuo del ajuste.'),
+  (3, 'banco 2026-09-15 (rev 3)', 0.20689, 0.169, 0.000399, 517.9,
+      'banco tras ajustar la ganancia del Howland y los filtros: outAD 340 mVpp · U3A 3,22 Vpp · R_How 8,06k -> I=399,5 uA pp · INAout 14 mVpp · U4 pin14 1450 mVpp · Vadc 556 mV',
+      date '2026-09-15',
+      'Cambios de hardware: RfAD1 8k, rhpad1 500->1k, R_How 10k->8,06k, R8 8,2k, CHP1 y CHP2 cambiados. La ganancia total 517,9 sale de INAout (14 mVpp) por la ganancia de catalogo del INA122 (5 con Rg abierto), NO del diferencial anotado en la hoja: ese diferencial (5 mVpp) implicaria G_INA=2,8, imposible. Si se confirmara, K seria 0,1159. LIMITACION: el deficit del detector paso de 277 a 169 mV a la misma amplitud entre el 04/09 y el 15/09 (~1 ohm de offset). Sigue pendiente la calibracion con resistencias patron.')
 on conflict (id) do update set
   label  = excluded.label,  k_cal      = excluded.k_cal,   v_detector = excluded.v_detector,
   i_pp_a = excluded.i_pp_a, g_receiver = excluded.g_receiver,
   method = excluded.method, valid_from = excluded.valid_from, notes = excluded.notes;
 
--- Marca la referencia SOLO si todavía no hay ninguna. Si forzara (id = 2)
--- en cada corrida pisaría un cambio manual y este archivo no serviría nunca
--- para una recalibración futura.
---
--- PARA CAMBIAR LA REFERENCIA más adelante (p. ej. tras calibrar con
--- patrones), correr esto a mano y volver a correr el archivo entero:
---     update public.calibrations set is_reference = false;
---     update public.calibrations set is_reference = true where id = 3;
-update public.calibrations
-   set is_reference = (id = 2)
- where not exists (select 1 from public.calibrations where is_reference);
+-- La referencia la fija ESTE archivo: es el unico lugar donde se decide en
+-- que escala queda todo. Van dos sentencias y no una porque el indice unico
+-- parcial no tolera dos referencias ni siquiera a mitad de un UPDATE.
+update public.calibrations set is_reference = false where is_reference and id <> 3;  -- CAL_REF
+update public.calibrations set is_reference = true  where id = 3;                    -- CAL_REF
 
 -- RLS · lectura para todos los autenticados; escritura solo superadmin, y
 -- solo si existe `profiles` (si no, se deja sin política de escritura).
@@ -204,8 +209,26 @@ update public.sessions
        end
  where calibration_id is null;
 
--- De acá en más, lo que entre nace con la calibración de referencia.
-alter table public.sessions alter column calibration_id set default 2;
+-- De acá en más, lo que entre nace con la calibración de referencia. Va por
+-- trigger y no por DEFAULT: un default es un numero fijo que hay que acordarse
+-- de mover en cada recalibracion, y olvidarselo etiqueta mal las sesiones
+-- nuevas sin que nadie se entere. El trigger sigue solo a `is_reference`.
+alter table public.sessions alter column calibration_id drop default;
+
+create or replace function public.set_calibration_id()
+returns trigger language plpgsql security definer set search_path = public as $fn$
+begin
+  if new.calibration_id is null then
+    select id into new.calibration_id from public.calibrations where is_reference;
+  end if;
+  return new;
+end;
+$fn$;
+
+drop trigger if exists trg_calibration_id on public.sessions;
+create trigger trg_calibration_id
+  before insert on public.sessions
+  for each row execute function public.set_calibration_id();
 
 -- Hasta la v1.6.0 (2026-08-03) el firmware leía el ADC como
 -- analogRead()*3.3/4095, asumiendo linealidad. El ADC del ESP32-C3 no es

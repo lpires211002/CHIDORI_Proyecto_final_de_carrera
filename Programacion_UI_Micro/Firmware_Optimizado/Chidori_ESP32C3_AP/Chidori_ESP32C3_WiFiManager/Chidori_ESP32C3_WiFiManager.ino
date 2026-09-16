@@ -41,6 +41,9 @@
 //      daban I = 288 uA y G = 200; los valores reales medidos el 2026-09-04
 //      son 450 uA y 631. La Z venia sobreestimada ~4,4x en valor absoluto y
 //      4,93x en los deltas. Ver el bloque CALIBRACION mas abajo.
+//  11. Recalibracion (rev 3, 2026-09-15) tras ajustar la ganancia del
+//      Howland y los filtros: K_CAL 0,28406 -> 0,20689 y el deficit del
+//      detector 0,277 -> 0,169 V.
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -92,54 +95,64 @@
 
 /* ================= CALIBRACIÓN DE LA CADENA DE MEDICIÓN =================
  *
- * Medida en banco el 2026-09-04. Todo pico a pico, montaje tetrapolar
- * (inyeccion por Jack_FES1, sensado por Jack_V1), sobre sujeto humano:
+ * REVISION 3 · banco del 2026-09-15, tras ajustar la ganancia del Howland y
+ * los filtros. Todo pico a pico, montaje tetrapolar, placa #1.
  *
- *   corriente inyectada ........................  450 uA pp
- *   salida del INA122 (U1 pin 6, ya x5) ........   12 mVpp
- *   salida del ultimo opamp (U4 pin 14) ........ 1515 mVpp
- *   Vadc en A0 .................................  480 mV
+ * CAMBIOS DE HARDWARE respecto de la revision anterior:
+ *   RfAD1 .... -> 8 k       (ganancia del generador)
+ *   rhpad1 ... 500 -> 1 k   (carga en la salida del AD9833)
+ *   R_How .... 10 k -> 8,06 k  (las cuatro del Howland)
+ *   R8 ....... -> 8,2 k
+ *   CHP1 y CHP2 cambiados
  *
- * De ahi:
- *   ganancia post-INA ... 1515 / 12         = 126,25
- *   ganancia receptor ... 5 x 126,25        = 631,2
- *   K_CAL ............... 450 uA x 631,2    = 0,28406
- *   deficit detector .... 1515/2 - 480 mV   = 0,277 V
+ * MEDICIONES
+ *   salida AD9833 (outAD) ......................  340 mVpp
+ *   salida U3A .................................  3,22 Vpp
+ *   salida del INA122 (U1 pin 6 = U5A, ya x5) ..   14 mVpp
+ *   salida del ultimo opamp (U4 pin 14) ........ 1450 mVpp
+ *   Vadc en A0 .................................  556 mV
+ *   FesOut+ (nodo de carga) ....................  188 mVpp
  *
- * Los cuatro numeros son mutuamente consistentes (1515/2 - 480 = 277,5),
- * asi que el modelo del detector queda validado en ese punto de trabajo.
- * Z resultante de esa medicion: 1,515 / 0,28406 = 5,33 ohm, coherente con
- * una medicion tetrapolar abdominal (Wenner sobre semiespacio homogeneo da
- * 4,5-13 ohm para sigma 0,25-0,35 S/m y separaciones de 5-10 cm).
+ * DE AHI
+ *   I inyectada = V_U3A / R_How = 3,22 / 8060 ......... 399,5 uA pp
+ *   ganancia post-INA = 1450 / 14 ..................... 103,6
+ *   ganancia total = 5 x 103,6 ........................ 517,9
+ *   K_CAL = I x G ..................................... 0,20689
+ *   deficit del detector = 1450/2 - 556 ............... 0,169 V
+ *   Z de esa medicion ................................. 7,0 ohm
  *
- * POR QUE UNA CONSTANTE MEDIDA Y NO EL PRODUCTO DE GANANCIAS DE DISENO
- * Las constantes anteriores eran VPP 0.6, GANANCIA_GENERADOR 4.8, R1 10k,
- * GANANCIA_INA 5, GANANCIA_HIGH_PASS 10, GANANCIA_LOW_PASS 4, y daban
- * I = 288 uA y G = 200. Ninguno de los dos era real:
- *   - G = 10 x 4 x 5 solo contaba U5B, U4B y el INA. La cadena tiene
- *     ademas U4A, U4C y U4D, que no aparecian en ninguna constante.
- *   - el 4 de U4B era la relacion resistiva 2k/500, pero a 50 kHz la
- *     reactancia de CHP2 (1,5 n -> 2,1 kohm) domina sobre R6 (500 ohm) y
- *     esa etapa queda en ~0,92, no en 4.
- *   - la corriente real medida es 450 uA, no los 288 uA calculados.
- * El INA122 con Rg abierto si aporta exactamente x5 (G = 5 + 200k/Rg): ese
- * era el unico termino correcto.
+ * POR QUE 517,9 Y NO LOS 241,6 DE LA HOJA
+ * En la hoja la ganancia total se saco como 1450 mVpp sobre el diferencial
+ * medido en los electrodos (-2 mV - (-7 mV) = 5 mVpp, anotado como 6). Ese
+ * numero es incompatible con el resto de la propia hoja: con INAout = 14
+ * mVpp implicaria una ganancia del INA de 2,8, y el INA122 con Rg abierto da
+ * 5 por formula (G = 5 + 200k/Rg). El diferencial real tiene que ser ~2,8
+ * mVpp. Restar dos lecturas de pocos mV montadas sobre 100 mVpp de modo
+ * comun es la medicion menos confiable de la hoja, asi que la cadena se
+ * ancla en INAout, que es una lectura directa, y en la ganancia de catalogo
+ * del INA. Si se confirmara el diferencial de 5 mVpp, K_CAL pasaria a
+ * 0,1159 y esta medicion daria 12,5 ohm en vez de 7,0.
  *
- * OJO: el deficit del detector NO es constante con la amplitud. A senal
- * chica el diodo conduce menos y el capacitor no llega al pico, asi que el
- * deficit crece en proporcion. Los 0,277 V valen alrededor del punto de
- * trabajo medido. Para cerrar la exactitud del instrumento hay que calibrar
- * con resistencias patron (47, 100, 220, 470 ohm al 1 %) y reportar el
- * residuo del ajuste.
+ * OJO CON EL DETECTOR: el deficit paso de 277 mV (04/09, a 1515 mVpp) a
+ * 169 mV (15/09, a 1450 mVpp). Misma amplitud, 108 mV de diferencia. O algo
+ * cambio en el camino del detector (jumper J5), o una de las dos lecturas de
+ * Vadc esta mal. Esos 108 mV son ~1 ohm de offset en Z.
  *
- * RANGO UTIL con esta calibracion: 1,95 ohm (Vadc = 0) a 15,5 ohm, donde
- * recorta el TL084 con +-3,7 V. Una lectura pegada a 15 ohm es RECORTE, no
- * tejido de alta impedancia; una pegada a 1,95 ohm es senal nula.
+ * RANGO UTIL: 1,63 ohm (Vadc = 0) a ~21 ohm, donde recorta el TL084 con
+ * +-3,7 V. Una lectura pegada al techo es RECORTE, no tejido de alta
+ * impedancia; una pegada al piso es senal nula.
+ *
+ * PENDIENTE, Y YA ES LA TERCERA VEZ: calibrar con resistencias patron de
+ * 1 % (47, 100, 220, 470 ohm) y ajustar Z = a*Vadc + b por cuadrados
+ * minimos. Eso cierra de una sola vez la ganancia real, la corriente real y
+ * el deficit del detector, y da el residuo, que es la cifra de exactitud del
+ * instrumento. Mientras la calibracion se derive de la cadena de ganancias,
+ * cada retoque de hardware obliga a rehacer todo esto.
  *
  * Detalle completo: claude/chidori-cadena-de-ganancia.md
  */
-#define V_DETECTOR          0.277f    // deficit del detector de envolvente [V]
-#define K_CAL               0.28406f  // I_pp [A] x ganancia del receptor
+#define V_DETECTOR          0.169f    // deficit del detector de envolvente [V]
+#define K_CAL               0.20689f  // I_pp [A] x ganancia del receptor
 
 #define VREF                3.3
 #define RESOLUCION          4095
@@ -297,7 +310,7 @@ void setup() {
   // Calibracion en uso (ver el bloque CALIBRACION arriba)
   Serial.print("K_CAL = ");             Serial.print(K_CAL, 5);
   Serial.print(" A  ·  V_DETECTOR = "); Serial.print(V_DETECTOR, 3); Serial.println(" V");
-  Serial.println("Z = 2*(Vadc + V_DETECTOR) / K_CAL   [banco 2026-09-04]");
+  Serial.println("Z = 2*(Vadc + V_DETECTOR) / K_CAL   [banco 2026-09-15 rev3]");
 
   Chidori.estado = INACTIVO;
   Chidori.Z      = 0.0f;
