@@ -127,10 +127,10 @@ values
       'medicion directa: 450 uA pp · 12 mVpp en U1 pin 6 · 1515 mVpp en U4 pin 14 · Vadc 480 mV',
       date '2026-09-04',
       'Los cuatro numeros cierran entre si (1515/2 - 480 = 277,5 mV). Z resultante 5,33 ohm, coherente con medicion tetrapolar abdominal. LIMITACION: el deficit del detector se midio a una sola amplitud y no es constante con la senal. Pendiente calibrar con resistencias patron de 1 % y reportar el residuo del ajuste.'),
-  (3, 'banco 2026-09-15 (rev 3)', 0.20689, 0.169, 0.000399, 517.9,
-      'banco tras ajustar la ganancia del Howland y los filtros: outAD 340 mVpp · U3A 3,22 Vpp · R_How 8,06k -> I=399,5 uA pp · INAout 14 mVpp · U4 pin14 1450 mVpp · Vadc 556 mV',
+  (3, 'banco 2026-09-15 (rev 3)', 0.16675, 0.169, 0.000322, 517.9,
+      'banco tras ajustar la ganancia del Howland y los filtros: outAD 340 mVpp · U3A 3,22 Vpp · R_How 10k (las cuatro) -> I=322,0 uA pp · INAout 14 mVpp · U4 pin14 1450 mVpp · Vadc 556 mV',
       date '2026-09-15',
-      'Cambios de hardware: RfAD1 8k, rhpad1 500->1k, R_How 10k->8,06k, R8 8,2k, CHP1 y CHP2 cambiados. La ganancia total 517,9 sale de INAout (14 mVpp) por la ganancia de catalogo del INA122 (5 con Rg abierto), NO del diferencial anotado en la hoja: ese diferencial (5 mVpp) implicaria G_INA=2,8, imposible. Si se confirmara, K seria 0,1159. LIMITACION: el deficit del detector paso de 277 a 169 mV a la misma amplitud entre el 04/09 y el 15/09 (~1 ohm de offset). Sigue pendiente la calibracion con resistencias patron.')
+      'Cambios de hardware: RfAD1 ~9,5k, rhpad1 500->1k, R8 8,2k, R9 2,2k, CHP1 y CHP2 cambiados. Las cuatro del Howland siguen en 10k: el 8,06k de la hoja era una lectura EN CIRCUITO (10k en paralelo con RfAD1+RiAD1+rhpad1+3x10k = 41,5k), no el valor del componente. La ganancia total 517,9 sale de INAout (14 mVpp) por la ganancia de catalogo del INA122 (5 con Rg abierto), NO del diferencial anotado en la hoja: ese diferencial (5 mVpp) implicaria G_INA=2,8, imposible. Si se confirmara, K seria 0,1159. LIMITACION: el deficit del detector paso de 277 a 169 mV a la misma amplitud entre el 04/09 y el 15/09 (~1 ohm de offset). Sigue pendiente la calibracion con resistencias patron.')
 on conflict (id) do update set
   label  = excluded.label,  k_cal      = excluded.k_cal,   v_detector = excluded.v_detector,
   i_pp_a = excluded.i_pp_a, g_receiver = excluded.g_receiver,

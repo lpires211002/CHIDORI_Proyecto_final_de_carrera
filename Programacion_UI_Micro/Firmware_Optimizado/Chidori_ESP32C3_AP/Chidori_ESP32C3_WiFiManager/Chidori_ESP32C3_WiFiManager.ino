@@ -101,7 +101,7 @@
  * CAMBIOS DE HARDWARE respecto de la revision anterior:
  *   RfAD1 .... -> 8 k       (ganancia del generador)
  *   rhpad1 ... 500 -> 1 k   (carga en la salida del AD9833)
- *   R_How .... 10 k -> 8,06 k  (las cuatro del Howland)
+ *   R_How .... siguen siendo 10 k las cuatro (ver nota mas abajo)
  *   R8 ....... -> 8,2 k
  *   CHP1 y CHP2 cambiados
  *
@@ -116,12 +116,35 @@
  *   FesOut+ (nodo de carga) ....................  188 mVpp
  *
  * DE AHI
- *   I inyectada = V_U3A / R_How = 3,22 / 8060 ......... 399,5 uA pp
+ *   I inyectada = V_U3A / R_How = 3,22 / 10000 ........ 322,0 uA pp
  *   ganancia post-INA = 1450 / 14 ..................... 103,6
  *   ganancia total = 5 x 103,6 ........................ 517,9
- *   K_CAL = I x G ..................................... 0,20689
+ *   K_CAL = I x G ..................................... 0,16675
  *   deficit del detector = 1450/2 - 556 ............... 0,169 V
- *   Z de esa medicion ................................. 7,0 ohm
+ *   Z de esa medicion ................................. 8,7 ohm
+ *
+ * LAS CUATRO DEL HOWLAND SON 10 k, NO 8,06 k
+ * El 8,06 k de la hoja es una lectura EN CIRCUITO: el ohmetro mide la
+ * resistencia en paralelo con todo otro camino que exista entre esas dos
+ * puntas, asi que siempre lee de menos. Las resistencias no cambian de valor
+ * al conectarlas; cambia lo que ve el instrumento.
+ *
+ * El camino paralelo, midiendo R1how1 entre la salida de U3A y la entrada -
+ * de U3B, es:
+ *     U3A out --RfAD1--> U3A(-) --RiAD1--> outAD --rhpad1--> GND
+ *     GND --R3how1--> FesOut+ --R4how1--> U3B out --R2how1--> U3B(-)
+ * o sea RfAD1 + RiAD1 + rhpad1 + 3x10k. Con RfAD1 ~ 9,5k, RiAD1 = 1k y
+ * rhpad1 = 1k eso da 41,5k, y 10k || 41,5k = 8,06k: exactamente lo medido.
+ *
+ * Triple confirmacion, porque ese mismo despeje pide RfAD1 = 9,55k y la
+ * ganancia medida de U3A es 3220/340 = 9,47. Cierran entre si.
+ *
+ * La transconductancia del Howland usa el valor FISICO de las resistencias
+ * (I = Vin/R con las cuatro iguales), no la lectura en circuito. Por eso
+ * I = 3,22/10000 = 322 uA y no los 399,5 que salian del 8,06k.
+ *
+ * Para medir una resistencia en circuito hay que levantar una pata, o medirla
+ * fuera de la placa.
  *
  * POR QUE 517,9 Y NO LOS 241,6 DE LA HOJA
  * En la hoja la ganancia total se saco como 1450 mVpp sobre el diferencial
@@ -142,7 +165,7 @@
  * cuando uno es probablemente un error no reduce el error, garantiza estar
  * equivocado por la mitad de la diferencia. Ademas 169 mV es lo esperable de
  * un BAT54S a esta corriente, y es la medicion del hardware actual. Vale
- * 0,52 ohm sobre los 7 ohm de esta medicion; lo resuelve la calibracion con
+ * 0,64 ohm sobre los 8,7 ohm de esta medicion; lo resuelve la calibracion con
  * patrones, que mide el deficit directo.
  *
  * CADENA COHERENTE: con U4C = 330 mVpp (la hoja decia 830, era 330) cada
@@ -151,7 +174,7 @@
  * pide R9 ~ 2,3k: el "22K" de la hoja es 2,2k. Nada de esto mueve K_CAL, que
  * se toma punta a punta (1450/14), pero ahora la cadena se explica entera.
  *
- * RANGO UTIL: 1,63 ohm (Vadc = 0) a ~21 ohm, donde recorta el TL084 con
+ * RANGO UTIL: 2,03 ohm (Vadc = 0) a ~26 ohm, donde recorta el TL084 con
  * +-3,7 V. Una lectura pegada al techo es RECORTE, no tejido de alta
  * impedancia; una pegada al piso es senal nula.
  *
@@ -165,7 +188,7 @@
  * Detalle completo: claude/chidori-cadena-de-ganancia.md
  */
 #define V_DETECTOR          0.169f    // deficit del detector de envolvente [V]
-#define K_CAL               0.20689f  // I_pp [A] x ganancia del receptor
+#define K_CAL               0.16675f  // I_pp [A] x ganancia del receptor
 
 #define VREF                3.3
 #define RESOLUCION          4095
