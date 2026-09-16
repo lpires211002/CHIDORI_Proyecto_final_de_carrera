@@ -98,12 +98,23 @@
  * REVISION 3 · banco del 2026-09-15, tras ajustar la ganancia del Howland y
  * los filtros. Todo pico a pico, montaje tetrapolar, placa #1.
  *
- * CAMBIOS DE HARDWARE respecto de la revision anterior:
- *   RfAD1 .... -> 8 k       (ganancia del generador)
- *   rhpad1 ... 500 -> 1 k   (carga en la salida del AD9833)
- *   R_How .... siguen siendo 10 k las cuatro (ver nota mas abajo)
- *   R8 ....... -> 8,2 k
- *   CHP1 y CHP2 cambiados
+ * ESTADO DEL HARDWARE (confirmado por Luca el 16/09):
+ *   R1 1k · R2 10k · R3 1k · R4 337 · R5 500 · R6 500 · R7+R11 2k
+ *   R8 8,2k · R9 2,2k · R10 10k
+ *   CHP1 20 n · CHP2 10 n · CLP1 4,7 n · CLP2 ~470 p (impreso 270 p)
+ *   RfAD1 ~9,5k · RiAD1 1k · rhpad1 1k · R_How 10k las cuatro
+ *
+ * Con esos valores el modelo nodal reproduce la cadena medida dentro del
+ * 13 % por etapa y del 4,5 % punta a punta. CLP1 se despejo de la ganancia
+ * medida de U4A (da 4,60 n, o sea los 4,7 n del esquematico) y CLP2 de la
+ * atenuacion de U4C (da 458 p, no los 270 p impresos: o se cambio, o la
+ * lectura de 330 mVpp esta baja).
+ *
+ * LA BANDA QUEDO BIEN CENTRADA. Con los filtros nuevos el pico esta en
+ * 40 kHz y el -3 dB va de 22 a 74 kHz, asi que los 50 kHz caen en zona
+ * plana: la ganancia se mueve 8 % ante +-10 % de frecuencia. En la placa
+ * anterior el pico estaba en 85 kHz y 50 kHz caia sobre el flanco de
+ * subida. Es una mejora real de robustez ante tolerancias y deriva termica.
  *
  * MEDICIONES
  *   salida AD9833 (outAD) ......................  340 mVpp
@@ -177,6 +188,14 @@
  * RANGO UTIL: 2,03 ohm (Vadc = 0) a ~26 ohm, donde recorta el TL084 con
  * +-3,7 V. Una lectura pegada al techo es RECORTE, no tejido de alta
  * impedancia; una pegada al piso es senal nula.
+ *
+ * INCERTIDUMBRE DE ESTA CALIBRACION: ~13 %.
+ * La etapa U5B son dos resistencias sin capacitores (R1 1k, R2 10k): su
+ * ganancia es 10 por construccion. Medida da 158/14 = 11,29, o sea +12,9 %.
+ * Ese es el error real de leer 14 mVpp con el osciloscopio, y se propaga
+ * ENTERO a K_CAL porque la cadena se ancla en INAout. En ohms: la medicion
+ * de 8,7 ohm es 8,7 +- 1,1. Con resistencias patron al 1 % ese error baja a
+ * ~1 % y ademas queda medido en vez de estimado.
  *
  * PENDIENTE, Y YA ES LA TERCERA VEZ: calibrar con resistencias patron de
  * 1 % (47, 100, 220, 470 ohm) y ajustar Z = a*Vadc + b por cuadrados
