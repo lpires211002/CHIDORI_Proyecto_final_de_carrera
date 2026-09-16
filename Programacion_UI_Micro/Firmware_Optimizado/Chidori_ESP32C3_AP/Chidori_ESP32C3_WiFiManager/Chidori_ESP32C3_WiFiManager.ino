@@ -109,6 +109,8 @@
  *   salida AD9833 (outAD) ......................  340 mVpp
  *   salida U3A .................................  3,22 Vpp
  *   salida del INA122 (U1 pin 6 = U5A, ya x5) ..   14 mVpp
+ *   U4B (U4 pin 7) .............................  510 mVpp
+ *   U4C (U4 pin 8) .............................  330 mVpp
  *   salida del ultimo opamp (U4 pin 14) ........ 1450 mVpp
  *   Vadc en A0 .................................  556 mV
  *   FesOut+ (nodo de carga) ....................  188 mVpp
@@ -134,9 +136,20 @@
  * 0,1159 y esta medicion daria 12,5 ohm en vez de 7,0.
  *
  * OJO CON EL DETECTOR: el deficit paso de 277 mV (04/09, a 1515 mVpp) a
- * 169 mV (15/09, a 1450 mVpp). Misma amplitud, 108 mV de diferencia. O algo
- * cambio en el camino del detector (jumper J5), o una de las dos lecturas de
- * Vadc esta mal. Esos 108 mV son ~1 ohm de offset en Z.
+ * 169 mV (15/09, a 1450 mVpp), a practicamente la misma amplitud. Confirmado
+ * que J5 NO se movio, asi que queda sin explicar: una de las dos lecturas de
+ * Vadc esta mal. Se toma la del 15/09 y NO el promedio: promediar dos numeros
+ * cuando uno es probablemente un error no reduce el error, garantiza estar
+ * equivocado por la mitad de la diferencia. Ademas 169 mV es lo esperable de
+ * un BAT54S a esta corriente, y es la medicion del hardware actual. Vale
+ * 0,52 ohm sobre los 7 ohm de esta medicion; lo resuelve la calibracion con
+ * patrones, que mide el deficit directo.
+ *
+ * CADENA COHERENTE: con U4C = 330 mVpp (la hoja decia 830, era 330) cada
+ * etapa da algo fisicamente posible. U4C atenua a 0,647, como corresponde a
+ * un pasabajos RC seguido de un buffer. Y U4D gana 4,39, que con R10 = 10k
+ * pide R9 ~ 2,3k: el "22K" de la hoja es 2,2k. Nada de esto mueve K_CAL, que
+ * se toma punta a punta (1450/14), pero ahora la cadena se explica entera.
  *
  * RANGO UTIL: 1,63 ohm (Vadc = 0) a ~21 ohm, donde recorta el TL084 con
  * +-3,7 V. Una lectura pegada al techo es RECORTE, no tejido de alta
