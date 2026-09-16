@@ -72,7 +72,7 @@ export async function countPendingSessions() {
  * el guardado en vivo y por el re-sync de la cola.
  */
 export async function commitSession(supabase, payload) {
-  const { userId, patientPayload, stats, measurements, events } = payload;
+  const { userId, patientPayload, stats, measurements, events, calibration } = payload;
 
   const sessionRow = {
     user_id:           userId,
@@ -81,6 +81,10 @@ export async function commitSession(supabase, payload) {
     final_impedance:   stats.finalZ,
     elapsed_time_str:  stats.elapsedStr,
     total_events:      stats.eventCount,
+    // Constantes que reporto el equipo. El trigger de la base las usa para
+    // etiquetar la sesion con la calibracion que de verdad la midio.
+    k_cal_firmware:      calibration?.kcal ?? null,
+    v_detector_firmware: calibration?.vdet ?? null,
   };
 
   let { data: newSession, error: sErr } = await supabase
@@ -89,7 +93,8 @@ export async function commitSession(supabase, payload) {
   // Fallback: si la base todavía no corrió el SQL del protocolo, esas columnas
   // no existen y el insert falla. Reintentamos sin ellas antes que perder la
   // sesión entera (las muestras son irrepetibles). Ver la guía de medición.
-  const COLS_PROTOCOLO = ['notes', 'patient_id', 'session_data', 'session_number'];
+  const COLS_PROTOCOLO = ['notes', 'patient_id', 'session_data', 'session_number',
+                          'k_cal_firmware', 'v_detector_firmware'];
   if (sErr && COLS_PROTOCOLO.some((c) => new RegExp(`\\b${c}\\b`, 'i').test(sErr.message || ''))) {
     const legacy = { ...sessionRow };
     COLS_PROTOCOLO.forEach((c) => delete legacy[c]);

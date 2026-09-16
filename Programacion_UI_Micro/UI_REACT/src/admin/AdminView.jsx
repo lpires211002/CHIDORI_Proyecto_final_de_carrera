@@ -59,17 +59,29 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
   const loadSessions = useCallback(async () => {
     setBusy(true); setError(null);
     try {
-      const { data: sessRows, error: err1 } = await supabase
-        .from('sessions')
-        .select(`
+      // Las columnas de calibracion llegaron con la 1.8.0. Si la base todavia
+      // no corrio sql/calibracion.sql, se reintenta sin ellas: es preferible
+      // un panel sin ese dato a un panel que no abre.
+      const COLS_BASE = `
           id, created_at, patient_name, patient_age, patient_gender,
           patient_weight, patient_height, patient_iliac_circ, menstruation_info,
           initial_impedance, final_impedance, elapsed_time_str, total_events,
           user_id, patient_id, session_number, session_data, notes,
-          patient:patients ( id, code, first_name, last_name, data, notes )
-        `)
+          patient:patients ( id, code, first_name, last_name, data, notes )`;
+      const COLS_CAL = `, k_cal_firmware, v_detector_firmware, calibration_matched, calibration_id`;
+
+      let { data: sessRows, error: err1 } = await supabase
+        .from('sessions')
+        .select(COLS_BASE + COLS_CAL)
         .order('created_at', { ascending: false })
         .limit(200);
+      if (err1 && /(k_cal_firmware|calibration_)/i.test(err1.message || '')) {
+        ({ data: sessRows, error: err1 } = await supabase
+          .from('sessions')
+          .select(COLS_BASE)
+          .order('created_at', { ascending: false })
+          .limit(200));
+      }
       if (err1) throw err1;
 
       const ownerIds = [...new Set((sessRows || []).map((s) => s.user_id).filter(Boolean))];
@@ -935,6 +947,11 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     stats: buildStats(),
     measurements,
     events,
+    calibration: session.k_cal_firmware != null
+      ? { kcal: session.k_cal_firmware,
+          vdet: session.v_detector_firmware,
+          matched: session.calibration_matched }
+      : null,
     // El gráfico se re-rinde en paleta clara: el canvas de pantalla es
     // transparente y de tema oscuro, ilegible sobre una hoja blanca.
     chartImage: chartRef.current?.toPNG() ?? null,

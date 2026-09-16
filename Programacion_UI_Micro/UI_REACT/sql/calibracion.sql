@@ -11,6 +11,8 @@
 --  4. Reescala `impedance`, `rate`, `initial_impedance`, `final_impedance`
 --     e `impedance_change` a la calibración de referencia.
 --  5. Agrega `measurements.voltage_v` para guardar la continua cruda de A0.
+--  5b. Etiqueta cada sesión con la calibración que REALMENTE la midió, leída
+--      del K_CAL que reporta el firmware, en vez de suponerla por un default.
 --  6. Rehace `v_dataset_sesiones` con la escala nueva y las banderas.
 --
 --  Resultado: la app muestra TODAS las sesiones en la misma escala sin
@@ -170,6 +172,9 @@ end $$;
 -- Ninguna pisa nada: todas nacen vacías.
 
 alter table public.sessions
+  add column if not exists k_cal_firmware        numeric,
+  add column if not exists v_detector_firmware   numeric,
+  add column if not exists calibration_matched   boolean,
   add column if not exists calibration_id        smallint references public.calibrations(id),
   add column if not exists calibration_shown     smallint references public.calibrations(id),
   add column if not exists adc_lineal_asumido    boolean not null default false,
@@ -193,6 +198,10 @@ comment on column public.sessions.adc_lineal_asumido is
   'true = firmware anterior a v1.6.0 (2026-08-03): el ADC se leia como lineal y el del ESP32-C3 no lo es. La conversion de escala para estas sesiones es APROXIMADA.';
 comment on column public.measurements.impedance_raw is
   'Impedancia tal como la mando el equipo, en la escala de sessions.calibration_id. NUNCA se pisa: toda recalibracion se calcula desde aca.';
+comment on column public.sessions.k_cal_firmware is
+  'K_CAL que reporto el equipo en el STATUS al momento de medir. Es el dato duro de con que constante se calculo esta sesion.';
+comment on column public.sessions.calibration_matched is
+  'true = calibration_id salio de matchear k_cal_firmware contra el catalogo. false = el firmware no lo reporto (anterior a 1.8.0) o no coincidio con ninguna, y la etiqueta es una SUPOSICION.';
 comment on column public.measurements.voltage_v is
   'Continua medida en A0 del ESP32, en volts, antes de convertir a impedancia. Es el dato fisico, contrastable con tester. Vadc ~0 = senal nula.';
 
@@ -217,9 +226,29 @@ alter table public.sessions alter column calibration_id drop default;
 
 create or replace function public.set_calibration_id()
 returns trigger language plpgsql security definer set search_path = public as $fn$
+declare cal_id smallint;
 begin
+  -- 1 · si el equipo reporto su K_CAL, buscar la calibracion que coincide.
+  --     Tolerancia relativa del 0,1 %: el firmware manda 5 decimales.
+  if new.k_cal_firmware is not null then
+    select c.id into cal_id
+      from public.calibrations c
+     where abs(c.k_cal - new.k_cal_firmware) <= 0.001 * new.k_cal_firmware
+     order by abs(c.k_cal - new.k_cal_firmware)
+     limit 1;
+  end if;
+
+  if cal_id is not null then
+    new.calibration_matched := true;
+  else
+    -- 2 · sin reporte o sin coincidencia cae a la referencia, PERO queda
+    --     marcado: la etiqueta es una suposicion y tiene que poder verse.
+    select id into cal_id from public.calibrations where is_reference;
+    new.calibration_matched := false;
+  end if;
+
   if new.calibration_id is null then
-    select id into new.calibration_id from public.calibrations where is_reference;
+    new.calibration_id := cal_id;
   end if;
   return new;
 end;
@@ -234,6 +263,10 @@ create trigger trg_calibration_id
 -- analogRead()*3.3/4095, asumiendo linealidad. El ADC del ESP32-C3 no es
 -- lineal y su error depende del punto de trabajo, así que NO se deshace con
 -- una recta: para esas sesiones la conversión es aproximada.
+-- Ninguna de las sesiones existentes reporto su calibracion: quedaron
+-- etiquetadas por fecha, que es una suposicion. Que se vea.
+update public.sessions set calibration_matched = false where calibration_matched is null;
+
 update public.sessions
    set adc_lineal_asumido = true
  where created_at < timestamptz '2026-08-03 00:00:00-03:00'
@@ -343,6 +376,8 @@ begin
       s.final_impedance_raw,
       s.calibration_id,
       s.calibration_shown,
+      s.calibration_matched,
+      s.k_cal_firmware,
       s.adc_lineal_asumido,
       s.elapsed_time_str,
       s.total_events,
@@ -374,6 +409,7 @@ end $$;
 select
   s.calibration_id                                        as midio_con,
   s.calibration_shown                                     as escala_actual,
+  s.calibration_matched                                   as etiqueta_verificada,
   s.adc_lineal_asumido                                    as adc_aproximado,
   count(distinct s.id)                                    as sesiones,
   count(m.id)                                             as muestras,
@@ -382,7 +418,7 @@ select
   count(m.voltage_v)                                      as con_vadc
 from public.sessions s
 left join public.measurements m on m.session_id = s.id
-group by 1, 2, 3
+group by 1, 2, 3, 4
 order by 1, 2;
 
 

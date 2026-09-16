@@ -99,6 +99,7 @@ export function exportPDF({
   measurements,
   events,
   chartImage,
+  calibration,          // { kcal, vdet, matched } · con que se midio la sesion
 } = {}) {
   const pdf = sanitizar(new jsPDF());
   const meas = normMeasurements(measurements);
@@ -157,6 +158,27 @@ export function exportPDF({
   pdf.text(`Duración: ${stats?.elapsedStr || '—'}`, 22, y); y += 5;
   pdf.text(`Eventos marcados: ${stats?.eventCount ?? evs.length}`, 22, y); y += 5;
   pdf.text(`Puntos registrados: ${stats?.samples ?? meas.length}`, 22, y); y += 10;
+
+  /* Calibracion · sin esto, dos reportes con escalas distintas se ven iguales.
+   * Es el bloque que evita que alguien compare un PDF viejo con uno nuevo y
+   * concluya que el paciente cambio, cuando lo que cambio fue la constante. */
+  pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Calibracion', 20, y); y += 6;
+  pdf.setFontSize(9.5); pdf.setTextColor(70);
+  if (calibration?.kcal != null) {
+    pdf.text(`K_CAL: ${Number(calibration.kcal).toFixed(5)}`
+      + (calibration.vdet != null ? `   ·   V_det: ${Number(calibration.vdet).toFixed(3)} V` : ''),
+      22, y); y += 5;
+    pdf.text('Z = 2 x (Vadc + V_det) / K_CAL', 22, y); y += 5;
+    if (calibration.matched === false) {
+      pdf.text('Atencion: la calibracion no fue verificada contra el catalogo.', 22, y); y += 5;
+    }
+  } else {
+    pdf.text('El equipo no reporto su calibracion (firmware anterior a 1.8.0).', 22, y); y += 5;
+    pdf.text('Los ohms de este reporte dependen de la constante que tuviera el', 22, y); y += 5;
+    pdf.text('equipo al medir, que no quedo registrada.', 22, y); y += 5;
+  }
+  pdf.text('Exactitud estimada: +-13 % mientras la escala se derive de la cadena', 22, y); y += 5;
+  pdf.text('de ganancias y no de resistencias patron.', 22, y); y += 10;
 
   // Curva de la sesión · se respeta la relación de aspecto del PNG para que
   // el trazo no salga estirado.

@@ -41,6 +41,8 @@
 //      daban I = 288 uA y G = 200; los valores reales medidos el 2026-09-04
 //      son 450 uA y 631. La Z venia sobreestimada ~4,4x en valor absoluto y
 //      4,93x en los deltas. Ver el bloque CALIBRACION mas abajo.
+//  12. El mensaje STATUS lleva kcal y vdet: la app etiqueta cada sesion
+//      con la calibracion que REALMENTE la midio, en vez de suponerla.
 //  11. Recalibracion (rev 3, 2026-09-15) tras ajustar la ganancia del
 //      Howland y los filtros: K_CAL 0,28406 -> 0,20689 y el deficit del
 //      detector 0,277 -> 0,169 V.
@@ -676,12 +678,19 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
     webSocket.sendTXT(num, "PONG");
   }
   else if (strcmp(cmd, "STATUS") == 0) {
-    char buf[112];
+    /* kcal y vdet viajan para que la app NO tenga que suponer con que
+     * constantes midio el equipo. Antes la sesion se etiquetaba con el
+     * default de la base: si se flasheaba un firmware viejo por error, el
+     * dato quedaba guardado con la escala equivocada y nadie se enteraba.
+     * Ahora la app compara el kcal recibido contra la tabla `calibrations`
+     * y etiqueta la sesion por lo que REALMENTE la midio. */
+    char buf[176];
     snprintf(buf, sizeof(buf),
-             "STATUS estado=%s rssi=%d heap=%u Z=%.3f v=%.4f",
+             "STATUS estado=%s rssi=%d heap=%u Z=%.3f v=%.4f kcal=%.5f vdet=%.3f",
              Chidori.estado == MIDIENDO ? "MIDIENDO" : "INACTIVO",
              (int)apStationRSSI(),   // antes: WiFi.RSSI(), que en modo AP es basura
-             (unsigned)ESP.getFreeHeap(), Chidori.Z, last_Vpp);
+             (unsigned)ESP.getFreeHeap(), Chidori.Z, last_Vpp,
+             (double)K_CAL, (double)V_DETECTOR);
     webSocket.sendTXT(num, buf);
   }
 }

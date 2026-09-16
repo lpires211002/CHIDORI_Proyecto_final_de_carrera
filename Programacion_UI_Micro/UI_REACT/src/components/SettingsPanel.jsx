@@ -240,6 +240,18 @@ export default function SettingsPanel({
                     de transmisión en 8.5 dBm (fix de antena del ESP32-C3 Super Mini).
                   </span>
                 )}
+                {/* Calibración en uso · define qué significa cada ohm que muestra
+                    la app. Si el firmware es viejo no la reporta, y eso hay que
+                    verlo: la sesión queda etiquetada por el default de la base. */}
+                <span className="field-hint">
+                  {device.kcal != null
+                    ? `Calibración del equipo · K_CAL ${device.kcal.toFixed(5)}` +
+                      (device.vdet != null ? ` · V_det ${device.vdet.toFixed(3)} V` : '') +
+                      ' · Z = 2·(Vadc + V_det) / K_CAL'
+                    : 'El firmware no reporta su calibración (versión anterior a la 1.8.0). ' +
+                      'La sesión se va a etiquetar con la calibración de referencia de la base, ' +
+                      'que puede no ser la que midió.'}
+                </span>
               </>
             ) : (
               <span className="field-hint">

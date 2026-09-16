@@ -31,6 +31,7 @@ export default function ExportModal({
   eventCount,
   onShowAlert,
   onSavePatient,
+  calibration,
 }) {
   const [notas, setNotas]           = useState('');
   const [sessionFields, setFields]  = useState([]);
@@ -132,6 +133,7 @@ export default function ExportModal({
       measurements: buildMeasurements(),
       events,
       chartImage:   getChartImage(),
+      calibration,
     });
     onShowAlert('Reporte PDF generado', 'success');
     fireCloudSave();

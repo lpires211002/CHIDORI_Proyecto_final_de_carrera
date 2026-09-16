@@ -227,6 +227,10 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   const [armado, setArmado] = useState(false);
   const voltageBufRef = useRef([]);
   const lastVoltageRef = useRef(null);
+  /* Calibracion que reporta el equipo en el STATUS (kcal / vdet). Viaja con
+   * la sesion para que quede etiquetada por lo que REALMENTE la midio, en
+   * vez de por el default de la base. Null si el firmware es viejo. */
+  const deviceCalRef   = useRef(null);
   const [currentValue, setCurrentValue] = useState(null);
   /* Tendencia · mediana móvil de TREND_WINDOW_S. Es el valor que se lee, se
    * compara contra el basal y alimenta la alarma. currentValue sigue siendo
@@ -760,10 +764,17 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     const heap   = field('heap') != null ? parseInt(field('heap'), 10) : null;
     const volt   = field('v') != null ? parseFloat(field('v')) : null;
     if (Number.isFinite(volt)) setVoltage(volt);
+    // Calibracion en uso en el equipo. Los firmware anteriores a la 1.8.0 no
+    // la mandan: queda null y la sesion cae al default de la base.
+    const kcal = field('kcal') != null ? parseFloat(field('kcal')) : null;
+    const vdet = field('vdet') != null ? parseFloat(field('vdet')) : null;
+    if (Number.isFinite(kcal)) deviceCalRef.current = { kcal, vdet: Number.isFinite(vdet) ? vdet : null };
     setDevice({
       state: estado,
       rssi:  Number.isFinite(rssi) ? rssi : null,
       heap:  Number.isFinite(heap) ? heap : null,
+      kcal:  Number.isFinite(kcal) ? kcal : null,
+      vdet:  Number.isFinite(vdet) ? vdet : null,
       at:    Date.now(),
     });
     reconcileMeasuring(estado);
@@ -1262,6 +1273,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       stats: { initialZ: initialValue, finalZ, elapsedStr: elapsedTime, eventCount },
       measurements,
       events,
+      calibration: deviceCalRef.current,   // con que constantes midio el equipo
     };
 
     try {
@@ -1924,6 +1936,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         eventCount={eventCount}
         onShowAlert={toast}
         onSavePatient={handleSavePatient}
+        calibration={deviceCalRef.current}
       />
 
       <ConfirmModal
