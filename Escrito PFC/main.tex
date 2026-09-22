@@ -671,9 +671,9 @@ considerada, respectivamente. Para operacionales ideales, las dos primeras etapa
 \begin{equation}
     H_1=1,\qquad H_2=-\frac{R_f}{R_{\mathrm{in}}}=-10.
 \end{equation}
-Para el cálculo de las amplitudes ideales se adopta una señal de referencia de 12~mV pico a pico
+Para el cálculo de las amplitudes ideales se adopta una señal de referencia de 14~mV pico a pico
 a la salida del amplificador de instrumentación. Con esta entrada, la segunda etapa entrega
-idealmente 120~mV pico a pico. Las mediciones del prototipo se presentan por separado en resultados.
+idealmente 140~mV pico a pico. Las mediciones del prototipo se presentan por separado en resultados.
 
 \paragraph{Primer pasaaltos y filtro inversor.}
 La Figura~\ref{fig:acq_filtro1} muestra el bloque entre las salidas de U5B y U4A. En las expresiones siguientes, $R_m$ corresponde a R3, $R_{\mathrm{in}}$ a R4, $R_f$ a R5, $C_a$ a CHP1 y $C_f$ a CLP1.
@@ -774,8 +774,8 @@ y una resistencia de realimentación de 10~k$\Omega$:
     H_6=-\frac{R_f}{R_{\mathrm{in}}}=-\frac{10}{2{,}2}\approx-4{,}545.
 \end{equation}
 Esta ganancia se seleccionó considerando la amplitud entregada por las etapas de filtrado.
-Permite obtener una señal del orden de 1,52~V pico a pico antes del detector a partir del
-punto de funcionamiento adoptado de 12~mV pico a pico en la salida del amplificador de instrumentación.
+Permite obtener una señal del orden de 1,78~V pico a pico antes del detector a partir del
+punto de funcionamiento adoptado de 14~mV pico a pico en la salida del amplificador de instrumentación.
 
 \begin{table}[htbp]
     \centering
@@ -802,7 +802,7 @@ Calculando con los valores sin redondear se obtiene
     |H_{\mathrm{ac}}(50~\mathrm{kHz})|\approx127{,}1.
 \end{equation}
 Si se incluye un INA ideal con ganancia 5, el producto es aproximadamente 635,4. Para dimensionar
-la salida a partir de los 12~mV pico a pico adoptados como referencia a la salida del amplificador
+la salida a partir de los 14~mV pico a pico adoptados como referencia a la salida del amplificador
 de instrumentación, se utiliza solamente la ganancia posterior al INA; no corresponde
 multiplicar esa amplitud nuevamente por 5.
 
@@ -832,28 +832,28 @@ del circuito se contrastará con esta referencia en la sección de resultados.
 \paragraph{Amplitudes previstas y verificación.}
 El circuito se alimenta con dos baterías de 3,7~V en serie, cuyo punto medio se toma como referencia de masa,
 proporcionando una alimentación simétrica de $\pm3{,}7$~V, verificados en el conector de alimentación.
-La Tabla~\ref{tab:amplitudes_propuestas} presenta las amplitudes calculadas usando 12~mV pico a pico
+La Tabla~\ref{tab:amplitudes_propuestas} presenta las amplitudes calculadas usando 14~mV pico a pico
 en la salida del amplificador de instrumentación y las ganancias ideales de cada etapa.
 \begin{table}[htbp]
     \centering
-    \caption{Amplitudes calculadas a 50~kHz para una entrada de 12~mV pico a pico desde el amplificador de instrumentación.}
+    \caption{Amplitudes calculadas a 50~kHz para una entrada de 14~mV pico a pico desde el amplificador de instrumentación.}
     \label{tab:amplitudes_propuestas}
     \begin{tabular}{lr}
         \hline
         Punto & Tensión pico a pico (mV) \\
         \hline
-        Salida del amplificador de instrumentación & 12 \\
-        Salida del primer seguidor & 12 \\
-        Salida del amplificador de ganancia diez & 120 \\
-        Salida del primer filtro inversor & 121 \\
-        Salida del pasaaltos activo & 409 \\
-        Salida del segundo seguidor & 335 \\
-        Salida del amplificador final, antes del detector & 1525 \\
+        Salida del amplificador de instrumentación & 14 \\
+        Salida del primer seguidor & 14 \\
+        Salida del amplificador de ganancia diez & 140 \\
+        Salida del primer filtro inversor & 141 \\
+        Salida del pasaaltos activo & 477 \\
+        Salida del segundo seguidor & 391 \\
+        Salida del amplificador final, antes del detector & 1779 \\
         \hline
     \end{tabular}
 \end{table}
-La salida final prevista de 1,52~V pico a pico corresponde a una amplitud de aproximadamente
-0,76~V de pico para una senoide. En la sección de resultados se comparará esta estimación con la señal medida en el prototipo.
+La salida final prevista de 1,78~V pico a pico corresponde a una amplitud de aproximadamente
+0,89~V de pico para una senoide. En la sección de resultados se comparará esta estimación con la señal medida en el prototipo.
 
 \paragraph{Detección y salida hacia el conversor.}
 La Figura~\ref{fig:acq_detector} muestra el conector J5 y el circuito detector.
@@ -1027,6 +1027,39 @@ medidos. Las amplitudes anteriores al detector se expresan de pico a pico.
         \hline
     \end{tabular}
 \end{table}
+
+Al comparar con las amplitudes calculadas para la misma entrada de 14~mV pico a pico, la señal medida
+antes del detector (1450~mV) es un 18\,\% menor que la prevista (1779~mV). La ganancia medida desde la
+salida del INA hasta ese punto es aproximadamente 104, frente a 127 en el cálculo ideal. La
+Tabla~\ref{tab:ganancias_comparadas} descompone la diferencia por etapa a partir de los valores de la
+Tabla~\ref{tab:amplitudes_medidas}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Ganancia de cada etapa a 50~kHz: valor ideal y valor obtenido de las mediciones.}
+    \label{tab:ganancias_comparadas}
+    \begin{tabular}{lrr}
+        \hline
+        Etapa & Ideal & Medida \
+        \hline
+        Inversor de ganancia diez & 10 & 11,3 \
+        Primer filtro inversor & 1,01 & 1,01 \
+        Pasaaltos activo & 3,37 & 3,19 \
+        Pasabajos y seguidor & 0,821 & 0,647 \
+        Amplificador final & 4,55 & 4,39 \
+        Total desde la salida del INA & 127 & 104 \
+        \hline
+    \end{tabular}
+\end{table}
+
+La mayor parte de la diferencia se concentra en el pasabajos. Una ganancia de 0,647 a 50~kHz equivale a
+un polo cercano a 42~kHz y no a los 71,9~kHz nominales, lo que corresponde a una capacidad efectiva
+del orden de 450~pF en lugar de 270~pF. Una posible causa es la capacidad parásita de la placa o de la
+punta del osciloscopio, o la tolerancia del capacitor; esta hipótesis no se verificó. El pasaaltos activo y el
+amplificador final quedan entre un 4 y un 6\,\% por debajo del valor ideal, compatible con las tolerancias de
+los componentes y el ancho de banda finito de los operacionales. En la etapa de ganancia diez, la ganancia
+medida supera en un 13\,\% a la ideal; como la entrada de 14~mV pico a pico es una señal pequeña para
+el osciloscopio, es probable que ese valor tenga un error de lectura relativo apreciable.
 
 A la salida del detector se registraron 556~mV. Para la señal de 1,45~V pico a pico
 anterior al detector, suponiendo una senoide centrada en cero, el valor de pico es
