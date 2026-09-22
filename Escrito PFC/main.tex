@@ -688,20 +688,20 @@ La Figura~\ref{fig:acq_filtro1} muestra el bloque entre las salidas de U5B y U4A
 
 La salida de la segunda etapa se acopla mediante un capacitor de 20~nF a un nodo conectado a masa
 a través de una resistencia de 1~k$\Omega$. Desde ese nodo, una resistencia de entrada de
-300~$\Omega$ conduce a la entrada inversora del tercer operacional. Esta última resistencia carga
+337~$\Omega$ conduce a la entrada inversora del tercer operacional. Esta última resistencia carga
 el pasaaltos, porque su extremo inversor se encuentra a masa virtual en el modelo ideal.
 Denominando $R_m$ a la resistencia de 1~k$\Omega$ conectada a masa y $C_a$ al capacitor
 de acoplamiento de 20~nF, se obtiene
 \begin{equation}
     R_p=R_m\parallel R_{\mathrm{in}}
-    =\frac{1000\times300}{1000+300}~\Omega\approx230{,}8~\Omega,
+    =\frac{1000\times337}{1000+337}~\Omega\approx252{,}1~\Omega,
 \end{equation}
 \begin{equation}
     f_{\mathrm{HP1}}=\frac{1}{2\pi R_pC_a}
-    \approx34{,}5~\mathrm{kHz}.
+    \approx31{,}6~\mathrm{kHz}.
     \label{eq:fc1}
 \end{equation}
-Con el capacitor de 20~nF, la frecuencia de corte es aproximadamente 34,5~kHz al considerar la carga de
+Con el capacitor de 20~nF, la frecuencia de corte es aproximadamente 32~kHz al considerar la carga de
 la etapa siguiente. El cálculo con la resistencia a masa solamente no representa la red conectada.
 
 La tercera etapa utiliza una resistencia de realimentación de 500~$\Omega$ en paralelo con un
@@ -718,10 +718,10 @@ ideal conjunta es
     \frac{sR_pC_a}
     {(1+sR_pC_a)(1+sR_fC_f)}.
 \end{equation}
-A 50~kHz su magnitud es aproximadamente 1,10: la amplificación de la tercera etapa supera levemente la
-atenuación de las redes de filtrado a esa frecuencia. Los cortes de 34,5 y 67,7~kHz pertenecen a las
+A 50~kHz su magnitud es aproximadamente 1,01: la amplificación de la tercera etapa compensa prácticamente la
+atenuación de las redes de filtrado a esa frecuencia. Los cortes de 31,6 y 67,7~kHz pertenecen a las
 redes individuales; los límites de esta sección completa a $-3$~dB respecto de su máximo son
-aproximadamente 19,2 y 121,4~kHz, con máximo a 48,3~kHz.
+aproximadamente 18,2 y 117,5~kHz, con máximo a 46,2~kHz.
 
 \paragraph{Segundo pasaaltos activo.}
 En la Figura~\ref{fig:acq_filtro2}, $C_a$ corresponde a CHP2, $R_{\mathrm{in}}$ a R6 y $R_f$ a la suma de R7 y R11.
@@ -774,7 +774,7 @@ y una resistencia de realimentación de 10~k$\Omega$:
     H_6=-\frac{R_f}{R_{\mathrm{in}}}=-\frac{10}{2{,}2}\approx-4{,}545.
 \end{equation}
 Esta ganancia se seleccionó considerando la amplitud entregada por las etapas de filtrado.
-Permite obtener una señal del orden de 1,95~V pico a pico antes del detector a partir del
+Permite obtener una señal del orden de 1,78~V pico a pico antes del detector a partir del
 punto de funcionamiento adoptado de 14~mV pico a pico en la salida del amplificador de instrumentación.
 
 \begin{table}[htbp]
@@ -787,7 +787,7 @@ punto de funcionamiento adoptado de 14~mV pico a pico en la salida del amplifica
         \hline
         Primera & Seguidor & 1 \\
         Segunda & Inversor & 10 \\
-        Tercera & Acoplamiento cargado y filtro inversor & 1,10 \\
+        Tercera & Acoplamiento cargado y filtro inversor & 1,01 \\
         Cuarta & Pasaaltos activo & 3,374 \\
         Quinta & Pasabajos y seguidor & 0,821 \\
         Sexta & Inversor & 4,545 \\
@@ -799,9 +799,9 @@ punto de funcionamiento adoptado de 14~mV pico a pico en la salida del amplifica
 La transferencia posterior al INA es $H_{\mathrm{ac}}(s)=\prod_{i=1}^{6}H_i(s)$.
 Calculando con los valores sin redondear se obtiene
 \begin{equation}
-    |H_{\mathrm{ac}}(50~\mathrm{kHz})|\approx139{,}0.
+    |H_{\mathrm{ac}}(50~\mathrm{kHz})|\approx127{,}1.
 \end{equation}
-Si se incluye un INA ideal con ganancia 5, el producto es aproximadamente 694,9. Para dimensionar
+Si se incluye un INA ideal con ganancia 5, el producto es aproximadamente 635,4. Para dimensionar
 la salida a partir de los 14~mV pico a pico adoptados como referencia a la salida del amplificador
 de instrumentación, se utiliza solamente la ganancia posterior al INA; no corresponde
 multiplicar esa amplitud nuevamente por 5.
@@ -809,9 +809,9 @@ multiplicar esa amplitud nuevamente por 5.
 \paragraph{Respuesta en frecuencia ideal.}
 La Figura~\ref{fig:bode_cadena} muestra el diagrama de Bode de magnitud calculado a partir
 de las seis transferencias ideales, desde la salida del INA hasta la salida del último
-amplificador, antes del detector. La ganancia a 50~kHz es aproximadamente 139,0~V/V
-(42,9~dB). Los límites de banda a $-3$~dB respecto del máximo son aproximadamente
-25,3 y 91,5~kHz, con un ancho de banda de 66,3~kHz. La frecuencia de excitación de
+amplificador, antes del detector. La ganancia a 50~kHz es aproximadamente 127,1~V/V
+(42,1~dB). Los límites de banda a $-3$~dB respecto del máximo son aproximadamente
+24,6 y 89,9~kHz, con un ancho de banda de 65,3~kHz. La frecuencia de excitación de
 50~kHz queda dentro de esta banda.
 
 \begin{figure}[htbp]
@@ -845,15 +845,15 @@ en la salida del amplificador de instrumentación y las ganancias ideales de cad
         Salida del amplificador de instrumentación & 14 \\
         Salida del primer seguidor & 14 \\
         Salida del amplificador de ganancia diez & 140 \\
-        Salida del primer filtro inversor & 155 \\
-        Salida del pasaaltos activo & 521 \\
-        Salida del segundo seguidor & 428 \\
-        Salida del amplificador final, antes del detector & 1946 \\
+        Salida del primer filtro inversor & 141 \\
+        Salida del pasaaltos activo & 477 \\
+        Salida del segundo seguidor & 391 \\
+        Salida del amplificador final, antes del detector & 1779 \\
         \hline
     \end{tabular}
 \end{table}
-La salida final prevista de 1,95~V pico a pico corresponde a una amplitud de aproximadamente
-0,97~V de pico para una senoide. En la sección de resultados se comparará esta estimación con la señal medida en el prototipo.
+La salida final prevista de 1,78~V pico a pico corresponde a una amplitud de aproximadamente
+0,89~V de pico para una senoide. En la sección de resultados se comparará esta estimación con la señal medida en el prototipo.
 
 \paragraph{Detección y salida hacia el conversor.}
 La Figura~\ref{fig:acq_detector} muestra el conector J5 y el circuito detector.
@@ -1029,8 +1029,8 @@ medidos. Las amplitudes anteriores al detector se expresan de pico a pico.
 \end{table}
 
 Al comparar con las amplitudes calculadas para la misma entrada de 14~mV pico a pico, la señal medida
-antes del detector (1450~mV) es un 25\,\% menor que la prevista (1946~mV). La ganancia medida desde la
-salida del INA hasta ese punto es aproximadamente 104, frente a 139 en el cálculo ideal. La
+antes del detector (1450~mV) es un 18\,\% menor que la prevista (1779~mV). La ganancia medida desde la
+salida del INA hasta ese punto es aproximadamente 104, frente a 127 en el cálculo ideal. La
 Tabla~\ref{tab:ganancias_comparadas} descompone la diferencia por etapa a partir de los valores de la
 Tabla~\ref{tab:amplitudes_medidas}.
 
@@ -1043,16 +1043,16 @@ Tabla~\ref{tab:amplitudes_medidas}.
         Etapa & Ideal & Medida \\
         \hline
         Inversor de ganancia diez & 10 & 11,3 \\
-        Primer filtro inversor & 1,10 & 1,01 \\
+        Primer filtro inversor & 1,01 & 1,01 \\
         Pasaaltos activo & 3,37 & 3,19 \\
         Pasabajos y seguidor & 0,821 & 0,647 \\
         Amplificador final & 4,55 & 4,39 \\
-        Total desde la salida del INA & 139 & 104 \\
+        Total desde la salida del INA & 127 & 104 \\
         \hline
     \end{tabular}
 \end{table}
 
-La mayor parte de la diferencia se concentra en el pasabajos, seguido del primer filtro inversor, cuya ganancia medida es un 8\,\% menor que la ideal. Una ganancia de 0,647 a 50~kHz equivale a
+La mayor parte de la diferencia se concentra en el pasabajos. Una ganancia de 0,647 a 50~kHz equivale a
 un polo cercano a 42~kHz y no a los 71,9~kHz nominales, lo que corresponde a una capacidad efectiva
 del orden de 450~pF en lugar de 270~pF. Una posible causa es la capacidad parásita de la placa o de la
 punta del osciloscopio, o la tolerancia del capacitor; esta hipótesis no se verificó. El pasaaltos activo y el

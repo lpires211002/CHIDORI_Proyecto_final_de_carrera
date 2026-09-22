@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 
 def respuesta(f):
     s = 2j*np.pi*np.asarray(f)
-    rp = 1000*300/1300
-    h3 = -500/300*(s*rp*20e-9)/((1+s*rp*20e-9)*(1+s*500*4.7e-9))
+    rp = 1000*337/1337
+    h3 = -500/337*(s*rp*20e-9)/((1+s*rp*20e-9)*(1+s*500*4.7e-9))
     h4 = -2000/(500+1/(s*10e-9))
     h5 = 1/(1+s*8200*270e-12)
     return (-10)*h3*h4*h5*(-10000/2200)
