@@ -57,7 +57,7 @@
     {\large
     \textbf{Tutor:} Gustavo Panza\par
     \vspace{0.35cm}
-    \textbf{Co-tutor:} Rodrigo Cardenas\par}
+    \textbf{Co-tutor:} Dante Kienigiel\par}
 
     \vfill
 
@@ -271,7 +271,7 @@ absorbentes y la micción asistida o programada ayudan a contener o prevenir epi
 necesariamente el mecanismo subyacente \cite{eau2025femaleLUTS}.
 
 El intervalo entre micciones cambia con la ingesta, la diuresis, la actividad y
-otros factores. Una estimación continua del llenado mediante bioimpedanciapodría permitir avisos personalizados; su utilidad
+otros factores. Una estimación continua del llenado mediante bioimpedancia podría permitir avisos personalizados; su utilidad
 clínica, sin embargo, deberá demostrarse mediante estudios comparativos y no puede inferirse únicamente
 del desempeño electrónico.
 
@@ -451,7 +451,7 @@ Figura~\ref{fig:electrodos_li2019}. Este par produjo la mayor variación relativ
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[height=0.33\textheight]{figuras/li2019/posicion-electrodos.png}
+    \includegraphics[height=0.20\textheight]{figuras/li2019/posicion-electrodos.png}
     \caption{Ubicación de los electrodos de inyección $S1$--$S2$ y de medición $M3$--$M4$ empleada
     en el estudio experimental. Reproducida de Li et al. \cite{li2019electrode}, bajo licencia
     CC BY 4.0.}
@@ -463,15 +463,579 @@ adiposo, la geometría pélvica y la posición de la vejiga modifican la distrib
 aplicación en el prototipo requiere evaluar repetibilidad y sensibilidad entre distintos sujetos
 \cite{li2019electrode}.
 
+\clearpage
+
 \subsection{Modelos predictivos}
 
 
 
-\section{Metodologia}
+\section{Metodología}
+
+\subsection{Diseño general del sistema}
+
+Se desarrolló un prototipo para medir de forma no invasiva las variaciones de impedancia eléctrica
+en la región abdominal asociadas con el llenado vesical. El sistema emplea una configuración
+tetrapolar: dos electrodos aplican una corriente alterna y otros dos registran la tensión resultante.
+A partir de ambas magnitudes se estima la impedancia del tejido comprendido en la zona de medición.
+
+El dispositivo se organizó en cuatro bloques funcionales. El primero genera una señal sinusoidal de
+excitación de 50~kHz; el segundo la convierte en una corriente de amplitud controlada para aplicarla mediante los
+electrodos de inyección; el tercero amplifica, filtra y demodula la tensión obtenida por los electrodos
+de medición; y el cuarto digitaliza y procesa la señal mediante un microcontrolador ESP32-C3. Los
+resultados se transmiten de forma inalámbrica a una interfaz gráfica para su visualización y registro.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{Diagrama de bloques.png}
+    \caption{Diagrama de bloques del sistema de medición de bioimpedancia. El ESP32-C3 configura
+    la excitación, digitaliza la señal detectada y transmite los resultados a la interfaz gráfica.}
+    \label{fig:diagrama_bloques_sistema}
+\end{figure}
+
+\subsection{Diseño del circuito de medición}
+
+El circuito electrónico fue diseñado en KiCad e integrado en una placa de circuito impreso (PCB). Para
+facilitar su análisis, se dividió en las etapas de generación de la excitación, inyección de corriente,
+adquisición de tensión y control digital.
+
+\subsubsection{Generación de la señal de excitación}
+
+La señal de excitación se generó mediante un módulo AD9833, configurado y alimentado por el microcontrolador
+ESP32-C3. El generador se programó para producir una onda sinusoidal de
+50~kHz y aproximadamente 0,6~V pico a pico.
+
+La salida del AD9833 presentaba una componente continua, por lo que se incorporó una etapa de
+acoplamiento en alterna formada por un capacitor de 10~$\mu$F en serie y una resistencia de 500~$\Omega$
+conectada a la referencia del circuito. Ambos componentes forman un filtro pasaaltos de primer orden,
+cuya frecuencia de corte se calcula como
+
+\begin{equation}
+    f_c=\frac{1}{2\pi RC}
+    =\frac{1}{2\pi(500~\Omega)(10~\mu\mathrm{F})}
+    \approx 31{,}8~\mathrm{Hz}.
+\end{equation}
+
+Como la frecuencia de excitación de 50~kHz es muy superior a la frecuencia de corte, la etapa elimina
+la componente continua sin atenuar de manera significativa la señal sinusoidal de interés.
+
+\subsubsection{Inyección de corriente}
+
+Para acondicionar la señal antes de la fuente de corriente se utilizó una sección del TL082 en
+configuración inversora. Con una resistencia de entrada de 1~k$\Omega$ y una resistencia de
+realimentación de 10~k$\Omega$, se midió a la salida una amplitud de
+3,22~V pico a pico.
+
+La segunda sección del TL082 se utilizó para implementar una
+fuente de corriente Howland. Esta topología se emplea en sistemas de bioimpedancia debido a que puede
+proporcionar una corriente estable sobre un intervalo de cargas y frecuencias, aunque su desempeño
+depende del ancho de banda del amplificador y del apareamiento de las resistencias
+\cite{nwokoye2024howland}. La configuración implementada se muestra en la
+Figura~\ref{fig:howland}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.66\textwidth]{figuras/howland.png}
+    \caption{Esquema de la fuente de corriente Howland implementada. Las cuatro resistencias son de
+    10~k$\Omega$ y los diodos Zener de protección están conectados en antiparalelo entre los
+    terminales de salida.}
+    \label{fig:howland}
+\end{figure}
+
+Para que la fuente se encuentre balanceada, las resistencias deben satisfacer la condición
+
+\begin{equation}
+    R_1R_4=R_2R_3.
+\end{equation}
+
+En el circuito implementado se seleccionaron cuatro resistencias iguales de 10~k$\Omega$, con lo que se
+cumple esta relación. En estas condiciones, la corriente de salida queda determinada por la
+tensión aplicada a la fuente y una de las resistencias de 10~k$\Omega$:
+
+\begin{equation}
+    I_{\mathrm{out}}=\frac{V_{\mathrm{in}}}{R_1}.
+\end{equation}
+
+En el cálculo, $V_{\mathrm{in}}$ corresponde a la tensión medida a la entrada de la fuente de Howland,
+es decir, a la salida de la etapa inversora descripta anteriormente (3,22~V pico a pico).
+Con $R_1=10~\mathrm{k}\Omega$, esto da una corriente nominal de inyección de
+
+\begin{equation}
+    I_{\mathrm{out}}\approx\frac{3{,}22~\mathrm{V}}{10~\mathrm{k}\Omega}
+    =322~\mu\mathrm{A}_{\mathrm{pp}}\approx 114~\mu\mathrm{A}_{\mathrm{rms}}.
+\end{equation}
+
+Este es un valor teórico de diseño, calculado a partir de la relación tensión--corriente del circuito de
+Howland y no de una medición directa. Debido a que la amplitud real entregada por el AD9833, la ganancia
+efectiva de la etapa inversora y el apareamiento real de las resistencias del Howland pueden diferir de
+sus valores nominales, la corriente efectivamente entregada al paciente debe determinarse
+experimentalmente aplicando la fuente sobre una resistencia de carga conocida y midiendo la tensión
+resultante. Además, la verificación de seguridad debe realizarse con el procedimiento y las magnitudes
+establecidos por IEC~60601-1, considerando la frecuencia de 50~kHz y la clasificación de la parte
+aplicada \cite{iec60601}.
+
+\subsubsection{Adquisición y acondicionamiento de la tensión}
+
+La tensión diferencial captada por los electrodos de medición ingresa al amplificador de
+instrumentación INA122U. Su salida se acondiciona mediante seis etapas con amplificadores TL082 y
+TL084, antes de aplicarse al detector Schottky y al conversor analógico--digital. El diseño busca
+preservar la componente de 50~kHz y obtener una amplitud suficiente para la detección.
+
+El acondicionamiento combina amplificación y filtrado pasaaltos y pasabajos. Los componentes se seleccionaron a fin 
+de conservar la señal de interés y reducir el ruido fuera de la banda de frecuencia estudiada. La etapa final 
+incluye un detector de envolvente y un filtro pasabajos para obtener una señal de salida continua proporcional a 
+la amplitud de la señal de 50~kHz. A continuación se describen la configuración
+de cada etapa y su respuesta calculada. Las Figuras~\ref{fig:acq_inicial} a~\ref{fig:acq_detector}
+permiten seguir el recorrido de la señal por bloques. El esquema completo se incluye en el
+Anexo~\ref{anexo:esquema_circuito}.
+
+\paragraph{Instrumentación y amplificación inicial.}
+El INA122U es un amplificador de instrumentación que amplifica la diferencia de potencial entre los
+electrodos de medición y rechaza la componente de modo común presente en ambas entradas. Su estructura
+interna utiliza dos amplificadores operacionales y una red de resistencias. La ganancia se ajusta
+mediante una resistencia externa $R_g$ según
+la relación \cite{ti_ina122}
+\begin{equation}
+    G_{\mathrm{INA}}=5+\frac{200~\mathrm{k}\Omega}{R_g},\qquad
+    \lim_{R_g\to\infty}G_{\mathrm{INA}}=5.
+\end{equation}
+
+La estructura interna del INA122 y la conexión de la resistencia externa de ganancia se muestran en la
+Figura~\ref{fig:ina_estructura}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=12,trim=235 515 235 140,clip,width=0.42\textwidth]{Informe final GRUPO2 Chidori (1).pdf}
+    \caption{Estructura interna del INA122 y conexión de la resistencia externa de ganancia.
+    En el diseño se dejan abiertos los terminales de dicha resistencia para obtener una ganancia
+    nominal de 5. Esquema de Texas Instruments \cite{ti_ina122}.}
+    \label{fig:ina_estructura}
+\end{figure}
+
+En este diseño no se coloca una resistencia externa de ganancia, por lo que se adopta el valor mínimo
+de 5. Esta elección permite conservar un mayor ancho de banda que el disponible con ganancias más
+elevadas y distribuir la amplificación restante entre las etapas de acondicionamiento. Para esta
+ganancia, el ancho de banda típico considerado es del orden de 100~kHz, por encima de la frecuencia
+de excitación de 50~kHz, aunque su respuesta no es completamente plana a esa frecuencia
+\cite{ti_ina122}. Esta respuesta se ilustra en la Figura~\ref{fig:respuesta_frecuencia_ina122}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=12,trim=150 150 160 480,clip,width=0.62\textwidth]{Informe final GRUPO2 Chidori (1).pdf}
+    \caption{Respuesta en frecuencia del INA122 para distintos valores de ganancia. Para $G=5$,
+    la frecuencia de corte se encuentra aproximadamente en 100~kHz, mientras que a 50~kHz la
+    ganancia ya presenta una atenuación respecto de su valor de baja frecuencia. Adaptada de
+    Texas Instruments \cite{ti_ina122}.}
+    \label{fig:respuesta_frecuencia_ina122}
+\end{figure}
+
+\paragraph{Funciones de transferencia y ganancia.}
+Para describir cómo cada etapa modifica la señal se utiliza su función de transferencia
+$H_i(s)$, definida como la relación entre las transformadas de Laplace de las tensiones de salida
+y entrada, con condiciones iniciales nulas:
+\begin{equation}
+    H_i(s)=\frac{V_{\mathrm{sal},i}(s)}{V_{\mathrm{ent},i}(s)}.
+\end{equation}
+El subíndice $i$ identifica las seis etapas posteriores al amplificador de instrumentación, en el
+orden en que las atraviesa la señal: seguidor inicial ($H_1$), amplificador inversor ($H_2$),
+primer acoplamiento pasaaltos y filtro inversor ($H_3$), pasaaltos activo ($H_4$), pasabajos pasivo
+con seguidor ($H_5$) y amplificador final ($H_6$). Cada función incluye los componentes pasivos
+asociados a esa etapa.
+
+En régimen sinusoidal permanente se evalúa $s=j2\pi f$, donde $f$ es la frecuencia y $j$ la unidad
+imaginaria. La magnitud $|H_i(j2\pi f)|$ expresa la ganancia de amplitud, es decir, el cociente entre
+las amplitudes de salida y entrada a esa frecuencia; el argumento de $H_i$ representa el desfase.
+Una magnitud mayor que uno indica amplificación, menor que uno indica atenuación e igual a uno
+indica conservación de la amplitud. Para señales sinusoidales sin recorte, este cociente puede
+calcularse con valores de pico, pico a pico o eficaces, siempre que se use la misma magnitud en
+entrada y salida. Las ganancias se expresan en V/V y se evalúan a 50~kHz para caracterizar la
+respuesta a la señal de excitación. En una etapa resistiva inversora, el signo negativo de la
+transferencia indica inversión de polaridad, mientras que su valor absoluto determina cuánto
+se amplifica la amplitud.
+
+\paragraph{Seguidor de tensión y amplificación inicial.}
+En la Figura~\ref{fig:acq_inicial}, R1 y R2 corresponden a las resistencias de entrada y realimentación de U5B, respectivamente.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=125.87 492.11 236.17 569.08,clip,width=0.55\textwidth]{figuras/esquema_circuito.pdf}
+    \caption{Seguidor U5A y amplificador inversor U5B, desde la entrada INAout.}
+    \label{fig:acq_inicial}
+\end{figure}
 
 
+La primera etapa se conecta como seguidor de tensión: conserva aproximadamente la amplitud y desacopla al INA122U
+de la carga de la etapa siguiente. La segunda etapa es un amplificador inversor con una resistencia
+de entrada de 1~k$\Omega$ y una resistencia de realimentación de 10~k$\Omega$. En las ecuaciones,
+$R_{\mathrm{in}}$ y $R_f$ representan las resistencias de entrada y realimentación de la etapa
+considerada, respectivamente. Para operacionales ideales, las dos primeras etapas tienen las transferencias
+\begin{equation}
+    H_1=1,\qquad H_2=-\frac{R_f}{R_{\mathrm{in}}}=-10.
+\end{equation}
+Para el cálculo de las amplitudes ideales se adopta una señal de referencia de 12~mV pico a pico
+a la salida del amplificador de instrumentación. Con esta entrada, la segunda etapa entrega
+idealmente 120~mV pico a pico. Las mediciones del prototipo se presentan por separado en resultados.
+
+\paragraph{Primer pasaaltos y filtro inversor.}
+La Figura~\ref{fig:acq_filtro1} muestra el bloque entre las salidas de U5B y U4A. En las expresiones siguientes, $R_m$ corresponde a R3, $R_{\mathrm{in}}$ a R4, $R_f$ a R5, $C_a$ a CHP1 y $C_f$ a CLP1.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=237.06 472.09 307.33 569.53,clip,width=0.37\textwidth]{figuras/esquema_circuito.pdf}
+    \caption{Primer acoplamiento pasaaltos y filtro inversor U4A.}
+    \label{fig:acq_filtro1}
+\end{figure}
+
+
+La salida de la segunda etapa se acopla mediante un capacitor de 20~nF a un nodo conectado a masa
+a través de una resistencia de 1~k$\Omega$. Desde ese nodo, una resistencia de entrada de
+337~$\Omega$ conduce a la entrada inversora del tercer operacional. Esta última resistencia carga
+el pasaaltos, porque su extremo inversor se encuentra a masa virtual en el modelo ideal.
+Denominando $R_m$ a la resistencia de 1~k$\Omega$ conectada a masa y $C_a$ al capacitor
+de acoplamiento de 20~nF, se obtiene
+\begin{equation}
+    R_p=R_m\parallel R_{\mathrm{in}}
+    =\frac{1000\times337}{1000+337}~\Omega\approx252{,}1~\Omega,
+\end{equation}
+\begin{equation}
+    f_{\mathrm{HP1}}=\frac{1}{2\pi R_pC_a}
+    \approx31{,}6~\mathrm{kHz}.
+    \label{eq:fc1}
+\end{equation}
+Con el capacitor de 20~nF, la frecuencia de corte es aproximadamente 32~kHz al considerar la carga de
+la etapa siguiente. El cálculo con la resistencia a masa solamente no representa la red conectada.
+
+La tercera etapa utiliza una resistencia de realimentación de 500~$\Omega$ en paralelo con un
+capacitor de 4,7~nF, que introduce un polo pasabajos. Se denomina $C_a$ al capacitor de acoplamiento
+de 20~nF y $C_f$ al capacitor de realimentación de 4,7~nF. Con $s=j2\pi f$,
+\begin{equation}
+    Z_f(s)=\frac{R_f}{1+sR_fC_f},\qquad
+    f_{\mathrm{LP1}}=\frac{1}{2\pi R_fC_f}\approx67{,}7~\mathrm{kHz}.
+\end{equation}
+Desde la entrada del capacitor de acoplamiento hasta la salida de la tercera etapa, la transferencia
+ideal conjunta es
+\begin{equation}
+    H_3(s)=-\frac{R_f}{R_{\mathrm{in}}}
+    \frac{sR_pC_a}
+    {(1+sR_pC_a)(1+sR_fC_f)}.
+\end{equation}
+A 50~kHz su magnitud es aproximadamente 1,01: la amplificación de la tercera etapa compensa prácticamente la
+atenuación de las redes de filtrado a esa frecuencia. Los cortes de 31,6 y 67,7~kHz pertenecen a las
+redes individuales; los límites de esta sección completa a $-3$~dB respecto de su máximo son
+aproximadamente 18,2 y 117,5~kHz, con máximo a 46,2~kHz.
+
+\paragraph{Segundo pasaaltos activo.}
+En la Figura~\ref{fig:acq_filtro2}, $C_a$ corresponde a CHP2, $R_{\mathrm{in}}$ a R6 y $R_f$ a la suma de R7 y R11.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=308.22 491.66 374.94 569.53,clip,width=0.35\textwidth]{figuras/esquema_circuito.pdf}
+    \caption{Segundo pasaaltos activo con U4B; R7 y R11 forman la realimentación.}
+    \label{fig:acq_filtro2}
+\end{figure}
+
+
+La cuarta etapa es un amplificador inversor cuya entrada contiene un capacitor de 10~nF en serie
+con una resistencia de 500~$\Omega$. La realimentación está formada por dos resistencias de
+1~k$\Omega$ en serie, equivalentes a 2~k$\Omega$. Denominando $C_a$ al capacitor de entrada
+de esta etapa, su transferencia y frecuencia de corte ideales son
+\begin{equation}
+    H_4(s)=-\frac{R_f}{R_{\mathrm{in}}+1/(sC_a)},\qquad
+    f_{\mathrm{HP2}}=\frac{1}{2\pi R_{\mathrm{in}}C_a}\approx31{,}8~\mathrm{kHz}.
+\end{equation}
+Con el capacitor de 10~nF y la resistencia de entrada de 500~$\Omega$, la frecuencia de corte
+es 31,8~kHz, inferior a la frecuencia de excitación de 50~kHz. A esta frecuencia, la ganancia
+de amplitud es $|H_4|\approx3{,}374$; en el modelo ideal, se aproxima a 4 para frecuencias
+mucho mayores que la de corte.
+
+\paragraph{Pasabajos, seguidor y amplificación final.}
+La Figura~\ref{fig:acq_final} reúne las dos últimas etapas. En el filtro, $R$ corresponde a R8 y $C$ a CLP2; en el amplificador final, las resistencias de entrada y realimentación son R9 y R10.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=375.83 491.66 486.13 569.53,clip,width=0.55\textwidth]{figuras/esquema_circuito.pdf}
+    \caption{Pasabajos R8--CLP2, seguidor U4C y amplificador inversor U4D.
+    El valor de R9 utilizado es 2,2~k$\Omega$; el rótulo de 2~k$\Omega$ del esquema no corresponde al valor montado.}
+    \label{fig:acq_final}
+\end{figure}
+
+
+A continuación se dispone un pasabajos pasivo con una resistencia $R$ de 8,2~k$\Omega$ en serie
+y un capacitor $C$ de 270~pF a masa. El quinto operacional se conecta como seguidor después del
+filtro para desacoplarlo de la carga del amplificador final. La transferencia ideal de esta sección es
+\begin{equation}
+    H_5(s)=\frac{1}{1+sRC},\qquad
+    f_{\mathrm{LP2}}=\frac{1}{2\pi RC}\approx71{,}9~\mathrm{kHz}.
+\end{equation}
+A 50~kHz, $|H_5|\approx0{,}821$.
+
+La sexta y última etapa es un amplificador inversor con una resistencia de entrada de 2,2~k$\Omega$
+y una resistencia de realimentación de 10~k$\Omega$:
+\begin{equation}
+    H_6=-\frac{R_f}{R_{\mathrm{in}}}=-\frac{10}{2{,}2}\approx-4{,}545.
+\end{equation}
+Esta ganancia se seleccionó considerando la amplitud entregada por las etapas de filtrado.
+Permite obtener una señal del orden de 1,52~V pico a pico antes del detector a partir del
+punto de funcionamiento adoptado de 12~mV pico a pico en la salida del amplificador de instrumentación.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Ganancias ideales de las etapas de acondicionamiento a 50~kHz desde la salida del INA122U.}
+    \label{tab:cadena_acondicionamiento}
+    \begin{tabular}{lll}
+        \hline
+        Etapa & Función & Magnitud de ganancia \\
+        \hline
+        Primera & Seguidor & 1 \\
+        Segunda & Inversor & 10 \\
+        Tercera & Acoplamiento cargado y filtro inversor & 1,01 \\
+        Cuarta & Pasaaltos activo & 3,374 \\
+        Quinta & Pasabajos y seguidor & 0,821 \\
+        Sexta & Inversor & 4,545 \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\paragraph{Ganancia y banda de la cadena.}
+La transferencia posterior al INA es $H_{\mathrm{ac}}(s)=\prod_{i=1}^{6}H_i(s)$.
+Calculando con los valores sin redondear se obtiene
+\begin{equation}
+    |H_{\mathrm{ac}}(50~\mathrm{kHz})|\approx127{,}1.
+\end{equation}
+Si se incluye un INA ideal con ganancia 5, el producto es aproximadamente 635,4. Para dimensionar
+la salida a partir de los 12~mV pico a pico adoptados como referencia a la salida del amplificador
+de instrumentación, se utiliza solamente la ganancia posterior al INA; no corresponde
+multiplicar esa amplitud nuevamente por 5.
+
+\paragraph{Respuesta en frecuencia ideal.}
+La Figura~\ref{fig:bode_cadena} muestra el diagrama de Bode de magnitud calculado a partir
+de las seis transferencias ideales, desde la salida del INA hasta la salida del último
+amplificador, antes del detector. La ganancia a 50~kHz es aproximadamente 127,1~V/V
+(42,1~dB). Los límites de banda a $-3$~dB respecto del máximo son aproximadamente
+24,6 y 89,9~kHz, con un ancho de banda de 65,3~kHz. La frecuencia de excitación de
+50~kHz queda dentro de esta banda.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figuras/bode_cadena.pdf}
+    \caption{Diagrama de Bode de magnitud ideal de las seis etapas posteriores al INA,
+    calculado como $20\log_{10}|H_{\mathrm{ac}}|$. Se indican la frecuencia de excitación
+    de 50~kHz y los límites de banda a aproximadamente $-3$~dB respecto del máximo.
+    La curva corresponde al cálculo teórico, no a mediciones experimentales.}
+    \label{fig:bode_cadena}
+\end{figure}
+
+Los límites de banda de la cadena se obtienen del producto de las transferencias y no
+coinciden con los cortes de los filtros considerados por separado. Estos cálculos emplean
+los valores nominales de los componentes y operacionales ideales; la respuesta medida
+del circuito se contrastará con esta referencia en la sección de resultados.
+
+\paragraph{Amplitudes previstas y verificación.}
+El circuito se alimenta con dos baterías de 3,7~V en serie, cuyo punto medio se toma como referencia de masa,
+proporcionando una alimentación simétrica de $\pm3{,}7$~V, verificados en el conector de alimentación.
+La Tabla~\ref{tab:amplitudes_propuestas} presenta las amplitudes calculadas usando 12~mV pico a pico
+en la salida del amplificador de instrumentación y las ganancias ideales de cada etapa.
+\begin{table}[htbp]
+    \centering
+    \caption{Amplitudes calculadas a 50~kHz para una entrada de 12~mV pico a pico desde el amplificador de instrumentación.}
+    \label{tab:amplitudes_propuestas}
+    \begin{tabular}{lr}
+        \hline
+        Punto & Tensión pico a pico (mV) \\
+        \hline
+        Salida del amplificador de instrumentación & 12 \\
+        Salida del primer seguidor & 12 \\
+        Salida del amplificador de ganancia diez & 120 \\
+        Salida del primer filtro inversor & 121 \\
+        Salida del pasaaltos activo & 409 \\
+        Salida del segundo seguidor & 335 \\
+        Salida del amplificador final, antes del detector & 1525 \\
+        \hline
+    \end{tabular}
+\end{table}
+La salida final prevista de 1,52~V pico a pico corresponde a una amplitud de aproximadamente
+0,76~V de pico para una senoide. En la sección de resultados se comparará esta estimación con la señal medida en el prototipo.
+
+\paragraph{Detección y salida hacia el conversor.}
+La Figura~\ref{fig:acq_detector} muestra el conector J5 y el circuito detector.
+El esquema distingue las conexiones SIN\_BAT54S y CON\_BAT54S. El bloque incluye
+D2 (BAT54S), el diodo D1 y el capacitor Cschottky1 de 10~nF.
+Este bloque funciona como un detector de envolvente, entregando una tensión continua proporcional a la amplitud de la señal de 50~kHz
+y permite su posterior digitalización. 
+
+El BAT54S contiene dos diodos Schottky en serie, con acceso a la unión entre ambos mediante
+el pin 3. Su baja caída de tensión directa permite rectificar señales de pequeña amplitud
+\cite{nexperia_bat54s}. En la conexión mostrada, la señal ingresa por ese punto intermedio
+y se utiliza el diodo comprendido entre los pines 3 y 2, cuyo cátodo se conecta a Vout.
+El pin 1 queda sin conexión, por lo que el segundo diodo interno no interviene en la detección.
+
+Durante los máximos positivos de la señal, el diodo conduce cuando la tensión de entrada
+supera la tensión almacenada en el capacitor más la caída directa del diodo. En ese intervalo,
+circula corriente hacia Cschottky1 y aumenta su tensión. Cuando la entrada disminuye por
+debajo de esa condición, el diodo deja de conducir y bloquea la descarga del capacitor hacia
+la etapa amplificadora. La carga almacenada mantiene la salida entre máximos sucesivos.
+Así, el diodo y el capacitor forman un detector de pico positivo; cuando la amplitud varía
+lentamente, su salida permite seguir la envolvente de la señal.
+
+Para una senoide centrada en cero, de amplitud pico a pico $V_{\mathrm{pp}}$, una aproximación
+de la tensión detectada es
+\begin{equation}
+    V_{\mathrm{det}}\approx\frac{V_{\mathrm{pp}}}{2}-V_F,
+\end{equation}
+donde $V_F$ representa la caída directa durante la conducción. Esta expresión supone que el
+capacitor alcanza aproximadamente el pico y que su descarga entre ciclos es pequeña.
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=486.58 518.36 577.75 535.27,clip,width=0.43\textwidth]{figuras/esquema_circuito.pdf}
+    \par\medskip
+    \includegraphics[page=1,viewport=473.68 442.27 577.75 492.11,clip,width=0.48\textwidth]{figuras/esquema_circuito.pdf}
+    \caption{Conexiones de selección en J5 y bloque detector con salida Vout.}
+    \label{fig:acq_detector}
+\end{figure}
+
+La tensión en Vout se aplica al ADC del ESP32-C3. La magnitud digitalizada representa el
+nivel entregado por el detector y se utiliza para estimar la amplitud
+de la señal anterior a la rectificación. La relación entre ambas tensiones se caracteriza
+experimentalmente considerando la caída del diodo, la carga y el ripple. Esa caracterización,
+junto con la ganancia de la cadena de adquisición, permite establecer la conversión de la lectura del ADC
+a impedancia. 
+
+
+\clearpage
+\subsection{Digitalización, procesamiento y comunicación de datos}
+
+\subsubsection{Muestreo y filtrado digital de la señal}
+
+La tensión continua entregada por el detector de envolvente se digitaliza con el conversor
+analógico--digital del ESP32-C3, de 12~bits de resolución y configurado con una atenuación de entrada
+de 11~dB para admitir señales de hasta aproximadamente 3,3~V. Para compensar la no linealidad propia de
+este conversor, la lectura se realiza mediante la función de calibración de fábrica del fabricante en
+lugar de una conversión lineal directa. El microcontrolador muestrea esta entrada a una frecuencia
+aproximada de 700~Hz y promedia bloques de 192 muestras consecutivas, obteniendo así un valor de tensión
+continua cada 274~ms aproximadamente, a partir del cual se calcula un valor bruto de impedancia mediante
+
+\begin{equation}
+    Z=\frac{V_{\mathrm{pp}}}{I_{\mathrm{iny}}\,G},
+\end{equation}
+
+donde $V_{\mathrm{pp}}$ es la tensión pico a pico reconstruida a partir de la lectura continua y de la
+caída del diodo Schottky, $I_{\mathrm{iny}}$ la corriente nominal inyectada y $G$ la ganancia total de la
+etapa receptora.
+
+Dado que el llenado vesical evoluciona en una escala de minutos, se priorizó la relación señal--ruido
+por sobre la velocidad de respuesta al diseñar el filtrado digital de $Z$. En primer lugar se aplica un
+filtro de mediana móvil de ventana 5, que descarta transitorios aislados sin difundir su efecto sobre las
+muestras vecinas; sobre su salida se aplica luego una media móvil de 12 muestras, que reduce el ruido de
+naturaleza gaussiana remanente. El orden de esta cascada es relevante, ya que promediar antes de aplicar
+la mediana mezclaría cualquier transitorio con las muestras adyacentes y degradaría el filtrado
+posterior. Las primeras cinco muestras de cada medición se descartan como período de estabilización, con
+el fin de que el transitorio de arranque no contamine el valor basal de referencia $Z_0$, que se fija con
+la primera muestra válida obtenida a continuación.
+
+\subsubsection{Comunicación inalámbrica y protocolo de control}
+
+El ESP32-C3 opera como punto de acceso WiFi propio, de modo que el equipo no depende de infraestructura
+de red externa y mantiene una dirección IP fija. La comunicación con la interfaz gráfica se establece
+mediante \textit{WebSocket} sobre un puerto dedicado, protocolo que permite mantener abierto un canal
+bidireccional entre el microcontrolador y el navegador. El firmware transmite periódicamente un mensaje
+con tres valores: la impedancia filtrada $Z$, la tensión pico a pico reconstruida a la salida del
+receptor y la tensión continua leída directamente en el pin del conversor, esta última incluida para
+poder contrastarla experimentalmente con un instrumento de banco. La interfaz, a su vez, envía comandos
+de texto que gobiernan el inicio y la detención de las mediciones y permiten consultar el estado del
+equipo (intensidad de señal, memoria disponible e impedancia vigente) sin interrumpir la adquisición en
+curso. Un mecanismo de \textit{heartbeat} cierra automáticamente las conexiones que dejan de responder,
+evitando que sesiones de navegador inactivas degraden la transmisión.
+
+\subsubsection{Máquina de estados y control físico}
+
+El firmware implementa una máquina de estados con los modos \textit{Inactivo} y \textit{Midiendo}; la
+evaluación de los umbrales de alarma se realiza en la interfaz y no en el microcontrolador, que actúa
+como un sensor de propósito simple. El equipo puede iniciarse y detenerse tanto desde la interfaz como
+mediante un botón físico. Para evitar que un roce accidental o una vibración interrumpan una sesión de
+medición prolongada, se estableció una asimetría deliberada en el antirrebote: iniciar una medición
+requiere sostener el botón durante 80~ms, mientras que detenerla requiere un sostenido de 1,5~s,
+confirmado con una señal sonora. Cada inicio de medición reinicializa el generador de señales como medida
+defensiva frente a eventuales fallos de arranque de la señal sinusoidal.
+
+\subsection{Interfaz de usuario, alarmas y registro de sesiones}
+
+\subsubsection{Calibración del basal y configuración de alarmas}
+
+El valor basal de impedancia $Z_0$ puede establecerse de dos maneras. De forma automática, la interfaz
+toma la mediana de las primeras muestras recibidas al iniciar una medición, reduciendo la influencia de
+transitorios iniciales sobre la referencia. De forma guiada, un asistente de calibración de cuatro pasos
+permite registrar secuencialmente la impedancia con la vejiga vacía ($Z_0$) y, en una instancia
+posterior, con la vejiga llena ($Z_f$), calculando a partir de ambos valores la caída relativa en
+decibeles
+
+\begin{equation}
+    \mbox{Ca\'{\i}da (dB)} = 20\log_{10}\left(\frac{Z_0}{Z_f}\right),
+\end{equation}
+
+magnitud ya empleada para caracterizar el desempeño del prototipo anterior.
+
+A partir del basal fijado, el usuario puede configurar una alarma según tres criterios excluyentes entre
+sí:
+
+\begin{itemize}
+    \item \textbf{Valor absoluto:} la alarma se dispara cuando la impedancia medida cae por debajo de un
+    valor fijo definido por el usuario.
+    \item \textbf{Porcentaje del basal:} la alarma se dispara cuando la impedancia cae por debajo de un
+    porcentaje del valor $Z_0$.
+    \item \textbf{Diferencia respecto del basal:} la alarma se dispara cuando la caída de impedancia
+    respecto de $Z_0$ supera una magnitud fija, expresada en ohmios.
+\end{itemize}
+
+En los tres casos, la condición de disparo incorpora una banda de histéresis proporcional al umbral
+configurado, de modo que fluctuaciones pequeñas alrededor del umbral no generen activaciones y
+desactivaciones repetidas de la alarma. Al dispararse, la interfaz emite un aviso visual persistente y
+envía una orden al microcontrolador para activar un zumbador, que el paciente puede silenciar mediante el
+botón físico del equipo.
+
+\subsubsection{Registro de sesiones y exportación de datos}
+
+Cada sesión de medición puede asociarse a una ficha de paciente y a un conjunto configurable de variables
+contextuales (por ejemplo, ingesta de líquidos, registrada acumulando los eventos marcados durante la
+medición). Al finalizar una sesión, los datos --curva de impedancia, eventos marcados por el usuario y
+variables contextuales-- pueden exportarse en formato PDF, CSV o de texto plano, y opcionalmente
+sincronizarse con una base de datos en la nube mediante una cola de reintento que indica en la interfaz
+el estado de cada escritura. Este mecanismo constituye la base para la construcción de la base de datos
+experimental descripta en los objetivos del trabajo.
 
 \section{Resultados}
+\label{sec:resultados}
+
+\subsection{Caracterización experimental de la cadena analógica}
+Se registraron con osciloscopio las amplitudes en distintos puntos de la placa. La Tabla~\ref{tab:amplitudes_medidas} registra los valores 
+medidos. Las amplitudes anteriores al detector se expresan de pico a pico.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Amplitudes medidas con osciloscopio en la placa 1.}
+    \label{tab:amplitudes_medidas}
+    \begin{tabular}{lr}
+        \hline
+        Punto de medición & Tensión pico a pico (mV) \\
+        \hline
+        Salida del seguidor U5A & 14 \\
+        Salida del amplificador inversor U5B & 158 \\
+        Salida del primer filtro inversor U4A & 160 \\
+        Salida del pasaaltos activo U4B & 510 \\
+        Salida del pasabajos y seguidor U4C & 330 \\
+        Salida del amplificador final U4D & 1450 \\
+        \hline
+    \end{tabular}
+\end{table}
+
+A la salida del detector se registraron 556~mV. Para la señal de 1,45~V pico a pico
+anterior al detector, suponiendo una senoide centrada en cero, el valor de pico es
+725~mV. La diferencia entre ese valor y la tensión detectada es 169~mV.
+
+En la etapa inversora previa a la fuente de Howland se midieron 3,22~V pico a pico,
+con una resistencia de entrada de 1~k$\Omega$, como se indicó en metodología.
+
+
 
 
 
@@ -480,5 +1044,23 @@ aplicación en el prototipo requiere evaluar repetibilidad y sensibilidad entre 
 
 
 \printbibliography
+
+
+\clearpage
+\appendix
+\section{Esquema electrónico del circuito}
+\label{anexo:esquema_circuito}
+
+La Figura~\ref{fig:esquema_circuito_completo} reproduce el esquema suministrado, con los
+bloques de adquisición, inyección de corriente y microprocesado y transmisión.
+En el bloque de adquisición se muestran también las conexiones de alimentación de los TL082
+y TL084 y los capacitores de desacoplamiento de 22~nF entre los rieles y la referencia de masa.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=30.69 211.35 581.76 583.77,clip,width=1.0\textwidth]{figuras/esquema_circuito.pdf}
+    \caption{Esquema electrónico general. Los detalles del acondicionamiento se presentan ampliados en la sección de adquisición.}
+    \label{fig:esquema_circuito_completo}
+\end{figure}
 
 \end{document}
