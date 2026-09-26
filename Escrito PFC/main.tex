@@ -604,10 +604,10 @@ Figura~\ref{fig:ina_estructura}.
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[page=12,trim=235 515 235 140,clip,width=0.42\textwidth]{Informe final GRUPO2 Chidori (1).pdf}
-    \caption{Estructura interna del INA122 y conexión de la resistencia externa de ganancia.
-    En el diseño se dejan abiertos los terminales de dicha resistencia para obtener una ganancia
-    nominal de 5. Esquema de Texas Instruments \cite{ti_ina122}.}
+    \includegraphics[width=0.42\textwidth]{figuras/ina122_estructura.png}
+    \caption{Conexiones básicas y estructura interna del INA122, incluidos los terminales para la
+    resistencia externa $R_g$. En este diseño no se conecta $R_g$, por lo que la ganancia nominal es
+    5. Adaptado de Texas Instruments, p. 1 \cite{ti_ina122}.}
     \label{fig:ina_estructura}
 \end{figure}
 
@@ -620,11 +620,11 @@ de excitación de 50~kHz, aunque su respuesta no es completamente plana a esa fr
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[page=12,trim=150 150 160 480,clip,width=0.62\textwidth]{Informe final GRUPO2 Chidori (1).pdf}
+    \includegraphics[page=8,trim=68 520 323 121,clip,width=0.62\textwidth]{INA122_datasheet.pdf}
     \caption{Respuesta en frecuencia del INA122 para distintos valores de ganancia. Para $G=5$,
     la frecuencia de corte se encuentra aproximadamente en 100~kHz, mientras que a 50~kHz la
     ganancia ya presenta una atenuación respecto de su valor de baja frecuencia. Adaptada de
-    Texas Instruments \cite{ti_ina122}.}
+    Texas Instruments, p. 8 \cite{ti_ina122}.}
     \label{fig:respuesta_frecuencia_ina122}
 \end{figure}
 
