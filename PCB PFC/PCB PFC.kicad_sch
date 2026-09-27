@@ -3505,6 +3505,16 @@
 		)
 		(uuid "17a41ad0-79ee-4a36-b42a-553ccd1a392c")
 	)
+	(text "en alguna placa nueva es R9=1,1k\n"
+		(exclude_from_sim no)
+		(at 210.312 17.78 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "41e675eb-0dbb-4f1a-af86-c85dfcf5bf32")
+	)
 	(text "16/9/26"
 		(exclude_from_sim no)
 		(at 217.17 193.548 0)
@@ -7019,7 +7029,7 @@
 				)
 			)
 		)
-		(property "Value" "210"
+		(property "Value" "2,2k"
 			(at 213.36 36.83 90)
 			(effects
 				(font
