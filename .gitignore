@@ -23,3 +23,8 @@ fp-info-cache
 *.synctex.gz
 *.toc
 *-blx.bib
+
+# KiCad · export 3D de la placa (Archivo → Exportar → GLB, ~5,6 MB). Se
+# regenera desde KiCad; la app usa la versión optimizada que genera
+# UI_REACT/scripts/optimizar-pcb.mjs (UI_REACT/src/assets/chidori-pcb.glb).
+PCB PFC/*.glb
