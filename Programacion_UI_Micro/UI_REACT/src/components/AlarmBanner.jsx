@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { playAlarmTone } from '../lib/alarmSound';
 
 /**
  * Persistent alarm state. Replaces the prior 4.5s ephemeral toast.
@@ -7,7 +8,6 @@ import { AlertTriangle } from 'lucide-react';
  * dismissed only by explicit acknowledge.
  */
 export default function AlarmBanner({ active, message, hint, onAcknowledge }) {
-  const audioCtxRef = useRef(null);
   const intervalRef = useRef(null);
   const originalTitleRef = useRef(null);
 
@@ -20,10 +20,6 @@ export default function AlarmBanner({ active, message, hint, onAcknowledge }) {
     if (originalTitleRef.current !== null) {
       document.title = originalTitleRef.current;
       originalTitleRef.current = null;
-    }
-    if (audioCtxRef.current) {
-      try { audioCtxRef.current.close(); } catch { /* noop */ }
-      audioCtxRef.current = null;
     }
   };
 
@@ -41,27 +37,9 @@ export default function AlarmBanner({ active, message, hint, onAcknowledge }) {
       document.title = flashOn ? '⚠ ATENCION · Chidori' : originalTitleRef.current;
     };
 
-    // Repeating low-mid tone (every 1.6s)
-    const playTone = () => {
-      try {
-        if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
-          audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        const ctx = audioCtxRef.current;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 660;
-        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.28, ctx.currentTime + 0.04);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
-        osc.connect(gain).connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.45);
-      } catch {
-        // Audio unavailable: visual + title flash still convey the state
-      }
-    };
+    // Tono repetido cada 1,6 s · contexto de audio compartido y desbloqueado
+    // de antemano (ver lib/alarmSound.js): creado acá, sin gesto, quedaba mudo.
+    const playTone = playAlarmTone;
 
     playTone();
     flashTitle();

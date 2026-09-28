@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { X } from 'lucide-react';
 
 /**
  * Volumen vesical estimado · escala en dB sobre el basal.
@@ -50,6 +51,12 @@ export default function BladderVisual({
   currentValue,
   capacityMl = 500,
   umbralDb = UMBRAL_GANAS_DB,
+  /* Fila de pie (estado de la alarma). Vive dentro del mismo panel para que
+   * la columna lateral sea un solo bloque, del mismo alto que la señal. */
+  footer = null,
+  /* Panel desplegable: id para aria-controls y cierre desde su propio encabezado */
+  id,
+  onClose,
 }) {
   const conBasal = initialValue !== null && initialValue > 0;
   const caida    = conBasal && currentValue !== null ? caidaDb(currentValue, initialValue) : null;
@@ -73,40 +80,26 @@ export default function BladderVisual({
   const alcanzado = targetPct >= 100;
   const cerca     = targetPct >= 80 && !alcanzado;
 
+  /* La hipótesis se explica una vez, en el tooltip del título. En pantalla
+   * solo aparece texto cuando pide una acción (cerca o en el umbral). */
+  const hipotesis = `Hipótesis en estudio: las ganas aparecen con una caída de ${umbralDb} dB `
+    + `respecto del basal (100 % = ${capacityMl} ml). No reemplaza a la sensación del paciente.`;
+
   return (
-    <section className="surface surface-pad" aria-label="Volumen vesical estimado">
-      <header className="section-head" style={{ marginBottom: 18 }}>
-        <div>
-          <h2>Volumen estimado</h2>
-          <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-            {conBasal
-              ? `Caída de ${umbralDb} dB = 100 % · ${capacityMl} ml máx.`
-              : 'Requiere el valor basal'}
-          </span>
-        </div>
+    <section id={id} className="surface surface-pad bladder-panel" aria-label="Volumen vesical estimado">
+      <header className="section-head">
+        <h2 className="panel-title" title={hipotesis}>Volumen estimado</h2>
+        {onClose && (
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Plegar volumen estimado">
+            <X size={15} />
+          </button>
+        )}
       </header>
 
-      {!conBasal ? (
-        /* Sin basal la caída no se puede calcular: se dice, no se inventa un 0 %. */
-        <div className="vessel-wrap">
-          <div className="vessel is-idle" aria-hidden="true">
-            <div className="vessel-grid" />
-          </div>
-          <div className="vessel-meta">
-            <span className="section-label">Sin referencia</span>
-            <span className="vessel-idle-msg">Esperando el valor basal</span>
-            <div className="hairline" style={{ margin: '6px 0' }} />
-            <span style={{ fontSize: 'var(--t-xs)', color: 'var(--type-mute)', lineHeight: 1.5 }}>
-              Registre la impedancia con el paciente acomodado y la vejiga vacía,
-              desde <strong>Calibración</strong>. La estimación se mide como caída
-              respecto de ese valor.
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div className="vessel-wrap">
-          <div className={`vessel ${alcanzado ? 'alarm' : ''}`} aria-hidden="true">
-            <div className="vessel-grid" />
+      <div className="vessel-wrap">
+        <div className={`vessel ${!conBasal ? 'is-idle' : alcanzado ? 'alarm' : ''}`} aria-hidden="true">
+          <div className="vessel-grid" />
+          {conBasal && (
             <motion.div
               className="vessel-fill"
               style={{
@@ -116,45 +109,44 @@ export default function BladderVisual({
                 willChange: 'transform',
               }}
             />
-          </div>
+          )}
+        </div>
 
+        {!conBasal ? (
+          /* Sin basal la caída no se puede calcular: se dice, no se inventa un 0 %. */
           <div className="vessel-meta">
-            <span className="section-label">Llenado relativo</span>
+            <span className="vessel-idle-msg">Esperando el basal</span>
+            <span className="vessel-note">Fijalo desde Calibración, con la vejiga vacía.</span>
+          </div>
+        ) : (
+          <div className="vessel-meta">
             <span className="vessel-pct numeric">
               <motion.span>{pctDisplay}</motion.span>
-              <span style={{ color: 'var(--type-low)', fontSize: 'var(--t-xl)' }}>%</span>
+              <span className="vessel-pct-unit">%</span>
             </span>
             <span className="vessel-vol numeric">
-              ≈ <motion.span>{volDisplay}</motion.span> ml de {capacityMl}
+              ≈ <motion.span>{volDisplay}</motion.span> ml
             </span>
-
-            {/* La magnitud que sostiene la hipótesis, a la vista */}
-            <div className="vessel-db">
-              <span>
-                caída <strong className="numeric">
-                  {caida === null ? '—' : `${caida >= 0 ? '' : '−'}${Math.abs(caida).toFixed(2)}`}
-                </strong> dB de {umbralDb}
+            <dl className="vessel-facts">
+              <dt>Caída</dt>
+              <dd className="numeric">
+                {caida === null ? '—' : `${caida >= 0 ? '' : '−'}${Math.abs(caida).toFixed(2)}`} / {umbralDb} dB
+              </dd>
+              <dt>Umbral</dt>
+              <dd className="numeric">{zUmbral.toFixed(2)} Ω</dd>
+            </dl>
+            {(alcanzado || cerca) && (
+              <span className={`vessel-note ${alcanzado ? 'is-alarm' : ''}`}>
+                {alcanzado
+                  ? 'Umbral alcanzado: confirmá con el paciente si tiene ganas.'
+                  : 'Cerca del umbral: anotá cuándo refiere ganas.'}
               </span>
-              <span className="mute">
-                basal {initialValue.toFixed(2)} Ω → umbral {zUmbral.toFixed(2)} Ω
-              </span>
-            </div>
-
-            <div className="hairline" style={{ margin: '6px 0' }} />
-            <span style={{ fontSize: 'var(--t-xs)', color: 'var(--type-mute)', lineHeight: 1.5 }}>
-              {alcanzado
-                ? <>Se alcanzó la caída de {umbralDb} dB: según la hipótesis en estudio,
-                    el punto en que aparecen las ganas. <strong>Falta validarlo</strong> contra
-                    lo que refiere el paciente.</>
-                : cerca
-                  ? <>Cerca del umbral de {umbralDb} dB. Anote cuándo el paciente refiere ganas:
-                      es el dato que valida la hipótesis.</>
-                  : <>Hipótesis en estudio: las ganas aparecen con una caída de {umbralDb} dB
-                      respecto del basal. No reemplaza a la sensación del paciente.</>}
-            </span>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {footer && <div className="bladder-footer">{footer}</div>}
     </section>
   );
 }

@@ -24,6 +24,9 @@ export default defineConfig(({ command, mode }) => {
     // Base relativa: los assets se referencian como ./assets/... para que
     // carguen bajo file:// dentro del ejecutable de Electron.
     base: './',
+    // El modelo 3D de la placa (src/assets/chidori-pcb.glb) se importa como
+    // asset; Vite no reconoce .glb por su cuenta.
+    assetsInclude: ['**/*.glb'],
     plugins: [react()],
     resolve: {
       alias: {

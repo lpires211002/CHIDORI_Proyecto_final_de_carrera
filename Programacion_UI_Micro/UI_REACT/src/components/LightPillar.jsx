@@ -18,6 +18,11 @@ import * as THREE from 'three';
  *   · Respeta `prefers-reduced-motion`: rinde un solo cuadro y se detiene.
  *   · El shader se recompila solo si cambia la calidad; el resto de los props
  *     viajan por uniform.
+ *   · `ink`: variante para tema claro. En vez de luz sobre negro opaco (que
+ *     solo funciona sumada con `screen` sobre un fondo oscuro), el brillo de
+ *     cada píxel se usa como opacidad de un color de tinta, con el fondo
+ *     transparente. Sobre papel se lee como trazo índigo y no queda ningún
+ *     rectángulo alrededor del canvas.
  *
  * Sin WebGL devuelve null: es decoración, no puede romper la pantalla ni
  * mostrar un cartel de error.
@@ -37,6 +42,11 @@ const LightPillar = ({
   pillarRotation = 0,
   quality = 'high',
   paused = false,
+  ink = null,          // hex · si viene, se dibuja como tinta sobre fondo transparente
+  inkAlpha = 0.6,      // opacidad máxima de la tinta (núcleo del pilar)
+  /* Modo liviano · de fondo durante una medición de horas: 24 fps y media
+     resolución. Se cambia en caliente (sin recompilar ni perder la animación). */
+  lite = false,
 }) => {
   const containerRef = useRef(null);
   const rafRef = useRef(null);
@@ -49,10 +59,23 @@ const LightPillar = ({
   const timeRef = useRef(0);
   const rotationSpeedRef = useRef(rotationSpeed);
   const pausedRef = useRef(paused);
+  const liteRef = useRef(lite);
+  const basePixelRatioRef = useRef(1);
   const [webGLSupported, setWebGLSupported] = useState(true);
 
   useEffect(() => { rotationSpeedRef.current = rotationSpeed; }, [rotationSpeed]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => {
+    liteRef.current = lite;
+    const r = rendererRef.current;
+    const c = containerRef.current;
+    if (!r || !c) return;
+    const base = basePixelRatioRef.current;
+    r.setPixelRatio(lite ? Math.min(0.5, base) : base);
+    r.setSize(c.clientWidth, c.clientHeight);
+    // setSize borra el lienzo: sin esto, con movimiento reducido quedaba vacío
+    if (sceneRef.current && cameraRef.current) r.render(sceneRef.current, cameraRef.current);
+  }, [lite]);
 
   useEffect(() => {
     const canvas = document.createElement('canvas');
@@ -107,8 +130,9 @@ const LightPillar = ({
       setWebGLSupported(false);
       return;
     }
+    basePixelRatioRef.current = settings.pixelRatio;
+    renderer.setPixelRatio(liteRef.current ? Math.min(0.5, settings.pixelRatio) : settings.pixelRatio);
     renderer.setSize(width, height);
-    renderer.setPixelRatio(settings.pixelRatio);
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -144,6 +168,9 @@ const LightPillar = ({
       uniform float uPillarRotSin;
       uniform float uWaveSin;
       uniform float uWaveCos;
+      uniform float uInkMode;
+      uniform vec3 uInkColor;
+      uniform float uInkAlpha;
       varying vec2 vUv;
 
       const float STEP_MULT = ${settings.stepMultiplier.toFixed(1)};
@@ -197,9 +224,27 @@ const LightPillar = ({
 
         float widthNorm = uPillarWidth / 3.0;
         col = tanh(col * uGlowAmount / widthNorm);
-        col -= fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) / 15.0 * uNoiseIntensity;
+        // Dither de grano · solo sobre negro. En modo tinta el brillo pasa a
+        // ser opacidad y el grano se vería como ruido sobre el papel.
+        if (uInkMode < 0.5) {
+          col -= fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) / 15.0 * uNoiseIntensity;
+        }
 
-        gl_FragColor = vec4(col * uIntensity, 1.0);
+        col *= uIntensity;
+
+        if (uInkMode > 0.5) {
+          // Brillo → opacidad. El cuerpo del pilar tiene un brillo medio
+          // parejo: con umbral bajo se pintaba entero como una mancha. Desde
+          // 0,3 y con curva, solo quedan marcados los filamentos.
+          float lum = clamp(max(max(col.r, col.g), col.b), 0.0, 1.0);
+          float a = pow(smoothstep(0.30, 1.0, lum), 1.6) * uInkAlpha;
+          // El núcleo, donde el original satura a blanco, se oscurece un poco
+          // en vez de aclararse: en papel la densidad se lee como más tinta.
+          vec3 c = mix(uInkColor, uInkColor * 0.8, smoothstep(0.6, 1.0, lum));
+          gl_FragColor = vec4(c, a);
+        } else {
+          gl_FragColor = vec4(col, 1.0);
+        }
       }
     `;
 
@@ -225,6 +270,9 @@ const LightPillar = ({
         uPillarRotSin:  { value: Math.sin(pillarRotRad) },
         uWaveSin:       { value: Math.sin(0.4) },
         uWaveCos:       { value: Math.cos(0.4) },
+        uInkMode:       { value: ink ? 1.0 : 0.0 },
+        uInkColor:      { value: parseColor(ink || '#000000') },
+        uInkAlpha:      { value: inkAlpha },
       },
       transparent: true,
       depthWrite: false,
@@ -262,14 +310,15 @@ const LightPillar = ({
         if (pausedRef.current) return;
 
         const deltaTime = currentTime - lastTime;
-        if (deltaTime >= frameTime) {
+        const ft = liteRef.current ? 1000 / 24 : frameTime;
+        if (deltaTime >= ft) {
           timeRef.current += 0.016 * rotationSpeedRef.current;
           const t = timeRef.current;
           materialRef.current.uniforms.uTime.value = t;
           materialRef.current.uniforms.uRotCos.value = Math.cos(t * 0.3);
           materialRef.current.uniforms.uRotSin.value = Math.sin(t * 0.3);
           rendererRef.current.render(sceneRef.current, cameraRef.current);
-          lastTime = currentTime - (deltaTime % frameTime);
+          lastTime = currentTime - (deltaTime % ft);
         }
       };
       rafRef.current = requestAnimationFrame(animate);
@@ -343,6 +392,15 @@ const LightPillar = ({
   useEffect(() => {
     if (materialRef.current) materialRef.current.uniforms.uNoiseIntensity.value = noiseIntensity;
   }, [noiseIntensity]);
+  useEffect(() => {
+    if (!materialRef.current) return;
+    const u = materialRef.current.uniforms;
+    u.uInkMode.value = ink ? 1.0 : 0.0;
+    if (ink) u.uInkColor.value = toVec(ink);
+    u.uInkAlpha.value = inkAlpha;
+    // Con reduced-motion no hay bucle: se vuelve a pintar el único cuadro.
+    rendererRef.current?.render(sceneRef.current, cameraRef.current);
+  }, [ink, inkAlpha]);
   useEffect(() => {
     if (!materialRef.current) return;
     const rad = (pillarRotation * Math.PI) / 180;

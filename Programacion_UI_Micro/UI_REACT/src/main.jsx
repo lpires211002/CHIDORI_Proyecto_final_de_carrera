@@ -2,10 +2,9 @@ import { createRoot } from 'react-dom/client'
 
 // Fuentes empaquetadas en el bundle · NO por CDN: la app funciona sin internet
 // (conectada al Access Point del equipo), donde Google Fonts no cargaría.
-import '@fontsource/montserrat/400.css'
-import '@fontsource/montserrat/500.css'
-import '@fontsource/montserrat/600.css'
-import '@fontsource/montserrat/700.css'
+// Space Grotesk + JetBrains Mono van como archivos propios (src/fonts.css):
+// así no hace falta instalar paquetes nuevos.
+import './fonts.css'
 import '@fontsource/climate-crisis'          // solo para la marca "Chidori"
 
 import './index.css'

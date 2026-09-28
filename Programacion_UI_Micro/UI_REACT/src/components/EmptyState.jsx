@@ -3,9 +3,8 @@ import { Plug, RefreshCw, UserRound, Check, Play } from 'lucide-react';
 import { patientLabel } from '../lib/patients';
 import SpecularButton from './SpecularButton';
 
-// Carga diferida: three.js pesa, y así no demora el arranque de la app.
-// Solo se descarga/monta en esta pantalla previa a la medición.
-const LightPillar = lazy(() => import('./LightPillar'));
+// La placa 3D · carga diferida: three.js + el modelo (~1 MB) solo en esta pantalla.
+const DeviceModel = lazy(() => import('./DeviceModel'));
 
 /**
  * Pantalla de inicio · antes de que llegue el primer dato.
@@ -39,6 +38,9 @@ export default function EmptyState({
   onReconnect,
   onPickPatient,
   onStart,
+  /* Resumen de la alarma ya configurada ({ label, sub, tone }). Es lo único
+     real que muestran las tarjetas flotantes antes de medir. */
+  alarm = null,
 }) {
   const enlazado     = wsStatus === 'CONNECTED' || isSimulator;
   const reconectando = wsStatus === 'CONNECTING';
@@ -57,31 +59,15 @@ export default function EmptyState({
 
   return (
     <div className="start-screen">
-      {/* Fondo · columna de luz. Se desmonta al iniciar la medición (este
-          componente deja de renderizarse), así que no consume GPU durante una
-          sesión larga. */}
-      <div className="start-screen__bg" aria-hidden="true">
-        <Suspense fallback={null}>
-          <LightPillar
-            /* Los valores de fábrica: bajarlos apagaba los filamentos y el
-               efecto quedaba como una mancha. Lo único propio son los colores
-               —indigo de marca en vez del violeta/rosa— manteniendo el rango
-               de luminancia del original, que es lo que da el relieve. */
-            topColor="#b8cdff"
-            bottomColor="#3c32da"
-            intensity={1.0}
-            rotationSpeed={0.28}
-            glowAmount={0.005}
-            pillarWidth={3.0}
-            pillarHeight={0.4}
-            noiseIntensity={0.4}
-            /* Inclinado como en el ejemplo: los filamentos cruzan el cuadro en
-               diagonal en vez de subir rectos por el medio. */
-            pillarRotation={-16}
-            mixBlendMode="screen"
-          />
-        </Suspense>
-      </div>
+      {/* La columna de luz ya no vive acá: es el fondo de toda la app
+          (AppBackdrop, en Dashboard) y sigue detrás del dashboard al medir. */}
+
+      {/* Vista previa del dashboard · las mismas celdas que vas a ver al medir,
+          vacías. Al iniciar, cada una vuela a su lugar (FLIP en Dashboard, por
+          el atributo data-fly). Sin números inventados: en reposo no hay
+          lectura, y una cifra de muestra se confundiría con una. */}
+      {/* La placa se ilumina solo con el equipo real enlazado, no con el simulador. */}
+      <StartPreview alarm={alarm} linked={wsStatus === 'CONNECTED'} />
 
       <div className="start-screen__content">
         <header className="start-screen__head">
@@ -191,6 +177,58 @@ export default function EmptyState({
             {isSimulator ? 'Desactivar simulador' : 'Usar simulador en su lugar'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* Curva fantasma · forma de un llenado (la impedancia baja mientras la vejiga
+   se llena). Es decorativa: no tiene ejes ni valores. */
+const GHOST_PATH =
+  'M0 34 C 26 33, 44 36, 64 38 S 104 44, 126 50 S 170 58, 196 66 S 240 78, 262 84 S 300 96, 320 100';
+
+function FloatCard({ fly, label, value, unit, sub, tone, className = '', style }) {
+  return (
+    <div className={`float-card ${className}`} data-fly={fly} style={style}>
+      <span className="readout-label">{label}</span>
+      <span className={`readout-value ${tone ? `tone-${tone}` : ''}`}>
+        {value}
+        {unit && <span className="readout-unit">{unit}</span>}
+      </span>
+      {sub && <span className="readout-delta mute">{sub}</span>}
+    </div>
+  );
+}
+
+function StartPreview({ alarm, linked }) {
+  const dash = <span className="mute">—</span>;
+  return (
+    <div className="start-float" aria-hidden="true">
+      {/* La placa en el centro del collage; las tarjetas la rodean. */}
+      <Suspense fallback={null}>
+        <DeviceModel linked={linked} className="start-device" />
+      </Suspense>
+
+      <FloatCard fly="z"     className="fc-z"     label="Impedancia" value={dash} unit="Ω"     sub="esperando la primera muestra" style={{ '--i': 0 }} />
+      <FloatCard fly="v"     className="fc-v"     label="Tensión"    value={dash} unit="V"     sub="sin dato del equipo"         style={{ '--i': 1 }} />
+      <FloatCard fly="vol"   className="fc-vol"   label="Volumen"    value={dash} unit="%"     sub="sin basal"                   style={{ '--i': 2 }} />
+      <FloatCard
+        fly="alarm"
+        className="fc-alarm"
+        label="Alarma"
+        value={<span className="is-word">{alarm?.label ?? 'Desactivada'}</span>}
+        sub={alarm?.sub ?? 'sin configurar'}
+        tone={alarm?.tone}
+        style={{ '--i': 3 }}
+      />
+      <FloatCard fly="rate"  className="fc-rate"  label="Tasa"       value={dash} unit="Ω/min" sub="disponible a los 3 min"      style={{ '--i': 4 }} />
+
+      <div className="float-card fc-chart" data-fly="chart" style={{ '--i': 5 }}>
+        <span className="readout-label">Impedancia · tiempo real</span>
+        <svg className="fc-chart-svg" viewBox="0 0 320 110" preserveAspectRatio="none">
+          <line x1="0" y1="34" x2="320" y2="34" className="fc-chart-base" />
+          <path d={GHOST_PATH} className="fc-chart-line" />
+        </svg>
       </div>
     </div>
   );

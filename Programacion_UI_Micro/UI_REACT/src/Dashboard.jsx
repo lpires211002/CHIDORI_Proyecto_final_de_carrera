@@ -1,24 +1,28 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Play, Pause, Bookmark, RotateCcw, Download, Moon, Sun,
   Settings as SettingsIcon, Cpu, LogOut, Shield, Menu,
-  ZapOff, GlassWater, Toilet,
+  ZapOff, GlassWater, Toilet, X,
 } from 'lucide-react';
 
 import SettingsPanel     from './components/SettingsPanel';
 import MobileMenu, { MobileMenuItem, MobileMenuSection } from './components/MobileMenu';
 import HeaderMenu        from './components/HeaderMenu';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import StatsGrid         from './components/StatsGrid';
 import RealTimeCharts    from './components/RealTimeCharts';
 import Timeline          from './components/Timeline';
 import ExportModal       from './components/ExportModal';
-import BladderVisual     from './components/BladderVisual';
+import BladderVisual, { caidaDb, UMBRAL_GANAS_DB } from './components/BladderVisual';
+import ReadoutToggle     from './components/ReadoutToggle';
 import CalibrationWizard from './components/CalibrationWizard';
 import AlarmBanner       from './components/AlarmBanner';
 import CloudSyncBadge    from './components/CloudSyncBadge';
 import ConfirmModal      from './components/ConfirmModal';
 import Toasts            from './components/Toasts';
 import EmptyState        from './components/EmptyState';
+import AppBackdrop       from './components/AppBackdrop';
+import { unlockAlarmAudio, requestAlarmNotifications } from './lib/alarmSound';
 import SpotlightArea     from './components/SpotlightArea';
 import LineTabs          from './components/LineTabs';
 import PatientGate       from './components/PatientGate';
@@ -70,6 +74,8 @@ const USER_ACTION_GRACE = 2000;    // ventana anti-race tras una acción del usu
  * más de STALE_AFTER_MS sin datos con el socket abierto, el último valor en
  * pantalla ya no es confiable y hay que decirlo. */
 const STALE_AFTER_MS    = 3000;
+/* Capacidad de referencia del volumen estimado (la misma que usa BladderVisual) */
+const VOLUMEN_MAX_ML    = 500;
 /* Microcortes · el firmware transmite cada 250 ms (4 Hz). Un hueco mayor a
  * esto implica muestras perdidas aunque el WebSocket nunca se haya cerrado
  * (típico de interferencia WiFi). Se registra como evento para que el vacío
@@ -141,6 +147,15 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   /* Instante en que la TENDENCIA cruzó el umbral de alarma hacia abajo.
    * La alarma exige que se sostenga ALARM_PERSIST_S. */
   const alarmBelowSinceRef = useRef(null);
+  /* Espejo en estado, solo para mostrar la cuenta regresiva ("dispara en N s"):
+   * sin eso, durante los 30 s de confirmación la celda seguía diciendo
+   * "Armada" y parecía que la alarma no hacía nada. */
+  const [alarmBelowSince, setAlarmBelowSince] = useState(null);
+  const setBelowSince = (v) => {
+    if (alarmBelowSinceRef.current === v) return;
+    alarmBelowSinceRef.current = v;
+    setAlarmBelowSince(v);
+  };
 
   /* ── Reloj del EQUIPO ────────────────────────────────────────────────
    * El firmware manda su propio millis() con cada muestra. Con eso, cada
@@ -277,7 +292,25 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // Volver a inicio desde la marca · misma operación que reiniciar, pero se
   // confirma aparte para poder explicar por qué se pregunta.
   const [confirmHome, setConfirmHome]       = useState(false);
+  // Sección plegable abierta debajo del monitor · 'config' | 'events' | null
   const [setupTab, setSetupTab]             = useState('config'); // 'config' | 'events'
+  // Paneles plegables de arriba a la derecha · plegados = gráfico a todo el ancho
+  const [showVolume, setShowVolume]         = useState(false);
+  const [showAlarm, setShowAlarm]           = useState(false);
+
+  /* Motion de los paneles plegables · entran desde la derecha con un resorte
+   * sin rebote (acompaña a la columna, que se abre en ese sentido) y salen
+   * con un fundido corto: salir más rápido que entrar se siente más ágil.
+   * `layout` hace que, con los dos abiertos, el que queda se reacomode
+   * suave en vez de saltar cuando se cierra el otro.
+   * Con "reducir movimiento" no hay animación: aparecen y desaparecen. */
+  const reduceMotion = useReducedMotion();
+  const panelMotion = reduceMotion ? {} : {
+    layout: 'position',
+    initial: { opacity: 0, x: 28 },
+    animate: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 260, damping: 30 } },
+    exit:    { opacity: 0, x: 28, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } },
+  };
   const [toasts, setToasts]                 = useState([]);
   const [signalStale, setSignalStale]       = useState(false);
   // Respaldo recuperable · lazy init desde localStorage (evita setState en effect)
@@ -702,7 +735,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       if (threshold !== null && Number.isFinite(threshold)) {
         const margin = Math.max(0.5, Math.abs(threshold) * 0.02);
         if (alarmValue <= threshold) {
-          if (alarmBelowSinceRef.current == null) alarmBelowSinceRef.current = elapsed;
+          if (alarmBelowSinceRef.current == null) setBelowSince(elapsed);
           const held = elapsed - alarmBelowSinceRef.current;
           if (held >= ALARM_PERSIST_S && cur.alarmArmed && !cur.alarmFired) {
             setAlarmFired(true);
@@ -710,13 +743,13 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           }
         } else {
           // Volvió por encima del umbral: el reloj de persistencia se reinicia.
-          alarmBelowSinceRef.current = null;
+          setBelowSince(null);
           if (alarmValue >= threshold + margin
               && !cur.alarmArmed && !cur.alarmFired) setAlarmArmed(true);
         }
       }
     } else {
-      alarmBelowSinceRef.current = null;
+      setBelowSince(null);
     }
   };
 
@@ -927,9 +960,42 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     return false;
   };
 
+  /* ── Entrada al dashboard · las tarjetas vuelan a su lugar ──────────────
+   * La pantalla de inicio muestra las mismas celdas que el dashboard, vacías
+   * y flotando alrededor de la placa. Al iniciar se guarda dónde estaba cada
+   * una (atributo data-fly) y, ya montado el dashboard, cada celda real arranca
+   * dibujada en esa posición y tamaño y se desliza a la suya (FLIP con la Web
+   * Animations API: sin medir en cada render ni dependencias nuevas).
+   * Solo transform: no cambia el layout ni lo que se lee al terminar. */
+  const flyFromRef = useRef(null);
+
+  const captureStartCards = () => {
+    flyFromRef.current = null;
+    const startEl = document.querySelector('.start-screen');
+    if (!startEl) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const rects = {};
+    startEl.querySelectorAll('[data-fly]').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      // En la pantalla de inicio las tarjetas están apagadas (detrás de la
+      // placa): el vuelo arranca desde esa opacidad.
+      const alpha = Number(getComputedStyle(el).opacity) || 1;
+      if (r.width > 0 && r.height > 0) {
+        rects[el.dataset.fly] = { left: r.left, top: r.top, width: r.width, height: r.height, alpha };
+      }
+    });
+    // Las originales se esconden: desde acá "son" las del dashboard
+    startEl.classList.add('is-leaving');
+    if (Object.keys(rects).length) {
+      flyFromRef.current = rects;
+      document.querySelector('.app-main')?.classList.add('is-intro');
+    }
+  };
+
+
   const toggleMeasuring = async () => {
     if (wsStatus !== 'CONNECTED' && !isSimulator) {
-      toast('Sin conexión. Active el simulador o configure el dispositivo.', 'warn');
+      toast('Sin conexión. Activá el simulador o configurá el dispositivo.', 'warn');
       return;
     }
 
@@ -938,6 +1004,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
 
     // Marca la acción para que el reconciliador no la pise con un STATUS en vuelo.
     lastUserActionRef.current = Date.now();
+    captureStartCards();      // antes de que la pantalla de inicio se desmonte
     setArmado(true);          // a partir de acá Reiniciar no devuelve al inicio
 
     if (!measuring) {
@@ -953,7 +1020,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         baselineSamplesRef.current = [];
         baselineLockedRef.current  = false;
         residualBufRef.current     = [];
-        alarmBelowSinceRef.current = null;
+        setBelowSince(null);
         dataBufRef.current = [];
         rateBufRef.current = [];
         espT0Ref.current      = null;
@@ -976,9 +1043,11 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       sendCommand('START');
       setMeasuring(true);
 
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
-      }
+      // Dentro del click de Iniciar: habilita el sonido de la alarma (los
+      // navegadores lo bloquean si se crea sin un gesto) y pide permiso de
+      // notificaciones.
+      unlockAlarmAudio();
+      requestAlarmNotifications();
     } else {
       sendCommand('STOP');
       setMeasuring(false);
@@ -1154,7 +1223,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     baselineSamplesRef.current = [];
     baselineLockedRef.current  = false;
     residualBufRef.current     = [];
-    alarmBelowSinceRef.current = null;
+    setBelowSince(null);
     lastAcceptedZRef.current   = null;
     consecRejectRef.current    = 0;
     dataBufRef.current = [];
@@ -1325,6 +1394,67 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // Reposo · todavía no empezó ninguna sesión. Manda la pantalla de
   // preparación: no hay cronómetro, ni eventos, ni nada que exportar.
   const idle = !hasAnyData && !measuring && !armado;
+
+  // Entrada animada al dashboard (ver captureStartCards). Va después de
+  // `idle` porque depende de él.
+  useLayoutEffect(() => {
+    if (idle) return undefined;
+    const from = flyFromRef.current;
+    flyFromRef.current = null;
+    if (!from) return undefined;
+
+    const area = document.querySelector('.spotlight-area');
+    const main = document.querySelector('.app-main');
+    if (!area) { main?.classList.remove('is-intro'); return undefined; }
+
+    // Durante el vuelo las celdas salen de la grilla: sin esto el recorte de
+    // .readout (overflow: hidden) las cortaría.
+    const readout = area.querySelector('.readout');
+    readout?.classList.add('is-arriving');
+
+    const anims = [];
+    area.querySelectorAll('[data-fly]').forEach((el) => {
+      const src = from[el.dataset.fly];
+      if (!src) return;
+      const dst = el.getBoundingClientRect();
+      if (!dst.width || !dst.height) return;
+      el.classList.add('is-flying');
+      anims.push(el.animate(
+        [
+          {
+            transformOrigin: '0 0',
+            transform: `translate(${src.left - dst.left}px, ${src.top - dst.top}px) scale(${src.width / dst.width}, ${src.height / dst.height})`,
+            opacity: src.alpha,
+          },
+          { transformOrigin: '0 0', transform: 'none', opacity: 1 },
+        ],
+        {
+          duration: 820,
+          delay: anims.length * 55,
+          easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          fill: 'backwards',
+        },
+      ));
+    });
+
+    let cancelled = false;
+    const done = () => {
+      if (cancelled) return;
+      readout?.classList.remove('is-arriving');
+      area.querySelectorAll('.is-flying').forEach((el) => el.classList.remove('is-flying'));
+      main?.classList.remove('is-intro');
+    };
+    const tail = setTimeout(done, 1600);             // por si una animación no resuelve
+    Promise.all(anims.map((a) => a.finished.catch(() => {}))).then(done);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(tail);
+      anims.forEach((a) => a.cancel());
+      readout?.classList.remove('is-arriving');
+      main?.classList.remove('is-intro');
+    };
+  }, [idle]);
   const primaryButtonLabel = measuring ? 'Pausar' : (startTime ? 'Reanudar' : 'Iniciar adquisición');
 
   // Estado mostrado en el CloudSyncBadge. Se sobreescribe a 'pending'
@@ -1337,13 +1467,23 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   }, [cloud.state, data.length, persistedSessionId]);
 
   // Estado resumido de la alarma para el panel lateral
+  // Confirmación en curso: la tendencia ya está bajo el umbral y tiene que
+  // sostenerse ALARM_PERSIST_S antes de disparar.
+  const lastSampleT = data.length ? data[data.length - 1].x : null;
+  const alarmCountdown = (alarmEnabled && alarmArmed && !alarmFired
+      && alarmBelowSince != null && lastSampleT != null)
+    ? Math.max(0, Math.ceil(ALARM_PERSIST_S - (lastSampleT - alarmBelowSince)))
+    : null;
+
   const alarmStatus = !alarmEnabled
     ? { label: 'Desactivada', cls: 'pill-off', tag: 'Off' }
     : alarmFired
       ? { label: 'Disparada', cls: 'pill-alarm', tag: 'Activa' }
-      : alarmArmed
-        ? { label: 'Armada', cls: 'pill-amber', tag: 'Preventiva' }
-        : { label: 'En espera', cls: 'pill-off', tag: 'Rearmando' };
+      : alarmCountdown != null
+        ? { label: 'Confirmando', cls: 'pill-alarm', tag: 'Bajo el umbral' }
+        : alarmArmed
+          ? { label: 'Armada', cls: 'pill-amber', tag: 'Preventiva' }
+          : { label: 'En espera', cls: 'pill-off', tag: 'Rearmando' };
 
   // Calidad de enlace derivada del RSSI reportado por el firmware.
   const linkQuality = device.rssi == null ? null
@@ -1363,7 +1503,34 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
   // Acciones secundarias · viven en el menú ⋯ (desktop) y en el MobileMenu.
   // Acciones del menú ⋯ · sin separadores: el ritmo de ticks del marcador ya
   // separa las entradas (ver HeaderMenu).
+  /* Resumen del volumen para la celda plegada · misma cuenta que BladderVisual
+   * (caída en dB sobre el basal, 100 % = UMBRAL_GANAS_DB), sobre la tendencia. */
+  const zVolumen = zTrend ?? currentValue;
+  const volCaida = initialValue > 0 && zVolumen != null ? caidaDb(zVolumen, initialValue) : null;
+  const volPct   = volCaida == null ? null : Math.max(0, Math.min(100, (volCaida / UMBRAL_GANAS_DB) * 100));
+  const volMl    = volPct == null ? null : Math.round((volPct / 100) * VOLUMEN_MAX_ML);
+
+  /* Acciones de sesión que no se usan a cada rato: viven en el menú ⋯ para
+   * que la barra de control quede con lo que sí se toca durante la medición
+   * (pausar, marcar, agua, micción, exportar). */
+  const canSimulateGap = !idle && isSimulator && measuring;
+  const canReset       = !idle && (Boolean(startTime) || data.length > 0);
+  const sessionMenuItems = [
+    ...(canSimulateGap
+      ? [{
+          icon: ZapOff,
+          label: 'Simular corte',
+          hint: `Corta la transmisión durante ${SIM_GAP_SAMPLES} muestras`,
+          onClick: simulateMicroGap,
+        }]
+      : []),
+    ...(canReset
+      ? [{ icon: RotateCcw, label: 'Reiniciar sesión', hint: 'Descarta la medición en curso', onClick: () => setConfirmReset(true) }]
+      : []),
+  ];
+
   const overflowItems = [
+    ...sessionMenuItems,
     ...(isAdmin && onSwitchToAdmin
       ? [{ icon: Shield, label: 'Panel de administración', hint: 'Volver a la vista admin', onClick: onSwitchToAdmin }]
       : []),
@@ -1393,7 +1560,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       <AlarmBanner
         active={alarmFired}
         message="Umbral preventivo alcanzado · la vejiga está próxima a su capacidad calibrada"
-        hint="Sugiera al paciente que orine. La alarma seguirá activa hasta que se reconozca."
+        hint="Sugerile al paciente que orine. La alarma sigue activa hasta que la reconozcas."
         onAcknowledge={() => setAlarmFired(false)}
       />
 
@@ -1424,7 +1591,9 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               : wsStatus === 'CONNECTING' ? 'pill-syncing'
               : 'pill-alarm'
             }`}
-            title={signalStale ? 'Socket abierto pero sin datos del firmware' : connectionTitle}
+            title={signalStale
+              ? 'Socket abierto pero sin datos del firmware'
+              : `${connectionTitle}${voltage != null ? ` · tensión de lectura ${voltage.toFixed(4)} V${voltageIsRaw ? '' : ' (Vpp reconstruida)'}` : ''}`}
           >
             <span className="pill-dot" />
             {isSimulator ? 'Simulador'
@@ -1447,7 +1616,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           {activePatient && (
             <button
               type="button"
-              className="pill pill-live"
+              className="pill pill-live pill-patient"
               onClick={() => setGateOpen(true)}
               title="Paciente de esta sesión · click para cambiar"
               style={{ cursor: 'pointer' }}
@@ -1457,7 +1626,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             </button>
           )}
 
-          <span className="pill pill-off" title={`Sesión iniciada como ${displayName}`}>
+          <span className="pill pill-off pill-user" title={`Sesión iniciada como ${displayName}`}>
             <span className="pill-dot" />
             {displayName}
           </span>
@@ -1521,7 +1690,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
           <div className="command-primary">
             <button
               type="button"
-              className={`button button-lg ${measuring ? '' : 'button-primary'}`}
+              className="button button-lg button-primary"
               onClick={toggleMeasuring}
             >
               {measuring ? <Pause size={16} /> : <Play size={16} />}
@@ -1559,23 +1728,6 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
               Micción
             </button>
 
-            {/* Solo en simulador · prueba de la detección de microcortes */}
-            {isSimulator && (
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={simulateMicroGap}
-                disabled={!measuring}
-                title={`Corta la transmisión simulada durante ${SIM_GAP_SAMPLES} muestras`}
-              >
-                <ZapOff size={14} />
-                Simular corte
-              </button>
-            )}
-            <button type="button" className="button button-ghost" onClick={() => setConfirmReset(true)} disabled={!startTime && data.length === 0}>
-              <RotateCcw size={14} />
-              Reiniciar
-            </button>
             <button type="button" className="button button-ghost" onClick={() => setIsExportOpen(true)}>
               <Download size={14} />
               Exportar
@@ -1584,8 +1736,22 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         </section>
         )}
 
-        {idle ? (
+        {/* Fondo de toda la app · la columna de luz sigue detrás del dashboard
+            al empezar a medir (atenuada y en modo liviano). */}
+        <AppBackdrop theme={theme} mode={idle ? 'start' : 'dash'} />
+
+        {/* La pantalla de inicio sale con un fundido y, mientras tanto, queda
+            fuera del flujo (popLayout): el dashboard ocupa su lugar de
+            inmediato y las celdas vuelan por encima del pilar que se apaga. */}
+        <AnimatePresence mode="popLayout" initial={false}>
+        {idle && (
+          <motion.div
+            key="start"
+            className="start-wrap"
+            exit={{ opacity: 0, transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] } }}
+          >
           <EmptyState
+            theme={theme}
             wsStatus={wsStatus}
             isSimulator={isSimulator}
             wsConfig={wsConfig}
@@ -1597,193 +1763,216 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             onReconnect={connectWebSocket}
             onPickPatient={() => setGateOpen(true)}
             onStart={toggleMeasuring}
+            alarm={{
+              label: alarmStatus.label,
+              sub: alarmEnabled ? 'se arma con el basal' : 'sin configurar',
+              tone: alarmStatus.cls === 'pill-alarm' ? 'alarm' : alarmStatus.cls === 'pill-amber' ? 'amber' : null,
+            }}
           />
-        ) : (
+          </motion.div>
+        )}
+        </AnimatePresence>
+
+        {!idle && (
           /* Foco + borde luminoso sobre las tarjetas reales de medición.
              Es solo presentación: no altera datos ni interacción. */
           <SpotlightArea>
-            {/* ── Grid de monitoreo · señal (izq) + vejiga hero (der) ── */}
-            <div className="monitor-grid">
-              <div className="monitor-main">
-                <StatsGrid
-                  voltage={voltage}
-                  voltageIsRaw={voltageIsRaw}
-                  initialValue={initialValue}
-                  currentValue={currentValue}
-                  trendValue={zTrend}
-                  artifact={artifact}
-                  rate={rate}
-                  zHistory={data}
-                  rateHistory={rateData}
-                  stale={signalStale}
-                />
-                <RealTimeCharts data={data} rateData={rateData} voltageData={voltageData} events={events} theme={theme} />
-              </div>
+            {/* ── Lecturas + resúmenes plegables en una sola fila ─────────
+                Volumen estimado y Alarma se muestran plegados como una celda
+                más (resumen de una línea). Al desplegarlos aparecen a la
+                derecha del gráfico, que solo entonces se angosta. */}
+            <StatsGrid
+              initialValue={initialValue}
+              currentValue={currentValue}
+              trendValue={zTrend}
+              artifact={artifact}
+              rate={rate}
+              voltage={voltage}
+              voltageIsRaw={voltageIsRaw}
+              stale={signalStale}
+              trailing={
+                <>
+                  <ReadoutToggle
+                    label="Volumen"
+                    value={volPct == null
+                      ? <span className="mute">—</span>
+                      : <>{Math.round(volPct)}<span className="readout-unit">%</span></>}
+                    sub={volPct == null ? 'sin basal' : `≈ ${volMl} ml`}
+                    tone={volPct == null ? null : volPct >= 100 ? 'alarm' : volPct >= 80 ? 'amber' : null}
+                    open={showVolume}
+                    onToggle={() => setShowVolume((v) => !v)}
+                    controls="panel-volumen"
+                    fly="vol"
+                    title={showVolume ? 'Plegar volumen estimado' : 'Ver volumen estimado'}
+                  />
+                  <ReadoutToggle
+                    label="Alarma"
+                    value={alarmStatus.label}
+                    word
+                    sub={!alarmEnabled ? 'sin configurar'
+                      : alarmCountdown != null ? `bajo el umbral · dispara en ${alarmCountdown} s`
+                      : !alarmFired && !alarmArmed ? 'se rearma al volver sobre el umbral'
+                      : initialValue !== null ? `umbral ${thresholdPreview.toFixed(2)} Ω`
+                      : 'falta el basal'}
+                    tone={alarmStatus.cls === 'pill-alarm' ? 'alarm' : alarmStatus.cls === 'pill-amber' ? 'amber' : null}
+                    open={showAlarm}
+                    onToggle={() => setShowAlarm((v) => !v)}
+                    controls="panel-alarma"
+                    fly="alarm"
+                    title={showAlarm ? 'Plegar configuración de alarma' : 'Configurar alarma'}
+                  />
+                </>
+              }
+            />
 
-              <div className="monitor-side">
-                {/* Ya no depende del umbral de alarma: la escala es la
-                    hipótesis de los 1,5 dB sobre el basal.
-                    Se alimenta de la TENDENCIA: con la muestra cruda, cada
-                    movimiento del paciente hacía saltar la vejiga en pantalla. */}
-                <BladderVisual
-                  initialValue={initialValue}
-                  currentValue={zTrend ?? currentValue}
-                />
+            <div className={`monitor ${showVolume || showAlarm ? 'has-side' : ''}`}>
+              <RealTimeCharts data={data} rateData={rateData} voltageData={voltageData} events={events} theme={theme} />
 
-                {/* Resumen de alarma · vivo, siempre a la vista */}
-                <section className="surface surface-pad alarm-mini" aria-label="Estado de la alarma">
-                  <div className="row-between" style={{ alignItems: 'flex-start' }}>
-                    <div>
-                      <span className="section-label">Alarma preventiva</span>
-                      <h3 style={{ fontSize: 'var(--t-lg)', marginTop: 2 }}>{alarmStatus.label}</h3>
-                    </div>
-                    <span className={`pill ${alarmStatus.cls}`}>
-                      <span className="pill-dot" />
-                      {alarmStatus.tag}
-                    </span>
-                  </div>
-
-                  {alarmEnabled && initialValue !== null ? (
-                    <div className="alarm-mini-grid">
-                      <div>
-                        <span className="field-label">Umbral</span>
-                        <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
-                      </div>
-                      <div>
-                        <span className="field-label">Margen</span>
-                        <strong className="numeric">
-                          {alarmValueNow != null ? `${(alarmValueNow - thresholdPreview).toFixed(2)} Ω` : '—'}
-                        </strong>
-                      </div>
-                    </div>
-                  ) : (
-                    <span className="field-hint" style={{ marginTop: 4 }}>
-                      Configure el umbral en la pestaña <strong>Configuración</strong> para activar
-                      el aviso preventivo durante la sesión.
-                    </span>
+              {/* La columna lateral queda montada siempre: su ancho (0 ↔ 380 px)
+                  se anima por CSS y los paneles entran y salen con motion. Si
+                  se desmontara al plegar, la salida no llegaría a verse. El
+                  recorte evita que el panel se deforme mientras la columna se
+                  cierra. */}
+              <div className="monitor-side-clip">
+                <div className="monitor-side">
+                  <AnimatePresence initial={false}>
+                  {showVolume && (
+                    <motion.div key="volumen" className="side-panel" {...panelMotion}>
+                    {/* Se alimenta de la TENDENCIA: con la muestra cruda, cada
+                        movimiento del paciente hacía saltar la vejiga en pantalla. */}
+                    <BladderVisual
+                      id="panel-volumen"
+                      initialValue={initialValue}
+                      currentValue={zTrend ?? currentValue}
+                      onClose={() => setShowVolume(false)}
+                    />
+                    </motion.div>
                   )}
-                </section>
+
+                  {showAlarm && (
+                    <motion.div key="alarma" className="side-panel" {...panelMotion}>
+                    <section id="panel-alarma" className="surface surface-pad alarm-panel" aria-label="Configuración de la alarma">
+                      <header className="section-head">
+                        <h2 className="panel-title">Alarma preventiva</h2>
+                        <div className="row" style={{ gap: 10 }}>
+                          <label className="switch" title="Activar / desactivar alarma">
+                            <input
+                              type="checkbox"
+                              checked={alarmEnabled}
+                              onChange={(e) => {
+                                setAlarmEnabled(e.target.checked);
+                                if (e.target.checked) { unlockAlarmAudio(); requestAlarmNotifications(); }
+                              }}
+                            />
+                            <span className="switch-track" />
+                          </label>
+                          <button type="button" className="icon-button" onClick={() => setShowAlarm(false)} aria-label="Plegar alarma">
+                            <X size={15} />
+                          </button>
+                        </div>
+                      </header>
+
+                      <div className="stack-md">
+                        <div className="segment" role="radiogroup" aria-label="Tipo de umbral">
+                          {[
+                            { v: 'abs',     label: 'Absoluto' },
+                            { v: 'percent', label: '% basal' },
+                            { v: 'diff',    label: 'Caída Ω' },
+                          ].map(({ v, label }) => (
+                            <button
+                              key={v}
+                              type="button"
+                              className={`segment-item ${alarmType === v ? 'active' : ''}`}
+                              onClick={() => setAlarmType(v)}
+                              disabled={!alarmEnabled}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {alarmType === 'abs' && (
+                          <div className="field">
+                            <label className="field-label" htmlFor="th-abs">Dispara por debajo de (Ω)</label>
+                            <input id="th-abs" className="input" type="number" placeholder="120.5"
+                              value={alarmAbs} onChange={(e) => setAlarmAbs(e.target.value)} disabled={!alarmEnabled} />
+                          </div>
+                        )}
+
+                        {alarmType === 'percent' && (
+                          <div className="field">
+                            <label className="field-label" htmlFor="th-pct">Dispara al llegar a (% del basal)</label>
+                            <input id="th-pct" className="input" type="number" min="0" max="100" placeholder="85"
+                              value={alarmPercent} onChange={(e) => setAlarmPercent(e.target.value)} disabled={!alarmEnabled} />
+                          </div>
+                        )}
+
+                        {alarmType === 'diff' && (
+                          <div className="field">
+                            <label className="field-label" htmlFor="th-diff">Dispara con una caída de (Ω)</label>
+                            <input id="th-diff" className="input" type="number" placeholder="35"
+                              value={alarmDiff} onChange={(e) => setAlarmDiff(e.target.value)} disabled={!alarmEnabled} />
+                          </div>
+                        )}
+
+                        {alarmEnabled && initialValue !== null && (
+                          <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                            <span>Umbral</span>
+                            <span>Margen</span>
+                            <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
+                            <strong className="numeric">
+                              {alarmValueNow != null ? `${(alarmValueNow - thresholdPreview).toFixed(2)} Ω` : '—'}
+                            </strong>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+                </div>
               </div>
             </div>
 
-            {/* ── Zona de setup · tabs Configuración / Eventos ── */}
+            {/* ── Calibración / Eventos · switch ─────────────────────────
+                La alarma ya no vive acá: tiene su propio panel plegable
+                arriba a la derecha. */}
             <section className="setup-section">
               <LineTabs
                 items={[
-                  { key: 'config', label: 'Configuración de sesión' },
-                  { key: 'events', label: `Eventos · ${String(eventCount).padStart(2, '0')}` },
+                  { key: 'config', label: 'Calibración' },
+                  { key: 'events', label: `Eventos · ${eventCount}` },
                 ]}
                 active={setupTab}
                 onChange={setSetupTab}
+                showIndex={false}
               />
 
               {setupTab === 'config' ? (
-                <div className="setup-grid">
-                  <CalibrationWizard
-                    currentValue={currentValue}
-                    onSaveCalibration={handleSaveCalibration}
-                    onShowAlert={toast}
-                    activeBaseline={initialValue}
-                    onSetBaselineNow={handleSetBaselineNow}
-                    baselineCandidate={baselineCandidate}
-                    onSetBaselineManual={handleSetBaselineManual}
-                  />
-
-
-                  <section className="surface surface-pad">
-                    <header className="section-head" style={{ marginBottom: 18 }}>
-                      <div>
-                        <h2>Umbral de alarma</h2>
-                        <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-                          Condición que dispara el aviso preventivo durante la sesión
-                        </span>
-                      </div>
-                      <label className="switch" title="Activar / desactivar alarma">
-                        <input type="checkbox" checked={alarmEnabled} onChange={(e) => setAlarmEnabled(e.target.checked)} />
-                        <span className="switch-track" />
-                      </label>
-                    </header>
-
-                    <div className="stack-md">
-                      <div className="segment" role="radiogroup" aria-label="Tipo de umbral">
-                        {[
-                          { v: 'abs',     label: 'Valor absoluto' },
-                          { v: 'percent', label: '% del basal' },
-                          { v: 'diff',    label: 'Δ respecto al basal' },
-                        ].map(({ v, label }) => (
-                          <button
-                            key={v}
-                            type="button"
-                            className={`segment-item ${alarmType === v ? 'active' : ''}`}
-                            onClick={() => setAlarmType(v)}
-                            disabled={!alarmEnabled}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {alarmType === 'abs' && (
-                        <div className="field">
-                          <label className="field-label" htmlFor="th-abs">Impedancia mínima permitida</label>
-                          <input id="th-abs" className="input" type="number" placeholder="120.5"
-                            value={alarmAbs} onChange={(e) => setAlarmAbs(e.target.value)} disabled={!alarmEnabled} />
-                          <span className="field-hint">La alarma dispara cuando Z desciende por debajo de este valor en ohmios.</span>
-                        </div>
-                      )}
-
-                      {alarmType === 'percent' && (
-                        <div className="field">
-                          <label className="field-label" htmlFor="th-pct">% del valor basal</label>
-                          <input id="th-pct" className="input" type="number" min="0" max="100" placeholder="85"
-                            value={alarmPercent} onChange={(e) => setAlarmPercent(e.target.value)} disabled={!alarmEnabled} />
-                          <span className="field-hint">
-                            La alarma dispara cuando Z desciende a este porcentaje del valor basal
-                            registrado al iniciar la sesión.
-                          </span>
-                        </div>
-                      )}
-
-                      {alarmType === 'diff' && (
-                        <div className="field">
-                          <label className="field-label" htmlFor="th-diff">Caída en ohmios</label>
-                          <input id="th-diff" className="input" type="number" placeholder="35"
-                            value={alarmDiff} onChange={(e) => setAlarmDiff(e.target.value)} disabled={!alarmEnabled} />
-                          <span className="field-hint">La alarma dispara cuando Z desciende esta cantidad respecto al basal.</span>
-                        </div>
-                      )}
-
-                      {alarmEnabled && initialValue !== null && (
-                        <div className="step-summary" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                          <span>Basal</span>
-                          <span>Umbral calculado</span>
-                          <span>Margen restante</span>
-                          <strong className="numeric">{initialValue.toFixed(2)} Ω</strong>
-                          <strong className="numeric">{thresholdPreview.toFixed(2)} Ω</strong>
-                          <strong className="numeric">
-                            {alarmValueNow != null ? `${(alarmValueNow - thresholdPreview).toFixed(2)} Ω` : '—'}
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-                </div>
+                <CalibrationWizard
+                  currentValue={currentValue}
+                  onSaveCalibration={handleSaveCalibration}
+                  onShowAlert={toast}
+                  activeBaseline={initialValue}
+                  onSetBaselineNow={handleSetBaselineNow}
+                  baselineCandidate={baselineCandidate}
+                  onSetBaselineManual={handleSetBaselineManual}
+                />
               ) : (
-                <>
-                  {/* Integridad del enlace · cuenta EXACTA, por número de
-                      secuencia del firmware. Antes se estimaba multiplicando
-                      la duración del hueco por una frecuencia supuesta, lo que
-                      contaba como perdido todo lo que solo llegaba demorado. */}
+                <section className="surface surface-pad" aria-label="Eventos de la sesión">
+                  {/* Integridad del enlace · cuenta EXACTA por número de
+                      secuencia del firmware (no una estimación por duración). */}
                   {dataCoverage != null && (
-                    <p className="field-hint" style={{ margin: '0 0 12px' }}>
-                      Integridad del enlace ·{' '}
-                      <strong className="numeric">{dataCoverage.toFixed(1)}%</strong>
-                      {' '}de las muestras recibidas · {lostSamples} perdidas de{' '}
-                      {lostSamples + data.length} medidas por el equipo
+                    <p
+                      className="events-integrity"
+                      title={`${lostSamples} muestras perdidas de ${lostSamples + data.length} medidas por el equipo`}
+                    >
+                      Integridad del enlace{' '}
+                      <strong className="numeric">{dataCoverage.toFixed(1)} %</strong>
                     </p>
                   )}
-                  <Timeline events={events} />
-                </>
+                  <Timeline events={events} bare />
+                </section>
               )}
             </section>
           </SpotlightArea>
@@ -1791,7 +1980,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
       </main>
 
       <footer className="app-footer">
-        <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
+        <div className="row footer-shortcuts" style={{ gap: 14, flexWrap: 'wrap' }}>
           <span><span className="kbd">Espacio</span> Iniciar / Pausar</span>
           <span><span className="kbd">E</span> Marcar evento</span>
           <span><span className="kbd">A</span> Ingesta de agua</span>
@@ -1809,13 +1998,29 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
         header={
           <div>
             <span className="brand-mark">Chidori</span>
-            <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--type-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--type-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
               {displayName}
             </div>
           </div>
         }
       >
         <MobileMenuSection>Sesión</MobileMenuSection>
+        {canSimulateGap && (
+          <MobileMenuItem
+            icon={ZapOff}
+            label="Simular corte"
+            hint={`Corta la transmisión durante ${SIM_GAP_SAMPLES} muestras`}
+            onClick={() => { setIsMobileMenuOpen(false); simulateMicroGap(); }}
+          />
+        )}
+        {canReset && (
+          <MobileMenuItem
+            icon={RotateCcw}
+            label="Reiniciar sesión"
+            hint="Descarta la medición en curso"
+            onClick={() => { setIsMobileMenuOpen(false); setConfirmReset(true); }}
+          />
+        )}
         {isAdmin && onSwitchToAdmin && (
           <MobileMenuItem
             icon={Shield}

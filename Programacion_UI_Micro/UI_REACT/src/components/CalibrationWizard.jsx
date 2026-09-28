@@ -33,7 +33,7 @@ export default function CalibrationWizard({
 
   const measureEmpty = () => {
     if (currentValue === null) {
-      onShowAlert('No hay mediciones en vivo. Conecte el dispositivo o active el simulador.', 'warn');
+      onShowAlert('No hay mediciones en vivo. Conectá el dispositivo o activá el simulador.', 'warn');
       return;
     }
     setZEmpty(currentValue);
@@ -50,7 +50,7 @@ export default function CalibrationWizard({
       return;
     }
     if (currentValue >= zEmpty) {
-      onShowAlert('La impedancia actual no es menor a la basal. Verifique que la vejiga esté llena.', 'warn');
+      onShowAlert('La impedancia actual no es menor que la basal. Verificá que la vejiga esté llena.', 'warn');
       return;
     }
     const db = 20 * Math.log10(currentValue / zEmpty);
@@ -67,14 +67,7 @@ export default function CalibrationWizard({
 
   return (
     <section className="surface surface-pad" aria-label="Asistente de calibración">
-      <header className="section-head" style={{ marginBottom: 16 }}>
-        <div>
-          <h2>Calibración</h2>
-          <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-            Umbral preventivo personalizado por paciente
-          </span>
-        </div>
-      </header>
+      <h2 className="panel-title" title="Umbral preventivo personalizado para este paciente">Calibración</h2>
 
       <div className="step-rail" aria-hidden="true">
         {[1, 2, 3, 4].map((s) => (
@@ -88,16 +81,9 @@ export default function CalibrationWizard({
       {step === 1 && (
         <div className="step-body">
           <p>
-            <strong>Paso 1 · Basal con vejiga vacía.</strong> Solicite al paciente que orine
-            completamente. Con los electrodos colocados y el paciente en reposo, registre la
-            impedancia de referencia.
+            <strong>Basal con vejiga vacía.</strong> Pedile que orine y quede en reposo;
+            después registrá la impedancia.
           </p>
-          {activeBaseline != null && (
-            <p className="field-hint" style={{ margin: 0 }}>
-              Ya hay un basal fijado en <strong>{activeBaseline.toFixed(2)} Ω</strong>. Podés
-              continuar con ese valor o registrarlo de nuevo con la lectura actual.
-            </p>
-          )}
 
           <div className="row-between">
             <span className="mute numeric" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
@@ -108,13 +94,13 @@ export default function CalibrationWizard({
               {/* Si ya hay basal (p. ej. cargado a mano), NO lo pisamos sin que
                   el usuario lo pida explícitamente. */}
               {activeBaseline != null && (
-                <button type="button" className="button button-primary" onClick={keepBaseline}>
+                <button type="button" className="button" onClick={keepBaseline}>
                   Continuar con {activeBaseline.toFixed(2)} Ω <ArrowRight size={14} />
                 </button>
               )}
               <button
                 type="button"
-                className={activeBaseline != null ? 'button button-ghost' : 'button button-primary'}
+                className={activeBaseline != null ? 'button button-ghost' : 'button'}
                 onClick={measureEmpty}
                 disabled={currentValue === null}
               >
@@ -129,15 +115,11 @@ export default function CalibrationWizard({
       {step === 2 && (
         <div className="step-body">
           <p>
-            <strong>Paso 2 · Hidratación libre.</strong> El paciente bebe a demanda, como en un
-            día normal: no se le indica una cantidad fija. Registre <strong>cada toma</strong> con
-            el botón <strong>Agua</strong> (tecla <span className="kbd">A</span>) anotando los ml, y
-            cada micción con <strong>Micción</strong> (<span className="kbd">M</span>). El llenado
-            vesical produce caídas progresivas en la impedancia. Avance cuando el paciente refiera
-            sensación inicial de llenado.
+            <strong>Hidratación libre.</strong> Registrá cada toma con <span className="kbd">A</span> y
+            cada micción con <span className="kbd">M</span>. Seguí cuando refiera las primeras ganas.
           </p>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" className="button button-primary" onClick={() => setStep(3)}>
+            <button type="button" className="button" onClick={() => setStep(3)}>
               Continuar <ArrowRight size={14} />
             </button>
           </div>
@@ -147,15 +129,14 @@ export default function CalibrationWizard({
       {step === 3 && (
         <div className="step-body">
           <p>
-            <strong>Paso 3 · Umbral con vejiga llena.</strong> Cuando el paciente refiera una
-            necesidad clara de orinar pero aún tolerable, registre la impedancia mínima como
-            límite preventivo.
+            <strong>Vejiga llena.</strong> Cuando la necesidad sea clara pero tolerable, registrá
+            el umbral.
           </p>
           <div className="row-between">
             <div className="stack-sm" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>
               <span className="mute">En vivo: <strong style={{ color: 'var(--type-hi)' }}>{fmtZ(currentValue)}</strong></span>
             </div>
-            <button type="button" className="button button-danger" onClick={measureFull} disabled={currentValue === null}>
+            <button type="button" className="button" onClick={measureFull} disabled={currentValue === null}>
               Registrar umbral
             </button>
           </div>
@@ -165,8 +146,8 @@ export default function CalibrationWizard({
       {step === 4 && (
         <div className="step-body">
           <p style={{ color: 'var(--confirm)' }}>
-            <strong style={{ color: 'var(--confirm)' }}>Calibración guardada.</strong> El sistema activará
-            la alarma cuando la impedancia descienda al nivel registrado o por debajo.
+            <strong style={{ color: 'var(--confirm)' }}>Calibración guardada.</strong> La alarma se
+            activa al llegar a ese valor.
           </p>
           <div className="step-summary">
             <span>Basal vacía</span>
@@ -193,20 +174,15 @@ export default function CalibrationWizard({
           </strong>
         </div>
 
-        <p className="field-hint" style={{ margin: 0 }}>
-          Si el paciente se acomodó después de calibrar, volvé a fijarlo. Toma la mediana de
-          las últimas lecturas (no un valor instantáneo), así un pico de ruido no queda como referencia.
-        </p>
-
         <div className="baseline-strip-actions">
           <button
             type="button"
             className="button button-ghost button-sm"
             onClick={() => { onSetBaselineNow?.(); setManualBaseline(''); }}
             disabled={baselineCandidate == null}
-            title="Mediana de las últimas lecturas · robusta ante picos puntuales"
+            title="Si el paciente se acomodó después de calibrar. Usa la mediana de las últimas lecturas, así un pico de ruido no queda como referencia."
           >
-            Re-fijar con la lectura de ahora
+            Re-fijar con la lectura actual
           </button>
 
           <div className="baseline-strip-manual">

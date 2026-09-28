@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Chart from 'chart.js/auto';
+import { CHART_FONT } from '../lib/chartFont';
 import { Camera } from 'lucide-react';
 
 /**
@@ -127,7 +128,7 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
 
         ctx.setLineDash([]);
         const label = `${evt.id.toString().padStart(2, '0')}`;
-        ctx.font = '600 10px Montserrat, system-ui, sans-serif';
+        ctx.font = `600 10px ${CHART_FONT}`;
         const labelWidth = ctx.measureText(label).width + 10;
         ctx.fillStyle = p.signal;
         ctx.beginPath();
@@ -149,8 +150,8 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
       type: 'linear',
       ...(lim.xMin != null ? { min: lim.xMin } : {}),
       ...(lim.xMax != null ? { max: lim.xMax } : {}),
-      title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 10, weight: '500', family: 'Montserrat' } },
-      ticks: { color: p.mute, font: { size: 10, family: 'Montserrat' } },
+      title: { display: true, text: 'tiempo (s)', color: p.mute, font: { size: 12, weight: '500', family: CHART_FONT } },
+      ticks: { color: p.mute, font: { size: 12, family: CHART_FONT }, maxTicksLimit: 8 },
       grid:  { color: p.grid, drawTicks: false },
       border: { color: p.grid },
     },
@@ -162,9 +163,11 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
         display: true,
         text: m === 'z' ? 'impedancia (Ω)' : m === 'v' ? 'tensión (V)' : 'Ω/min',
         color: p.mute,
-        font: { size: 10, weight: '500', family: 'Montserrat' },
+        font: { size: 12, weight: '500', family: CHART_FONT },
       },
-      ticks: { color: p.mute, font: { size: 10, family: 'Montserrat' } },
+      /* Antes: 10 marcas con 2 decimales, apretadas. 6 alcanzan para leer la
+       * escala y dejan respirar la curva. */
+      ticks: { color: p.mute, font: { size: 12, family: CHART_FONT }, maxTicksLimit: 6 },
       grid:  { color: p.grid, drawTicks: false },
       border: { color: p.grid },
     },
@@ -224,8 +227,8 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
             borderWidth: 1,
             padding: 10,
             displayColors: false,
-            titleFont:  { family: 'Montserrat', size: 10 },
-            bodyFont:   { family: 'Montserrat', size: 11 },
+            titleFont:  { family: CHART_FONT, size: 10 },
+            bodyFont:   { family: CHART_FONT, size: 11 },
             callbacks: {
               title: (c) => `t = ${c[0].parsed.x.toFixed(1)} s`,
               // Un caso por modo. Antes eran dos ramas y el modo 'v' caía en
@@ -416,18 +419,18 @@ export default function RealTimeCharts({ data, rateData, voltageData = [], event
   };
 
   return (
-    <section className="surface" style={{ padding: '16px 18px 8px' }}>
+    <section className="surface chart-panel" data-fly="chart" style={{ padding: '16px 18px 8px' }}>
       <header className="section-head" style={{ marginBottom: 12 }}>
-        <div>
-          <h2 style={{ fontSize: 'var(--t-lg)' }}>Señal en vivo</h2>
-          <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-            {mode === 'z'
-              ? 'Impedancia · módulo del tejido vesical'
-              : mode === 'v'
-                ? 'Tensión de lectura · continua en A0'
-                : 'dZ/dt · velocidad de llenado'}
-          </span>
-        </div>
+        <h2
+          className="panel-title"
+          title={mode === 'z'
+            ? 'Impedancia · módulo del tejido vesical'
+            : mode === 'v'
+              ? 'Tensión de lectura · continua en A0'
+              : 'dZ/dt · velocidad de llenado'}
+        >
+          Señal en vivo
+        </h2>
         <div className="row" style={{ gap: 10 }}>
           <div className="segment segment-compact" role="tablist" aria-label="Serie a visualizar">
             <button

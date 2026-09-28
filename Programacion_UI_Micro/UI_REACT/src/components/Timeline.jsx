@@ -16,32 +16,31 @@ const itemVariants = {
   exit:    { opacity: 0, y: -6, transition: { duration: 0.16 } },
 };
 
-export default function Timeline({ events }) {
+/* `bare`: sin tarjeta ni encabezado propio, para cuando la lista vive dentro
+ * de una sección plegable que ya dice "Eventos" y cuántos hay. */
+export default function Timeline({ events, bare = false }) {
   const fmtTime = (s) => {
     const m = Math.floor(s / 60);
     const ss = Math.floor(s % 60);
     return `${m.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
   };
 
+  const Wrapper = bare ? 'div' : 'section';
   return (
-    <section className="surface surface-pad" aria-label="Eventos marcados">
-      <header className="section-head" style={{ marginBottom: 14 }}>
-        <div>
+    <Wrapper
+      className={bare ? 'timeline-bare' : 'surface surface-pad'}
+      aria-label="Eventos marcados"
+    >
+      {!bare && (
+        <header className="section-head" style={{ marginBottom: 14 }}>
           <h2>Eventos</h2>
-          <span className="section-label" style={{ display: 'block', marginTop: 4 }}>
-            Marcas registradas durante la sesión
-          </span>
-        </div>
-        <span className="pill pill-off">
-          <span className="pill-dot" />
-          {events.length}
-        </span>
-      </header>
+          <span className="pill pill-off">{events.length}</span>
+        </header>
+      )}
 
       {events.length === 0 ? (
         <div className="timeline-empty">
-          Sin eventos registrados. Use <span className="kbd">E</span> durante la
-          adquisición para marcar hitos clínicos.
+          Sin eventos. Marcá con <span className="kbd">E</span>, <span className="kbd">A</span> o <span className="kbd">M</span>.
         </div>
       ) : (
         <ol className="timeline" aria-live="polite" style={{ listStyle: 'none' }}>
@@ -63,7 +62,8 @@ export default function Timeline({ events }) {
                              : isWater ? 'timeline-row is-water'
                              : isVoid  ? 'timeline-row is-void'
                              : 'timeline-row';
-              const ml = Number(evt.amount);
+              // Sin volumen cargado (null) no es 0 ml: se muestra solo el tipo.
+              const ml = evt.amount == null ? NaN : Number(evt.amount);
               return (
                 <motion.li
                   key={evt.id}
@@ -118,6 +118,6 @@ export default function Timeline({ events }) {
           </AnimatePresence>
         </ol>
       )}
-    </section>
+    </Wrapper>
   );
 }

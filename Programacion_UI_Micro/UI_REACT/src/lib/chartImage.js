@@ -1,4 +1,5 @@
 import Chart from 'chart.js/auto';
+import { CHART_FONT } from './chartFont';
 
 /**
  * Curva de una sesión rendida como PNG para el PDF.
@@ -108,7 +109,7 @@ export function makeMarkersPlugin(getEvents, c, escala = 1) {
                     : e.kind === 'void' ? 'M'
                     : e.kind === 'disconnect' ? '!'
                     : String(e.event_number ?? '').padStart(2, '0');
-        ctx.font = `600 ${9 * escala}px Montserrat, system-ui, sans-serif`;
+        ctx.font = `600 ${9 * escala}px ${CHART_FONT}`;
         const w = ctx.measureText(label).width + 9 * escala;
         ctx.fillStyle = col;
         ctx.beginPath();
@@ -139,7 +140,7 @@ export const fondoOpaco = (color) => ({
 
 /** Configuración base de la curva · la comparten pantalla e impresión. */
 export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, tooltip = true }) {
-  const fuente = { family: 'Montserrat', size: 10 * escala };
+  const fuente = { family: CHART_FONT, size: 10 * escala };
   const eje = (titulo) => ({
     type: 'linear',
     title: { display: true, text: titulo, color: c.mute, font: fuente },
@@ -178,8 +179,8 @@ export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, 
         legend: { display: false },
         decimation: { enabled: decimar, algorithm: 'lttb', samples: MUESTRAS_LTTB },
         tooltip: tooltip ? {
-          titleFont: { family: 'Montserrat', size: 10 },
-          bodyFont:  { family: 'Montserrat', size: 11 },
+          titleFont: { family: CHART_FONT, size: 10 },
+          bodyFont:  { family: CHART_FONT, size: 11 },
           callbacks: {
             title: (items) => `t = ${Number(items[0].parsed.x).toFixed(1)} s`,
             label: (item) => `${Number(item.parsed.y).toFixed(3)} ohm`,

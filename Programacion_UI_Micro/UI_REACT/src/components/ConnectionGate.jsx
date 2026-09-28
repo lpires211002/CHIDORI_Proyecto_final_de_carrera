@@ -20,7 +20,7 @@ export default function ConnectionGate({ wsStatus, isSimulator, onOpenSettings, 
           <span className="mute" style={{ fontSize: 'var(--t-xs)' }}>
             {reconnecting
               ? 'Reintentando automáticamente…'
-              : 'No se están adquiriendo mediciones. Revise la dirección o use el simulador.'}
+              : 'No se están adquiriendo mediciones. Revisá la dirección o usá el simulador.'}
           </span>
         </div>
       </div>
