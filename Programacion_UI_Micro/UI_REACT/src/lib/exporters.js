@@ -169,7 +169,14 @@ export function exportPDF({
       + (calibration.vdet != null ? `   ·   V_det: ${Number(calibration.vdet).toFixed(3)} V` : ''),
       22, y); y += 5;
     pdf.text('Z = 2 x (Vadc + V_det) / K_CAL', 22, y); y += 5;
-    if (calibration.matched === false) {
+    if (calibration.label) { pdf.text(`Escala: ${calibration.label}`, 22, y); y += 5; }
+    if (calibration.kcalFirmware != null) {
+      pdf.text(`El equipo calculo con K_CAL ${Number(calibration.kcalFirmware).toFixed(5)}; los ohms de este`, 22, y); y += 5;
+      pdf.text('reporte estan corregidos a la ganancia real de la placa.', 22, y); y += 5;
+    } else if (calibration.reescalada) {
+      pdf.text('Reescalada desde un firmware que no reportaba su calibracion.', 22, y); y += 5;
+    }
+    if (calibration.matched === false && !calibration.reescalada) {
       pdf.text('Atencion: la calibracion no fue verificada contra el catalogo.', 22, y); y += 5;
     }
   } else {

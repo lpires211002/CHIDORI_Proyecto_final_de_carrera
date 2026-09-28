@@ -28,6 +28,29 @@ const ROLE_CLINICIAN = 'clinician';
  *   tab "sessions"  → catálogo global de sesiones · drill-down con edit/delete/download
  *   tab "accounts"  → aprobaciones de cuentas pendientes
  */
+/* Calibracion que va en el PDF de una sesion guardada.
+ * Es la de la escala en la que ESTAN los ohms (calibration_shown), no la que
+ * uso el firmware: desde la rev 4 pueden no coincidir, cuando se modifico la
+ * placa y no se reflasheo (P-004 s9: R9 ya en 1,1k, firmware en 2,2k). */
+function calibracionDelReporte(s) {
+  const c = s.cal_shown;
+  if (c) {
+    const k   = Number(c.k_cal);
+    const kfw = s.k_cal_firmware != null ? Number(s.k_cal_firmware) : null;
+    return {
+      kcal: k,
+      vdet: Number(c.v_detector),
+      label: c.label,
+      matched: s.calibration_matched,
+      kcalFirmware: kfw != null && Math.abs(kfw - k) > 0.001 * k ? kfw : null,
+      reescalada: kfw == null && s.calibration_id != null && s.calibration_id !== s.calibration_shown,
+    };
+  }
+  return s.k_cal_firmware != null
+    ? { kcal: s.k_cal_firmware, vdet: s.v_detector_firmware, matched: s.calibration_matched }
+    : null;
+}
+
 export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
   const [tab, setTab] = useState('sessions');
   const [accounts, setAccounts] = useState([]);
@@ -68,7 +91,7 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
           initial_impedance, final_impedance, elapsed_time_str, total_events,
           user_id, patient_id, session_number, session_data, notes,
           patient:patients ( id, code, first_name, last_name, data, notes )`;
-      const COLS_CAL = `, k_cal_firmware, v_detector_firmware, calibration_matched, calibration_id`;
+      const COLS_CAL = `, k_cal_firmware, v_detector_firmware, calibration_matched, calibration_id, calibration_shown`;
 
       let { data: sessRows, error: err1 } = await supabase
         .from('sessions')
@@ -95,9 +118,20 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
         ownersById = new Map((profRows || []).map((p) => [p.id, p]));
       }
 
+      // Catalogo de calibraciones: el PDF tiene que decir la constante de la
+      // escala en la que ESTAN los ohms, no la que uso el firmware. Si la
+      // tabla no existe o no se puede leer, el PDF cae al dato del firmware.
+      let calById = new Map();
+      {
+        const { data: calRows, error: errCal } = await supabase
+          .from('calibrations').select('id, label, k_cal, v_detector');
+        if (!errCal) calById = new Map((calRows || []).map((c) => [c.id, c]));
+      }
+
       const merged = (sessRows || []).map((s) => ({
         ...s,
         owner: s.user_id ? ownersById.get(s.user_id) || null : null,
+        cal_shown: s.calibration_shown != null ? calById.get(s.calibration_shown) || null : null,
       }));
       setSessions(merged);
     } catch (e) {
@@ -947,11 +981,7 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     stats: buildStats(),
     measurements,
     events,
-    calibration: session.k_cal_firmware != null
-      ? { kcal: session.k_cal_firmware,
-          vdet: session.v_detector_firmware,
-          matched: session.calibration_matched }
-      : null,
+    calibration: calibracionDelReporte(session),
     // El gráfico se re-rinde en paleta clara: el canvas de pantalla es
     // transparente y de tema oscuro, ilegible sobre una hoja blanca.
     chartImage: chartRef.current?.toPNG() ?? null,

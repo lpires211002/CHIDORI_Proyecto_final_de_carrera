@@ -46,6 +46,11 @@
 //  11. Recalibracion (rev 3, 2026-09-15) tras ajustar la ganancia del
 //      Howland y los filtros: K_CAL 0,28406 -> 0,20689 y el deficit del
 //      detector 0,277 -> 0,169 V.
+//  13. Dos placas, dos calibraciones. El 27/09 se cambio R9 de 2,2k a 1,1k
+//      en una placa (U4D x4,5 -> x9,1) y la sesion 9 de P-004 se midio con
+//      el firmware todavia en 2,2k: quedo al doble. R9_OHM elige entre rev 3
+//      (2,2k, medida) y rev 4 (1,1k, K_CAL x2, derivada). SETEARLO ANTES DE
+//      FLASHEAR, segun la placa.
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -208,8 +213,46 @@
  *
  * Detalle completo: claude/chidori-cadena-de-ganancia.md
  */
+
+/* ================= PLACA · ELEGIR ANTES DE FLASHEAR =================
+ *
+ * No todas las placas tienen la misma ganancia. El 27/09/2026 se cambio R9
+ * (entrada de U4D, con R10 = 10k) de 2,2k a 1,1k en una placa: U4D pasa de
+ * x4,5 a x9,1 y la cadena entera gana el doble. Con el firmware equivocado
+ * la Z sale al doble (o a la mitad) SIN NINGUN AVISO: asi quedo la sesion 9
+ * de P-004, medida con R9 = 1,1k y este firmware todavia en 2,2k.
+ *
+ *   R9_OHM 2200 -> rev 3: la calibracion MEDIDA en banco el 15/09 (arriba).
+ *   R9_OHM 1100 -> rev 4: DERIVADA de rev 3, K_CAL x 2. No medida en banco.
+ *
+ * Para saber cual tiene una placa: mirar R9, al lado de U4 (pin 13). Si hay
+ * duda, osciloscopio en U4 pin 8 y pin 14: la relacion da ~4,5 con 2,2k y
+ * ~9 con 1,1k.
+ *
+ * Supuestos de la rev 4: (a) el resto de la placa es igual a rev 3
+ * (corriente, INA, filtros); (b) el deficit del detector sigue en 0,169 V
+ * con el doble de amplitud. El GBW del TL084 le resta ~1 % a U4D con 1,1k
+ * (factor real 1,98-1,99, no 2): queda dentro del 13 % de rev 3.
+ *
+ * El rango se achica a la mitad con 1,1k:
+ *   R9 2,2k : 2,03 ohm (Vadc = 0) a ~26 ohm
+ *   R9 1,1k : 1,01 ohm (Vadc = 0) a ~13 ohm   <- pegado a ~13 es RECORTE
+ *
+ * El equipo reporta su K_CAL en cada STATUS y la base etiqueta sola cada
+ * sesion con la calibracion que corresponde (tabla `calibrations`, 3 y 4).
+ */
+#define R9_OHM              1100      // <-- 2200 o 1100, SEGUN LA PLACA
+
 #define V_DETECTOR          0.169f    // deficit del detector de envolvente [V]
-#define K_CAL               0.16675f  // I_pp [A] x ganancia del receptor
+#if   R9_OHM == 2200
+  #define K_CAL             0.16675f  // rev 3 · I_pp x G, medida 2026-09-15
+  #define CAL_TAG           "rev3 · R9 2,2k · banco 2026-09-15"
+#elif R9_OHM == 1100
+  #define K_CAL             0.33350f  // rev 4 · rev 3 x (2,2k / 1,1k)
+  #define CAL_TAG           "rev4 · R9 1,1k · rev3 x2, derivada"
+#else
+  #error "R9_OHM tiene que ser 2200 o 1100: no hay calibracion para otro valor"
+#endif
 
 #define VREF                3.3
 #define RESOLUCION          4095
@@ -367,7 +410,8 @@ void setup() {
   // Calibracion en uso (ver el bloque CALIBRACION arriba)
   Serial.print("K_CAL = ");             Serial.print(K_CAL, 5);
   Serial.print(" A  ·  V_DETECTOR = "); Serial.print(V_DETECTOR, 3); Serial.println(" V");
-  Serial.println("Z = 2*(Vadc + V_DETECTOR) / K_CAL   [banco 2026-09-15 rev3]");
+  Serial.print("Placa: R9 = ");         Serial.print(R9_OHM);    Serial.println(" ohm");
+  Serial.print("Z = 2*(Vadc + V_DETECTOR) / K_CAL   ["); Serial.print(CAL_TAG); Serial.println("]");
 
   Chidori.estado = INACTIVO;
   Chidori.Z      = 0.0f;
