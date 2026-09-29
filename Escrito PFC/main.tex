@@ -993,8 +993,47 @@ desactivaciones repetidas de la alarma. Al dispararse, la interfaz emite un avis
 envía una orden al microcontrolador para activar un zumbador, que el paciente puede silenciar mediante el
 botón físico del equipo.
 
-\subsubsection{Interfaz de usuario y base de datos}
-Otra de las mejoras reproducidas en esta versión es la nueva interfaz de usuario, que permite visualizar la curva de impedancia en tiempo real y registrar eventos de interés mediante un botón virtual, junto con la curva de voltaje del microcontrolador y la derivada de la señal.  
+\subsubsection{Interfaz de usuario}
+Otra de las mejoras introducidas en esta versión es la nueva interfaz de usuario, que permite visualizar en tiempo real la curva de impedancia, junto con su tasa de cambio y la tensión medida por el microcontrolador, y registrar eventos de interés durante la medición. La interfaz está desarrollada con \textit{React} (JavaScript) y se comunica con el microcontrolador (mediante \textit{WebSocket}). Para ejecutarla como aplicación de escritorio se utiliza \textit{Electron}, un entorno que empaqueta el motor de navegación \textit{Chromium} junto con la aplicación y genera instaladores para Windows (\texttt{.exe}) y macOS (\texttt{.dmg}). Esta elección no responde solo a la portabilidad entre sistemas operativos: al cargarse desde el propio equipo y no desde un servidor, la aplicación puede abrir la conexión \textit{WebSocket} sin cifrar (\texttt{ws://}) con el microcontrolador, que los navegadores bloquean cuando la página se sirve por HTTPS, y funciona sin acceso a internet, condición habitual mientras la computadora está enlazada a la red WiFi que genera el equipo.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figuras/UI_princ.png}
+    \caption{Home de la interfaz de usuario, solicitando primero la carga de un paciente, o el registro del mismo, y luego asegurando la conexión con el equipo. Una vez establecida la conexión, se habilita el botón de inicio de medición.}
+    \label{fig:UIprinc}
+\end{figure}
+
+\paragraph{Registro de eventos.} La interfaz cuenta con un sistema para marcar los eventos que se consideren relevantes durante la medición, accesibles mediante botones en pantalla o atajos de teclado:
+\begin{itemize}
+    \item Ingesta de líquidos, con el volumen ingerido en mililitros (\textit{A}).
+    \item Micción, cuyo volumen puede cargarse posteriormente (\textit{M}).
+    \item Evento especial, por ejemplo un cambio de postura o cualquier situación a tener en cuenta al analizar los datos (\textit{E}).
+    \item Inicio y pausa de la adquisición (\textit{Espacio}).
+\end{itemize}
+Cada evento queda asociado al instante y al valor de impedancia en que se registró, y se muestra sobre la curva como un marcador numerado. Además, la interfaz registra de forma automática las desconexiones y reconexiones del equipo y los microcortes de transmisión, detectados por saltos en el número de secuencia de cada mensaje. Los microcortes se grafican como bandas sobre la curva, y la integridad del enlace se informa como porcentaje de muestras recibidas.
+
+\paragraph{Lecturas en tiempo real.} El valor principal que se muestra no es la muestra instantánea sino la tendencia de la impedancia, calculada como la mediana móvil de los últimos 60~s. De esta forma se atenúan los artefactos de movimiento del paciente, que pueden superar en amplitud a toda la variación de la sesión, sin modificar el dato crudo, que también se muestra y es el que se almacena. Cuando una muestra se aparta de la tendencia más de lo que explica el ruido de fondo, la interfaz lo señala como movimiento. Junto a la impedancia se presentan:
+\begin{itemize}
+    \item La tensión de lectura del microcontrolador, como indicador del estado de la cadena de medición.
+    \item La tasa de cambio en $\Omega$/min, estimada de forma robusta a partir de dos medianas separadas 5~min. Se informa a partir de los primeros minutos de medición.
+\end{itemize}
+
+\paragraph{Visualización.} El gráfico permite alternar entre tres series (impedancia, tasa de cambio y tensión) y acotar la ventana temporal (sesión completa, 5~min, 15~min o 1~h). También admite fijar manualmente los límites del eje vertical y ampliar una región seleccionándola con el cursor. Para sesiones de varias horas, la curva se reduce con el algoritmo LTTB (\textit{Largest-Triangle-Three-Buckets}), que conserva los picos y valles de la señal, mientras que el conjunto completo de datos se mantiene intacto para su exportación. La interfaz dispone de tema claro y oscuro.
+
+\paragraph{Calibración del basal.} El basal se estima automáticamente como la mediana del primer minuto de medición. Alternativamente, puede fijarse mediante un asistente de cuatro pasos:
+\begin{enumerate}
+    \item Medición del basal con la vejiga vacía.
+    \item Hidratación, con registro de tomas y micciones.
+    \item Medición de la impedancia con la vejiga llena.
+    \item Resumen de la atenuación obtenida, $20\log_{10}(Z_f/Z_0)$~dB.
+\end{enumerate}
+Al finalizar, el asistente configura la alarma con el valor medido con la vejiga llena. El basal puede volver a fijarse sin repetir el asistente, con la mediana de los últimos 60~s o de forma manual.
+
+\paragraph{Indicador de llenado.} A partir de la caída de impedancia respecto del basal, expresada en dB, la interfaz presenta un indicador de llenado vesical. Su escala se basa en la hipótesis de trabajo de que el deseo miccional aparece con una caída de 1,5~dB, por lo que debe interpretarse como una estimación a validar y no como una medición de volumen.
+
+\paragraph{Exportación.} Cada sesión puede exportarse como informe en PDF, con los datos del paciente, la curva de impedancia y la lista de eventos, o como archivo de datos (CSV) para su análisis posterior.
+
+\paragraph{Control de acceso y administración.} El ingreso requiere usuario y contraseña, y las cuentas nuevas quedan pendientes hasta ser aprobadas por un administrador. El panel de administración permite revisar y exportar todas las sesiones registradas, gestionar las cuentas de los operadores y editar el catálogo de variables. Por último, la aplicación incluye un modo simulador que genera una curva sintética, útil para pruebas y demostraciones sin el equipo conectado.
 
 \subsubsection{Registro de sesiones y exportación de datos}
 
@@ -1005,6 +1044,9 @@ variables contextuales-- pueden exportarse en formato PDF, CSV o de texto plano,
 sincronizarse con una base de datos en la nube mediante una cola de reintento que indica en la interfaz
 el estado de cada escritura. Este mecanismo constituye la base para la construcción de la base de datos
 experimental descripta en los objetivos del trabajo.
+
+\subsubsection{Base de datos}
+
 
 \section{Resultados}
 \label{sec:resultados}
