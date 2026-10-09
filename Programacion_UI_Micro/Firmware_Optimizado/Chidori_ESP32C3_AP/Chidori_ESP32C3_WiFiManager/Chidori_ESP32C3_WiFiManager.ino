@@ -51,6 +51,9 @@
 //      el firmware todavia en 2,2k: quedo al doble. R9_OHM elige entre rev 3
 //      (2,2k, medida) y rev 4 (1,1k, K_CAL x2, derivada). SETEARLO ANTES DE
 //      FLASHEAR, segun la placa.
+//  14. Esa placa tiene R9 = 1,2k, no 1,1k (SMD "1201", 1185 ohm). Rev 5
+//      MEDIDA el 09/10/2026: K_CAL 0,342 y V_DETECTOR 0,230, ahora por placa.
+//      Se quita la opcion 1100: esa placa nunca existio.
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -217,41 +220,53 @@
 /* ================= PLACA · ELEGIR ANTES DE FLASHEAR =================
  *
  * No todas las placas tienen la misma ganancia. El 27/09/2026 se cambio R9
- * (entrada de U4D, con R10 = 10k) de 2,2k a 1,1k en una placa: U4D pasa de
- * x4,5 a x9,1 y la cadena entera gana el doble. Con el firmware equivocado
- * la Z sale al doble (o a la mitad) SIN NINGUN AVISO: asi quedo la sesion 9
- * de P-004, medida con R9 = 1,1k y este firmware todavia en 2,2k.
+ * (entrada de U4D, con R10 = 10k) de 2,2k a 1,2k en una placa: U4D pasa de
+ * x4,4 a x8,2. Con el firmware equivocado la Z sale casi al doble (o a la
+ * mitad) SIN NINGUN AVISO: asi quedo la sesion 9 de P-004, medida con R9 ya
+ * en 1,2k y este firmware todavia en 2,2k.
  *
- *   R9_OHM 2200 -> rev 3: la calibracion MEDIDA en banco el 15/09 (arriba).
- *   R9_OHM 1100 -> rev 4: DERIVADA de rev 3, K_CAL x 2. No medida en banco.
+ *   R9_OHM 2200 -> rev 3: MEDIDA en banco el 15/09 (arriba). Placas originales.
+ *   R9_OHM 1200 -> rev 5: MEDIDA sobre Luca el 09/10/2026 (abajo).
  *
- * Para saber cual tiene una placa: mirar R9, al lado de U4 (pin 13). Si hay
- * duda, osciloscopio en U4 pin 8 y pin 14: la relacion da ~4,5 con 2,2k y
- * ~9 con 1,1k.
+ * OJO · entre el 28/09 y el 09/10 esta placa se creyo de 1,1k y se flasheo
+ * con K_CAL 0,33350 (rev 4, derivada). Era 1,2k: SMD "1201", 1185 ohm con
+ * tester. La base reasigna sola esas sesiones (calibracion 4 -> placa 5).
  *
- * Supuestos de la rev 4: (a) el resto de la placa es igual a rev 3
- * (corriente, INA, filtros); (b) el deficit del detector sigue en 0,169 V
- * con el doble de amplitud. El GBW del TL084 le resta ~1 % a U4D con 1,1k
- * (factor real 1,98-1,99, no 2): queda dentro del 13 % de rev 3.
+ * Para saber cual tiene una placa: R9 esta al lado de U4 (pata 13). Codigo
+ * SMD "2201"/"222" = 2,2k; "1201"/"122" = 1,2k. Con osciloscopio, U4 pata 14
+ * sobre pata 8 da ~4,4 con 2,2k y ~8,2 con 1,2k.
  *
- * El rango se achica a la mitad con 1,1k:
- *   R9 2,2k : 2,03 ohm (Vadc = 0) a ~26 ohm
- *   R9 1,1k : 1,01 ohm (Vadc = 0) a ~13 ohm   <- pegado a ~13 es RECORTE
+ * REV 5 · R9 = 1,2k · 09/10/2026, sobre Luca, osciloscopio de mano:
+ *   U3 pata 1 (entrada del Howland) .... 3,29 Vpp (Vrms 1,16) -> I = 328 uA pp
+ *   U5 pata 7 (salida de U5B) .......... 0,11 Vpp
+ *   U4 pata 14 ......................... 2,29 Vpp -> cadena U5B..U4D x20,8
+ *   K_CAL = 328 uA x 5 (INA) x 10 (U5B) x 20,8 ............. 0,342
+ *   deficit = Vpp14/2 - Vadc, tres tandas (0,215 a 0,245) .... 0,230 V
+ * La cadena cierra con los valores impresos: U4A 1,013 x U4B 3,19 x U4C 0,82
+ * (CLP2 = 270 p) x U4D 8,15 = 21,6. La corriente confirma la de rev 3: los
+ * "400 uA" eran 3,22 V / 8,06k, la lectura en circuito ya descartada.
+ * Incertidumbre ~+-12 %: a 20 mV/div el osciloscopio marca 0,11 V en U5B pero
+ * la traza dibujada mide ~0,086 V. Se toma 0,11 porque cierra con la cadena.
+ * Lo que la cierra del todo es calibrar con resistencias patron (2 a 12 ohm).
  *
- * El equipo reporta su K_CAL en cada STATUS y la base etiqueta sola cada
- * sesion con la calibracion que corresponde (tabla `calibrations`, 3 y 4).
+ * Rango con 1,2k: 2 x 0,230 / 0,342 = 1,35 ohm (Vadc = 0) a ~13 ohm, donde
+ * recorta. Con 2,2k: 2,03 a ~26 ohm. Una lectura pegada al techo es RECORTE.
+ *
+ * El equipo reporta K_CAL y V_DETECTOR en cada STATUS y la base etiqueta sola
+ * cada sesion (tabla `calibrations`: 3 = placa 2,2k, 5 = placa 1,2k).
  */
-#define R9_OHM              1100      // <-- 2200 o 1100, SEGUN LA PLACA
+#define R9_OHM              1200      // <-- 2200 o 1200, SEGUN LA PLACA
 
-#define V_DETECTOR          0.169f    // deficit del detector de envolvente [V]
 #if   R9_OHM == 2200
   #define K_CAL             0.16675f  // rev 3 · I_pp x G, medida 2026-09-15
+  #define V_DETECTOR        0.169f    // deficit del detector [V], rev 3
   #define CAL_TAG           "rev3 · R9 2,2k · banco 2026-09-15"
-#elif R9_OHM == 1100
-  #define K_CAL             0.33350f  // rev 4 · rev 3 x (2,2k / 1,1k)
-  #define CAL_TAG           "rev4 · R9 1,1k · rev3 x2, derivada"
+#elif R9_OHM == 1200
+  #define K_CAL             0.34200f  // rev 5 · I_pp x G, medida 2026-10-09
+  #define V_DETECTOR        0.230f    // deficit del detector [V], rev 5
+  #define CAL_TAG           "rev5 · R9 1,2k · medida 2026-10-09"
 #else
-  #error "R9_OHM tiene que ser 2200 o 1100: no hay calibracion para otro valor"
+  #error "R9_OHM tiene que ser 2200 o 1200: no hay calibracion medida para otro valor"
 #endif
 
 #define VREF                3.3
