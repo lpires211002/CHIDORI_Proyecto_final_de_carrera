@@ -20,6 +20,7 @@
 
 const KEY_PACIENTES = 'chidori.cache.patients';
 const KEY_CAMPOS    = 'chidori.cache.fields';
+const KEY_CONTEOS   = 'chidori.cache.sessionCounts';
 
 /** Días después de los cuales el caché se considera viejo (se avisa, no se borra). */
 const DIAS_FRESCO = 7;
@@ -50,6 +51,17 @@ export const guardarCampos    = (filas) => guardar(KEY_CAMPOS, filas);
 export const leerPacientes = () => leer(KEY_PACIENTES);
 export const leerCampos    = () => leer(KEY_CAMPOS);
 
+/**
+ * Cuántas sesiones tiene cada paciente en la nube, para mostrar "sesión N"
+ * sin internet. Se guarda como pares [id, n] porque `leer` exige un array.
+ */
+export const guardarConteos = (mapa) => guardar(KEY_CONTEOS, Object.entries(mapa));
+
+export function leerConteos() {
+  const e = leer(KEY_CONTEOS);
+  return e ? { at: e.at, mapa: Object.fromEntries(e.datos) } : null;
+}
+
 /** Antigüedad del caché en días, o null si no hay nada guardado. */
 export function antiguedadDias(entrada) {
   if (!entrada?.at) return null;
@@ -62,13 +74,13 @@ export function estaViejo(entrada) {
   return d != null && d > DIAS_FRESCO;
 }
 
-/** "hace 2 días" / "hace unas horas" · para avisar de qué momento son los datos. */
+/** "hace minutos" / "hace 3 h" / "ayer" / "hace 4 días" · de qué momento son los datos. */
 export function describirAntiguedad(entrada) {
   const d = antiguedadDias(entrada);
   if (d == null) return '';
   if (d < 1 / 24) return 'hace minutos';
   if (d < 1) return `hace ${Math.round(d * 24)} h`;
-  if (d < 2) return 'de ayer';
+  if (d < 2) return 'ayer';
   return `hace ${Math.round(d)} días`;
 }
 

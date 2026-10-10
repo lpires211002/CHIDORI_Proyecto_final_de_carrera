@@ -29,10 +29,11 @@ import PatientGate       from './components/PatientGate';
 import ConnectionGate    from './components/ConnectionGate';
 import useCloudSync      from './components/useCloudSync';
 import usePendingSync    from './components/usePendingSync';
+import usePatientsPrefetch from './components/usePatientsPrefetch';
 
 import { supabase, emailToUsername } from './supabaseClient';
-import { commitSession, queuePendingSession } from './lib/sessionSync';
-import { countSessions } from './lib/patients';
+import { commitSession, queuePendingSession, contarSesionesPaciente } from './lib/sessionSync';
+import { conteoGuardado } from './lib/patients';
 import {
   trendAt, robustRate, sigmaFromResiduals, isArtifact, sessionStats, median,
   TREND_WINDOW_S, BASELINE_WINDOW_S, ALARM_PERSIST_S, RESIDUAL_BUFFER_MAX,
@@ -916,12 +917,13 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     toast(`Simulando corte de ${SIM_GAP_SAMPLES} muestras (${ms / 1000} s)…`, 'info');
   };
 
-  // Cuántas sesiones lleva el paciente elegido · falla en silencio porque es
-  // informativo: sin internet igual se puede medir.
+  // Cuántas sesiones lleva el paciente elegido · informativo: sin internet
+  // usa el último conteo guardado más las sesiones que esperan en la cola.
   useEffect(() => {
     if (!activePatient?.id) { setPatientSessionCount(0); return; }
     let vivo = true;
-    countSessions(supabase, activePatient.id)
+    setPatientSessionCount(conteoGuardado(activePatient.id));
+    contarSesionesPaciente(supabase, activePatient.id)
       .then((n) => { if (vivo) setPatientSessionCount(n); })
       .catch(() => {});
     return () => { vivo = false; };
@@ -1283,9 +1285,19 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
     setAlarmArmed(true);
   };
 
+  // Lista de pacientes guardada en esta computadora, para elegir paciente
+  // estando ya en la red del Chidori (sin internet). SOLO descarga en la
+  // pantalla de preparación: desde que se arranca una sesión hasta que se
+  // reinicia no hace ninguna consulta, así no se cruza con la medición, la
+  // pausa ni el guardado del final.
+  const pacientesOffline = usePatientsPrefetch(
+    supabase, !measuring && !armado && data.length === 0);
+
   // Cola de sesiones medidas offline (modo AP): se suben solas al volver internet.
   const pendingSync = usePendingSync(supabase, ({ synced }) => {
     toast(`${synced} sesión${synced === 1 ? '' : 'es'} subida${synced === 1 ? '' : 's'} a la nube`, 'success');
+    // Cambiaron los conteos de sesiones (y quizás se crearon pacientes).
+    pacientesOffline.refrescar({ forzar: true });
   });
 
   /**
@@ -1757,6 +1769,7 @@ export default function Dashboard({ session, profile, onSignOut, isAdmin = false
             wsConfig={wsConfig}
             patient={activePatient}
             sessionCount={patientSessionCount}
+            pacientesGuardados={pacientesOffline.guardados}
             canStart={wsStatus === 'CONNECTED' || isSimulator}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onToggleSimulator={toggleSimulator}

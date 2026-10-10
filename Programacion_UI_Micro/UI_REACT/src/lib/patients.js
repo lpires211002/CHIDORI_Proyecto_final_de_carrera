@@ -1,7 +1,8 @@
 import {
   guardarCampos, leerCampos,
   guardarPacientes, leerPacientes,
-  pacientesPendientes, agregarPendiente, quitarPendiente,
+  guardarConteos, leerConteos,
+  pacientesPendientes, agregarPendiente, quitarPendiente, esLocal,
 } from './patientsCache';
 
 /**
@@ -15,21 +16,62 @@ import {
  * scope 'session' → cambia en cada medición (peso, temperatura, humedad, agua)
  */
 
+/* ── Red ────────────────────────────────────────────────────────────── */
+
+/**
+ * Cuánto se espera a Supabase en las pantallas interactivas.
+ *
+ * Enlazado al Chidori no hay internet, y una consulta puede quedar colgada
+ * hasta que el sistema operativo se rinda (decenas de segundos). Con un tope
+ * corto la app cae al caché enseguida en vez de dejar al clínico mirando
+ * "Cargando…".
+ */
+export const TIMEOUT_MS          = 5000;
+export const TIMEOUT_PREFETCH_MS = 12000;
+
+/**
+ * Corre una consulta de Supabase con tope de tiempo.
+ *
+ * Corta el fetch con abortSignal y además rechaza la promesa al vencer el
+ * tope: si el token de la sesión venció, supabase-js intenta renovarlo ANTES
+ * de mandar la consulta, y esa renovación el abortSignal no la alcanza.
+ */
+export function conTimeout(consulta, ms = TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const q = typeof consulta?.abortSignal === 'function'
+    ? consulta.abortSignal(ctrl.signal)
+    : consulta;
+  let timer;
+  const tope = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      ctrl.abort();
+      reject(new Error('Sin respuesta de la nube (¿sin internet?)'));
+    }, ms);
+  });
+  return Promise.race([Promise.resolve(q), tope]).finally(() => clearTimeout(timer));
+}
+
 /* ── Catálogo de campos ─────────────────────────────────────────────── */
 
-export async function fetchFields(supabase, { includeInactive = false } = {}) {
+/**
+ * `soloNube`: si falla la consulta, lanza en vez de devolver el caché. Lo usa
+ * la descarga anticipada, que necesita saber si de verdad actualizó algo.
+ */
+export async function fetchFields(supabase, {
+  includeInactive = false, timeoutMs = TIMEOUT_MS, soloNube = false,
+} = {}) {
   let q = supabase.from('field_definitions').select('*').order('sort_order');
   if (!includeInactive) q = q.eq('active', true);
 
   try {
-    const { data, error } = await q;
+    const { data, error } = await conTimeout(q, timeoutMs);
     if (error) throw error;
     guardarCampos(data || []);
     return data || [];
   } catch (e) {
     // Enlazado al equipo no hay internet. El catálogo cambia poco: la última
     // copia sirve para armar los formularios sin conexión.
-    const cache = leerCampos();
+    const cache = soloNube ? null : leerCampos();
     if (!cache) throw e;
     const filas = cache.datos;
     return includeInactive ? filas : filas.filter((f) => f.active);
@@ -76,7 +118,9 @@ export async function deleteField(supabase, id) {
  * momento son. Se les suman los pacientes creados offline que todavía no
  * subieron.
  */
-export async function fetchPatients(supabase, { search = '' } = {}) {
+export async function fetchPatients(supabase, {
+  search = '', timeoutMs = TIMEOUT_MS, soloNube = false,
+} = {}) {
   const filtrar = (filas) => {
     const s = search.trim().toLowerCase();
     if (!s) return filas;
@@ -91,7 +135,7 @@ export async function fetchPatients(supabase, { search = '' } = {}) {
     const s = search.trim();
     if (s) q = q.or(`code.ilike.%${s}%,first_name.ilike.%${s}%,last_name.ilike.%${s}%`);
 
-    const { data, error } = await q;
+    const { data, error } = await conTimeout(q, timeoutMs);
     if (error) throw error;
 
     // Solo se cachea la lista completa: una búsqueda filtrada pisaría el caché
@@ -100,6 +144,7 @@ export async function fetchPatients(supabase, { search = '' } = {}) {
 
     return { filas: [...(data || []), ...filtrar(pendientes)], deCache: false, cache: null };
   } catch (e) {
+    if (soloNube) throw e;
     const cache = leerPacientes();
     if (!cache && pendientes.length === 0) throw e;
     const base = cache?.datos || [];
@@ -107,14 +152,77 @@ export async function fetchPatients(supabase, { search = '' } = {}) {
   }
 }
 
-/** Cuenta las sesiones ya registradas de un paciente (para el "4 de 6"). */
-export async function countSessions(supabase, patientId) {
-  const { count, error } = await supabase
-    .from('sessions')
-    .select('id', { count: 'exact', head: true })
-    .eq('patient_id', patientId);
-  if (error) return 0;
-  return count || 0;
+/**
+ * Lo último descargado más los pacientes creados offline, SIN tocar la red.
+ * Es lo que permite abrir el selector al instante estando en la red del
+ * Chidori. Null si en esta computadora nunca se descargó la lista.
+ */
+export function pacientesGuardados() {
+  const cache = leerPacientes();
+  const pendientes = pacientesPendientes();
+  if (!cache && pendientes.length === 0) return null;
+  return { filas: [...(cache?.datos || []), ...pendientes], cache };
+}
+
+/** Campos activos del último catálogo descargado, sin tocar la red. */
+export function camposGuardados() {
+  return (leerCampos()?.datos || []).filter((f) => f.active);
+}
+
+/**
+ * Cuenta las sesiones de un paciente en la nube (para el "sesión N"). Sin
+ * internet usa el último conteo descargado. No incluye las que esperan en la
+ * cola local: eso lo suma `contarSesionesPaciente` (lib/sessionSync).
+ */
+export async function countSessions(supabase, patientId, { timeoutMs = TIMEOUT_MS } = {}) {
+  if (!patientId || esLocal(patientId)) return 0;
+  try {
+    const { count, error } = await conTimeout(supabase
+      .from('sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('patient_id', patientId), timeoutMs);
+    if (error) throw error;
+    return count || 0;
+  } catch {
+    return conteoGuardado(patientId);
+  }
+}
+
+/** Último conteo descargado para ese paciente, sin tocar la red. */
+export function conteoGuardado(patientId) {
+  return leerConteos()?.mapa?.[patientId] ?? 0;
+}
+
+/**
+ * Descarga todo lo necesario para elegir paciente sin internet: catálogo de
+ * campos, pacientes activos y cuántas sesiones tiene cada uno.
+ *
+ * Se llama al abrir la app y cada tanto mientras hay internet
+ * (components/usePatientsPrefetch.js). Así, cuando el clínico se pasa a la red
+ * del Chidori, la lista ya está guardada y no hace falta volver al WiFi de
+ * siempre para elegir paciente. Si no hay conexión lanza, y lo guardado antes
+ * queda intacto.
+ */
+export async function prefetchPacientes(supabase) {
+  const ms = TIMEOUT_PREFETCH_MS;
+  const [campos, pacientes] = await Promise.all([
+    fetchFields(supabase, { timeoutMs: ms, soloNube: true }),
+    fetchPatients(supabase, { timeoutMs: ms, soloNube: true }),
+  ]);
+
+  // Sesiones por paciente · informativo: si falla, la lista ya quedó guardada.
+  // Trae solo la columna patient_id (un dataset de tesis son decenas de filas;
+  // Supabase corta en 1000 por defecto).
+  try {
+    const { data, error } = await conTimeout(
+      supabase.from('sessions').select('patient_id').not('patient_id', 'is', null), ms);
+    if (error) throw error;
+    const mapa = {};
+    (data || []).forEach(({ patient_id: id }) => { mapa[id] = (mapa[id] || 0) + 1; });
+    guardarConteos(mapa);
+  } catch { /* se conserva el conteo anterior */ }
+
+  return { pacientes: pacientes.filas.length, campos: campos.length, at: Date.now() };
 }
 
 /**
@@ -132,8 +240,8 @@ export async function nextPatientCode(supabase, prefix = 'P') {
   };
 
   try {
-    const { data, error } = await supabase
-      .from('patients').select('code').like('code', `${prefix}-%`);
+    const { data, error } = await conTimeout(supabase
+      .from('patients').select('code').like('code', `${prefix}-%`));
     if (error) throw error;
     // Los pendientes locales también ocupan número, o el próximo alta offline
     // reusaría un código y chocaría al subir.
@@ -162,8 +270,11 @@ export async function nextPatientCode(supabase, prefix = 'P') {
 export async function createPatient(supabase, { code, first_name, last_name, data = {}, notes = '' }) {
   const fila = { code, first_name, last_name, data, notes };
   try {
-    const { data: row, error } = await supabase
-      .from('patients').insert(fila).select().single();
+    // Con tope de tiempo: sin internet cae a pendiente en segundos. Si la nube
+    // llegó a guardarlo pero la respuesta tardó, al sincronizar el código ya
+    // existe y `sincronizarPendientes` reusa ese paciente: no se duplica.
+    const { data: row, error } = await conTimeout(supabase
+      .from('patients').insert(fila).select().single());
     if (error) throw error;
     return row;
   } catch (e) {
