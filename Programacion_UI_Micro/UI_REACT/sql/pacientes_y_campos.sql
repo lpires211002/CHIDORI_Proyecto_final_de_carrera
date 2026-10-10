@@ -13,6 +13,26 @@
 -- ═══════════════════════════════════════════════════════════════════════
 
 
+-- ─── 0 · FUNCIÓN DE APROBACIÓN ─────────────────────────────────────────
+-- (mantenimiento 10/10/2026) Las políticas de este archivo exigen cuenta
+-- APROBADA, igual que sql/seguridad.sql. Antes eran `true`: como tienen el
+-- mismo nombre que las de seguridad.sql, re-correr este archivo las pisaba y
+-- dejaba los pacientes abiertos a cualquier cuenta logueada, aprobada o no.
+-- La función ya existe en la base (la creó seguridad.sql): solo se crea si
+-- falta, en una instalación nueva. Nunca se reemplaza la existente.
+
+do $$
+begin
+  if to_regprocedure('public.is_approved_user()') is null then
+    execute $f$
+      create function public.is_approved_user()
+      returns boolean language sql stable security definer set search_path = public as
+      $b$ select exists (select 1 from public.profiles where id = auth.uid() and is_approved) $b$
+    $f$;
+  end if;
+end $$;
+
+
 -- ─── 1 · CATÁLOGO DE CAMPOS ────────────────────────────────────────────
 -- scope 'patient' → estable, se carga una vez por persona (altura, sexo…)
 -- scope 'session' → cambia en cada medición (peso del día, temperatura…)
@@ -38,7 +58,7 @@ alter table public.field_definitions enable row level security;
 
 drop policy if exists "fields_select" on public.field_definitions;
 create policy "fields_select" on public.field_definitions
-  for select to authenticated using (true);
+  for select to authenticated using (public.is_approved_user());
 
 -- Solo los superadmin cambian el catálogo (define la forma del dataset)
 drop policy if exists "fields_write" on public.field_definitions;
@@ -70,15 +90,16 @@ alter table public.patients enable row level security;
 
 drop policy if exists "patients_select" on public.patients;
 create policy "patients_select" on public.patients
-  for select to authenticated using (true);
+  for select to authenticated using (public.is_approved_user());
 
 drop policy if exists "patients_insert" on public.patients;
 create policy "patients_insert" on public.patients
-  for insert to authenticated with check (true);
+  for insert to authenticated with check (public.is_approved_user());
 
 drop policy if exists "patients_update" on public.patients;
 create policy "patients_update" on public.patients
-  for update to authenticated using (true);
+  for update to authenticated using (public.is_approved_user())
+  with check (public.is_approved_user());
 
 create index if not exists patients_code_idx on public.patients (code);
 
@@ -104,6 +125,9 @@ set search_path = public
 as $$
 begin
   if new.patient_id is not null and new.session_number is null then
+    -- (mantenimiento 10/10/2026) Turno por paciente: dos guardados simultáneos
+    -- del mismo paciente esperan su turno en vez de sacar el mismo número.
+    perform pg_advisory_xact_lock(hashtextextended('chidori.session_number:' || new.patient_id::text, 0));
     select coalesce(max(session_number), 0) + 1
       into new.session_number
       from public.sessions
@@ -117,6 +141,11 @@ drop trigger if exists trg_session_number on public.sessions;
 create trigger trg_session_number
   before insert on public.sessions
   for each row execute function public.set_session_number();
+
+-- La base no acepta dos sesiones con el mismo número para un paciente.
+create unique index if not exists sessions_paciente_nro_unico
+  on public.sessions (patient_id, session_number)
+  where patient_id is not null and session_number is not null;
 
 
 -- ─── 5 · CAMPOS INICIALES ──────────────────────────────────────────────
@@ -173,3 +202,18 @@ select
 from public.sessions s
 left join public.patients p on p.id = s.patient_id
 order by p.code, s.session_number;
+
+-- Permisos de la vista (mantenimiento 10/10/2026). `create or replace view`
+-- borra la opción security_invoker, y Supabase da todos los permisos a la
+-- clave pública sobre lo que se crea en `public`. Sin este bloque, re-correr
+-- el archivo volvía a dejar el dataset legible con la clave pública.
+do $$
+begin
+  revoke all on public.v_dataset from anon;
+  revoke insert, update, delete, truncate, references, trigger on public.v_dataset from authenticated;
+  if current_setting('server_version_num')::int >= 150000 then
+    alter view public.v_dataset set (security_invoker = true);
+  else
+    revoke all on public.v_dataset from authenticated;
+  end if;
+end $$;

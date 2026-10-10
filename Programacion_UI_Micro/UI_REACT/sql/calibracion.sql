@@ -527,6 +527,22 @@ begin
 end $$;
 
 
+-- Permisos de la vista (mantenimiento 10/10/2026). La vista se borra y se
+-- vuelve a crear en cada corrida, y Supabase le da todos los permisos a la
+-- clave pública a lo que se crea en `public`. Sin este bloque, cada corrida
+-- de este archivo volvía a dejar el dataset legible con la clave pública.
+do $$
+begin
+  revoke all on public.v_dataset_sesiones from anon;
+  revoke insert, update, delete, truncate, references, trigger on public.v_dataset_sesiones from authenticated;
+  if current_setting('server_version_num')::int >= 150000 then
+    alter view public.v_dataset_sesiones set (security_invoker = true);
+  else
+    revoke all on public.v_dataset_sesiones from authenticated;
+  end if;
+end $$;
+
+
 -- ─── 6 · REPORTE FINAL ─────────────────────────────────────────────────
 -- Lo que devuelve el editor. Si algo salió mal, se ve acá.
 
