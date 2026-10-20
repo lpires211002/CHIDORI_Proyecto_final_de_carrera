@@ -30,14 +30,24 @@ function readToken(name, fallback) {
 /** A partir de acá el canvas empieza a acusar el trazo punto por punto. */
 const UMBRAL_DENSO = 4000;
 
+/* Default estable: un `[]` nuevo en cada render recrearía el gráfico entero. */
+const VACIO = [];
+
 const SessionChart = forwardRef(function SessionChart(
-  { measurements = [], events = [], height = 260, busy = false, loaded = 0 },
+  {
+    measurements = VACIO, events = VACIO, height = 260, busy = false, loaded = 0,
+    comments = VACIO,          // comentarios anclados, en la base de tiempo de `measurements`
+    fondo = null,           // curva original en gris detrás (sesión editada)
+    titulo = 'Curva de la sesión',
+    accesorio = null,       // control extra a la derecha del título
+  },
   ref,
 ) {
   const canvasRef = useRef(null);
   const instRef   = useRef(null);
   const eventsRef = useRef(events);
   const measRef   = useRef(measurements);
+  const commentsRef = useRef(comments);
 
   const total  = measurements.length;
   const pesado = total > UMBRAL_DENSO;
@@ -48,11 +58,15 @@ const SessionChart = forwardRef(function SessionChart(
 
   useEffect(() => { eventsRef.current = events; }, [events]);
   useEffect(() => { measRef.current = measurements; }, [measurements]);
+  useEffect(() => { commentsRef.current = comments; }, [comments]);
 
   useImperativeHandle(ref, () => ({
+    // opts puede traer otra serie / eventos / comentarios (el PDF del original
+    // cuando lo que se ve en pantalla es la editada)
     toPNG: (opts) => renderChartPNG({
       measurements: measRef.current,
       events: eventsRef.current,
+      comments: commentsRef.current,
       ...opts,
     }),
   }), []);
@@ -64,8 +78,10 @@ const SessionChart = forwardRef(function SessionChart(
       signal:   readToken('--signal', '#6366f1'),
       alarm:    readToken('--alarm', '#e5484d'),
       confirm:  readToken('--confirm', '#30a46c'),
+      amber:    readToken('--amber', '#d97706'),
       onSignal: readToken('--signal-on', '#fff'),
       mute:     readToken('--type-mute', '#666'),
+      original: readToken('--hairline-strong', '#888'),
       grid:     readToken('--hairline', 'rgba(255,255,255,0.06)'),
     };
 
@@ -79,13 +95,14 @@ const SessionChart = forwardRef(function SessionChart(
       c,
       decimar: simplificar,
       pointRadius: radio,
+      fondo: fondo ? normalizarMuestras(fondo) : null,
     });
-    cfg.plugins = [makeMarkersPlugin(() => eventsRef.current, c)];
+    cfg.plugins = [makeMarkersPlugin(() => eventsRef.current, c, 1, () => commentsRef.current)];
 
     const inst = new Chart(canvasRef.current, cfg);
     instRef.current = inst;
     return () => { inst.destroy(); instRef.current = null; };
-  }, [measurements, events, simplificar]);
+  }, [measurements, events, comments, fondo, simplificar]);
 
   const n = (x) => x.toLocaleString('es-AR');
 
@@ -106,9 +123,10 @@ const SessionChart = forwardRef(function SessionChart(
     <div className="surface surface-pad" style={{ marginBottom: 18 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, gap: 12, flexWrap: 'wrap' }}>
         <span className="section-label">
-          Curva de la sesión · {n(total)} puntos
+          {titulo} · {n(total)} puntos
           {events.length > 0 && ` · ${events.length} marcadores`}
         </span>
+        {accesorio}
 
         {pesado && (
           <button
@@ -139,6 +157,8 @@ const SessionChart = forwardRef(function SessionChart(
             banda roja = microcorte.
           </>
         )}
+        {comments.length > 0 && <> <strong>C</strong> = comentario (abajo).</>}
+        {fondo && <> En gris, la curva original.</>}
       </span>
     </div>
   );

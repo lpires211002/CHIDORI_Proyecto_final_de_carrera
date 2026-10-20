@@ -3,7 +3,7 @@ import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import {
   Shield, ShieldOff, LogOut, X, UserCheck, UserX, RefreshCw, Search, ChevronRight,
   Activity, Pencil, Trash2, Download, FileText, Table, FileType2, Save, Menu,
-  ChevronDown,
+  ChevronDown, PenLine, Eye, EyeOff,
 } from 'lucide-react';
 import { supabase, emailToUsername } from '../supabaseClient';
 import ConfirmModal from '../components/ConfirmModal';
@@ -12,8 +12,17 @@ import MobileMenu, { MobileMenuItem, MobileMenuSection } from '../components/Mob
 import { exportPDF, exportCSV, exportTXT } from '../lib/exporters';
 import FieldsPanel from './FieldsPanel';
 import SessionChart from './SessionChart';
+import CurveEditor from './CurveEditor';
 import DynamicFields from '../components/DynamicFields';
 import { fetchFields, coerceValues, updatePatient, patientLabel } from '../lib/patients';
+import { renderChartPNG } from '../lib/chartImage';
+import {
+  cargarEdicion, cargarRevision, cargarComentarios, guardarRevision, eventosDeEdicion,
+  resumenesDeSesiones, AVISO_SQL,
+} from '../lib/edicionDB';
+import {
+  tasaSerie, describirEdicion, comentariosEnSerie, periodoMuestreo, fmtTiempo,
+} from '../lib/edicion';
 
 const sessionLayoutId = (id) => `session-card-${id}`;
 
@@ -128,10 +137,19 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
         if (!errCal) calById = new Map((calRows || []).map((c) => [c.id, c]));
       }
 
+      // Ediciones y apta / no apta (sql/edicion_sesiones.sql). Si la base no
+      // las tiene todavía, el listado sale igual, sin esas marcas.
+      let resumenes = { ediciones: new Map(), revisiones: new Map() };
+      try {
+        resumenes = await resumenesDeSesiones(supabase, (sessRows || []).map((s) => s.id));
+      } catch { /* sin marcas de edición */ }
+
       const merged = (sessRows || []).map((s) => ({
         ...s,
         owner: s.user_id ? ownersById.get(s.user_id) || null : null,
         cal_shown: s.calibration_shown != null ? calById.get(s.calibration_shown) || null : null,
+        edicion_resumen: resumenes.ediciones.get(s.id) || null,
+        revision: resumenes.revisiones.get(s.id) || null,
       }));
       setSessions(merged);
     } catch (e) {
@@ -199,8 +217,13 @@ export default function AdminView({ profile, onSignOut, onSwitchToDashboard }) {
       .eq('id', sessionId)
       .maybeSingle();
     if (err || !data) return;
-    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, ...data } : s)));
-    setSelectedSession((cur) => (cur && cur.id === sessionId ? { ...cur, ...data } : cur));
+    let extra = {};
+    try {
+      const r = await resumenesDeSesiones(supabase, [sessionId]);
+      extra = { edicion_resumen: r.ediciones.get(sessionId) || null, revision: r.revisiones.get(sessionId) || null };
+    } catch { /* se queda con las marcas anteriores */ }
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, ...data, ...extra } : s)));
+    setSelectedSession((cur) => (cur && cur.id === sessionId ? { ...cur, ...data, ...extra } : cur));
   };
 
   /** Borrar la sesión (cascade: measurements + events). */
@@ -670,6 +693,8 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
                       ? ` · ${[s.patient.last_name, s.patient.first_name].filter(Boolean).join(', ')}` : ''}`
                   : (s.patient_name || 'Sin paciente asociado')}
                 {s.session_number ? <span className="patient-item-meta"> · sesión {s.session_number}</span> : null}
+                {s.edicion_resumen && <span className="tag-mini" title="La curva tiene una versión editada">editada</span>}
+                {s.revision?.apta === false && <span className="tag-mini is-alarm" title={s.revision.nota || 'Marcada no apta para el análisis'}>no apta</span>}
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', color: 'var(--type-mute)' }}>
                 {new Date(s.created_at).toLocaleString('es-AR')}
@@ -684,13 +709,16 @@ function SessionsPanel({ sessions, busy, filter, setFilter, onReload, setSelecte
             <div>
               <div className="section-label">Z basal</div>
               <div className="numeric" style={{ color: 'var(--type-hi)', fontFamily: 'var(--font-mono)' }}>
-                {s.initial_impedance != null ? `${s.initial_impedance.toFixed(2)} Ω` : '—'}
+                {(() => {
+                  const z = s.edicion_resumen ? s.edicion_resumen.initial_impedance : s.initial_impedance;
+                  return z != null ? `${Number(z).toFixed(2)} Ω` : '—';
+                })()}
               </div>
             </div>
             <div>
               <div className="section-label">Duración</div>
               <div className="numeric" style={{ color: 'var(--type-hi)', fontFamily: 'var(--font-mono)' }}>
-                {s.elapsed_time_str || '—'}
+                {(s.edicion_resumen ? s.edicion_resumen.elapsed_time_str : s.elapsed_time_str) || '—'}
               </div>
             </div>
             <ChevronRight size={16} style={{ color: 'var(--type-mute)' }} />
@@ -768,11 +796,26 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
   const [busy, setBusy]                 = useState(true);
   const [loaded, setLoaded]             = useState(0);      // progreso de descarga
   const [loadError, setLoadError]       = useState(null);
-  const chartRef                        = useRef(null);     // para el PNG del PDF
-  const [mode, setMode]                 = useState('view'); // view | edit
+  const chartRef                        = useRef(null);
+  const [mode, setMode]                 = useState('view'); // view | edit | curva
   const [saving, setSaving]             = useState(false);
   const [savingError, setSavingError]   = useState(null);
   const [askDelete, setAskDelete]       = useState(false);
+
+  // Edición de la curva, apta / no apta y comentarios (sql/edicion_sesiones.sql)
+  const [edicionInfo, setEdicionInfo]   = useState({ cargando: true, disponible: true, edicion: null, serie: [], error: null });
+  const [revisionInfo, setRevisionInfo] = useState({ disponible: true, revision: null });
+  const [comentarios, setComentarios]   = useState([]);
+  const [comentariosOk, setComentariosOk] = useState(false);   // se leyeron bien
+  const [conVadc, setConVadc]           = useState(true);      // measurements trajo voltage_v
+  const [verOriginal, setVerOriginal]   = useState(false);
+  const [elegirVersion, setElegirVersion] = useState(null);  // 'pdf' | 'csv' | 'txt' | null
+  const [autorEdicion, setAutorEdicion] = useState(null);   // { id, data }
+  const vivoRef = useRef(true);
+  useEffect(() => () => { vivoRef.current = false; }, []);
+  // Al entrar o salir del editor se arranca desde arriba del detalle
+  const cardRef = useRef(null);
+  useEffect(() => { if (cardRef.current) cardRef.current.scrollTop = 0; }, [mode]);
 
   const patient = session.patient || null;
   const legacy  = hasLegacy(session);
@@ -793,6 +836,25 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     total_events:      session.total_events      ?? 0,
     ...Object.fromEntries(LEGACY_COLS.map(([k]) => [k, session[k] ?? ''])),
   });
+
+  /** Edición, apta y comentarios · cada uno por su lado: si uno falla, los otros siguen. */
+  const cargarExtras = useCallback(async () => {
+    setEdicionInfo((p) => ({ ...p, cargando: true }));
+    const [ed, rev, com] = await Promise.allSettled([
+      cargarEdicion(supabase, session.id),
+      cargarRevision(supabase, session.id),
+      cargarComentarios(supabase, session.id),
+    ]);
+    if (!vivoRef.current) return;
+    setEdicionInfo(ed.status === 'fulfilled'
+      ? { cargando: false, error: null, ...ed.value }
+      : { cargando: false, disponible: true, edicion: null, serie: [], error: ed.reason?.message || 'No se pudo leer la edición.' });
+    if (rev.status === 'fulfilled') setRevisionInfo(rev.value);
+    if (com.status === 'fulfilled') setComentarios(com.value.comentarios);
+    // Si no se pudieron leer, el editor no los toca (guardar una lista vacía
+    // los borraría)
+    setComentariosOk(com.status === 'fulfilled' && com.value.disponible);
+  }, [session.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -819,22 +881,34 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
 
       // Una sesión de 4 h son ~57.000 muestras: hay que paginarlas. El orden
       // tiene que ser total o la paginación repite o saltea filas, así que se
-      // desempata por `id`; si esa columna no existe se cae al orden simple
-      // (a 4 Hz los tiempos no se repiten, es solo un seguro).
+      // desempata por `id`. Se pide también voltage_v (Vadc), que el editor
+      // procesa junto con Z. Solo si la base dice que una columna NO EXISTE se
+      // reintenta sin ella: ante cualquier otro error (red) se corta, porque
+      // una serie sin Vadc guardada como edición perdería ese dato.
       const muestras = async () => {
-        const build = (conId) => () => {
+        const build = (conV, conId) => () => {
           const q = supabase
             .from('measurements')
-            .select('elapsed_time, impedance, rate')
+            .select(conV ? 'elapsed_time, impedance, rate, voltage_v' : 'elapsed_time, impedance, rate')
             .eq('session_id', session.id)
             .order('elapsed_time', { ascending: true });
           return conId ? q.order('id', { ascending: true }) : q;
         };
         const onProgress = (n) => { if (!cancelled) setLoaded(n); };
-        try {
-          return await fetchAllRows(build(true), { onProgress });
-        } catch {
-          return fetchAllRows(build(false), { onProgress });
+        const falta = (e, col) => String(e?.code) === '42703'
+          && new RegExp(`\\b${col}\\b`, 'i').test(String(e?.message || ''));
+        let conV = true;
+        let conId = true;
+        for (;;) {
+          try {
+            const filas = await fetchAllRows(build(conV, conId), { onProgress });
+            if (!cancelled) setConVadc(conV);
+            return filas;
+          } catch (e) {
+            if (conV && falta(e, 'voltage_v')) { conV = false; continue; }
+            if (conId && falta(e, 'id')) { conId = false; continue; }
+            throw e;
+          }
         }
       };
 
@@ -843,6 +917,7 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
           muestras(),
           eventos(),
           fetchFields(supabase, { includeInactive: true }).catch(() => []),
+          cargarExtras(),
         ]);
         if (cancelled) return;
         setMeasurements(m);
@@ -856,17 +931,83 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
       }
     })();
     return () => { cancelled = true; };
-  }, [session.id]);
+  }, [session.id, cargarExtras]);
 
   const fmt = (n, d = 2) => (n == null ? '—' : Number(n).toFixed(d));
 
+  /* ── versión editada ───────────────────────────────────────────────── */
+  const edicion = edicionInfo.edicion;
+  // Numerados en el orden de la sesión entera: C3 es C3 en la original y en la editada
+  const comentariosNum = useMemo(
+    () => [...comentarios].sort((a, b) => a.t_from - b.t_from).map((c, i) => ({ ...c, n: i + 1 })),
+    [comentarios],
+  );
+  const editada = useMemo(() => {
+    if (!edicion) return null;
+    const serie = edicionInfo.serie;
+    const tasa = tasaSerie(serie);
+    const rec = edicion.stats?.recorte || [-Infinity, Infinity];
+    return {
+      serie: serie.map((s, i) => ({ ...s, rate: tasa[i] })),
+      eventos: eventosDeEdicion(edicion, serie),
+      comentarios: comentariosEnSerie(comentariosNum, { tCero: edicion.t_cero || 0, lo: rec[0], hi: rec[1] }),
+      lo: rec[0],
+      hi: rec[1],
+    };
+  }, [edicion, edicionInfo.serie, comentariosNum]);
+
+  // Lo que se muestra como principal: la editada si existe
+  const principal = editada
+    ? { measurements: editada.serie, events: editada.eventos, comments: editada.comentarios }
+    : { measurements, events, comments: comentariosNum };
+
+  const fondoOriginal = useMemo(() => {
+    if (!editada || !verOriginal) return null;
+    const t0 = edicion.t_cero || 0;
+    return measurements
+      .filter((m) => m.elapsed_time >= editada.lo && m.elapsed_time <= editada.hi)
+      .map((m) => ({ elapsed_time: m.elapsed_time - t0, impedance: m.impedance }));
+  }, [editada, verOriginal, measurements, edicion]);
+
+  const periodo = useMemo(() => periodoMuestreo(measurements), [measurements]);
+  const lineasEdicion = useMemo(
+    () => (edicion ? describirEdicion(edicion.params, { tCero: edicion.t_cero, periodo }) : []),
+    [edicion, periodo],
+  );
+
+  // Quién editó · solo se muestra acá, en el detalle
+  useEffect(() => {
+    const id = edicion?.edited_by;
+    if (!id) return undefined;
+    let ok = true;
+    supabase.from('profiles').select('display_name, email').eq('id', id).maybeSingle()
+      .then(({ data }) => { if (ok) setAutorEdicion({ id, data: data || null }); });
+    return () => { ok = false; };
+  }, [edicion?.edited_by]);
+  const autor = autorEdicion && autorEdicion.id === edicion?.edited_by ? autorEdicion.data : null;
+
+  const resumen = edicion
+    ? {
+      basal: edicion.initial_impedance,
+      final: edicion.final_impedance,
+      duracion: edicion.elapsed_time_str,
+      eventos: edicion.total_events ?? editada?.eventos.length ?? 0,
+    }
+    : {
+      basal: session.initial_impedance,
+      final: session.final_impedance,
+      duracion: session.elapsed_time_str,
+      eventos: session.total_events ?? events.length,
+    };
+
   /** Agua total ingerida · se recalcula sumando los eventos, no se guarda suelta. */
-  const aguaTotal = useMemo(() => {
-    const ml = events
+  const aguaDe = (lista) => {
+    const ml = (lista || [])
       .filter((e) => e.kind === 'water' && Number.isFinite(Number(e.amount_ml)))
       .reduce((acc, e) => acc + Number(e.amount_ml), 0);
     return ml > 0 ? ml : null;
-  }, [events]);
+  };
+  const aguaTotal = useMemo(() => aguaDe(principal.events), [principal.events]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -923,9 +1064,10 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
   // Mismo formato que usa el export en vivo: código, nombre, notas y la lista
   // de campos con su etiqueta. Se arma desde el catálogo, no desde columnas
   // fijas, para que los reportes reflejen lo que realmente se midió.
-  const buildPatient = () => {
+  const buildPatient = (eventosVersion) => {
     const pData = patient?.data || {};
     const sData = session.session_data || {};
+    const agua = aguaDe(eventosVersion);
 
     const campos = [
       ...patientFields
@@ -934,7 +1076,7 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
       ...sessionFields
         .filter((f) => sData[f.key] !== undefined && sData[f.key] !== '')
         .map((f) => ({ label: f.label, unit: f.unit, value: sData[f.key] })),
-      ...(aguaTotal != null ? [{ label: 'Agua ingerida (eventos)', unit: 'ml', value: aguaTotal }] : []),
+      ...(agua != null ? [{ label: 'Agua ingerida (eventos)', unit: 'ml', value: agua }] : []),
       // Sesiones viejas: se agregan al final para no perder el dato histórico
       ...(legacy ? LEGACY_COLS
         .filter(([k]) => session[k] !== null && session[k] !== undefined && session[k] !== '')
@@ -954,13 +1096,60 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     };
   };
 
-  const buildStats = () => ({
-    initialZ:   session.initial_impedance,
-    finalZ:     session.final_impedance,
-    elapsedStr: session.elapsed_time_str,
-    eventCount: session.total_events ?? events.length,
-    samples:    measurements.length,
-  });
+  /** Todo lo que cambia entre bajar la original o la editada. */
+  const datosVersion = (v) => {
+    const revision = revisionInfo.revision;
+    const lineaApta = revision?.apta === false
+      ? [`Marcada NO APTA para el análisis${revision.nota ? `: ${revision.nota}` : '.'}`]
+      : [];
+    if (v === 'editada' && editada) {
+      return {
+        sufijo: '_editada',
+        measurements: editada.serie,
+        events: editada.eventos,
+        comments: editada.comentarios,
+        editada: true,
+        stats: {
+          initialZ: edicion.initial_impedance,
+          finalZ: edicion.final_impedance,
+          elapsedStr: edicion.elapsed_time_str,
+          eventCount: editada.eventos.length,
+          samples: editada.serie.length,
+        },
+        version: {
+          etiqueta: 'Editada',
+          lineas: [
+            'Curva editada a partir de la medición original, que se conserva sin cambios.',
+            ...lineasEdicion,
+            ...lineaApta,
+          ],
+        },
+      };
+    }
+    return {
+      sufijo: edicion ? '_original' : '',
+      measurements,
+      events,
+      comments: comentariosNum,
+      editada: false,
+      stats: {
+        initialZ:   session.initial_impedance,
+        finalZ:     session.final_impedance,
+        elapsedStr: session.elapsed_time_str,
+        eventCount: session.total_events ?? events.length,
+        samples:    measurements.length,
+      },
+      version: edicion || lineaApta.length
+        ? {
+          etiqueta: 'Original',
+          lineas: [
+            ...(edicion ? ['Curva tal como se midió. Esta sesión tiene una versión editada, que es la principal.'] : []),
+            ...lineaApta,
+          ],
+        }
+        : null,
+    };
+  };
 
   const safeSlug = () => {
     // El código del paciente es el identificador del dataset; el nombre suelto
@@ -975,30 +1164,43 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     return `${name}_${date}`;
   };
 
-  const downloadPDF = () => exportPDF({
-    filename: `chidori_${safeSlug()}.pdf`,
-    patient: buildPatient(),
-    stats: buildStats(),
-    measurements,
-    events,
-    calibration: calibracionDelReporte(session),
-    // El gráfico se re-rinde en paleta clara: el canvas de pantalla es
-    // transparente y de tema oscuro, ilegible sobre una hoja blanca.
-    chartImage: chartRef.current?.toPNG() ?? null,
-  });
+  const descargar = (formato, v) => {
+    setElegirVersion(null);
+    const d = datosVersion(v);
+    const nombre = `chidori_${safeSlug()}${d.sufijo}`;
+    if (formato === 'pdf') {
+      exportPDF({
+        filename: `${nombre}.pdf`,
+        patient: buildPatient(d.events),
+        stats: d.stats,
+        measurements: d.measurements,
+        events: d.events,
+        calibration: calibracionDelReporte(session),
+        // El gráfico se re-rinde en paleta clara: el canvas de pantalla es
+        // transparente y de tema oscuro, ilegible sobre una hoja blanca.
+        chartImage: renderChartPNG({ measurements: d.measurements, events: d.events, comments: d.comments }),
+        version: d.version,
+        comments: d.comments,
+      });
+    } else if (formato === 'csv') {
+      exportCSV({ filename: `${nombre}.csv`, measurements: d.measurements, comments: d.comments, editada: d.editada });
+    } else {
+      exportTXT({
+        filename: `${nombre}.txt`,
+        patient: buildPatient(d.events),
+        stats: d.stats,
+        measurements: d.measurements,
+        events: d.events,
+        version: d.version,
+        comments: d.comments,
+      });
+    }
+  };
+  // Con edición se pregunta cuál; sin edición se baja la única que hay
+  const pedirDescarga = (formato) => (edicion ? setElegirVersion(formato) : descargar(formato, 'original'));
 
-  const downloadCSV = () => exportCSV({
-    filename: `chidori_${safeSlug()}.csv`,
-    measurements,
-  });
-
-  const downloadTXT = () => exportTXT({
-    filename: `chidori_${safeSlug()}.txt`,
-    patient: buildPatient(),
-    stats: buildStats(),
-    measurements,
-    events,
-  });
+  const puedeEditarCurva = !busy && !edicionInfo.cargando && edicionInfo.disponible
+    && !edicionInfo.error && !loadError && conVadc && measurements.length >= 2;
 
   /* ── Render ─────────────────────────────────────────────────────── */
 
@@ -1006,22 +1208,24 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
     <>
       <motion.div
         className="modal-veil"
-        onClick={onClose}
+        onClick={mode === 'curva' ? undefined : onClose}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.18 }}
       >
         <motion.div
+          ref={cardRef}
           layoutId={sessionLayoutId(session.id)}
           className="modal-card modal-wide morph-card"
           onClick={(e) => e.stopPropagation()}
-          style={{ maxWidth: 820 }}
+          style={{ maxWidth: mode === 'curva' ? 1180 : 820 }}
           transition={{ type: 'spring', stiffness: 260, damping: 30 }}
         >
           <div className="modal-head" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
               <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {mode === 'curva' && 'Editar curva · '}
                 {session.patient
                   ? `${session.patient.code}${[session.patient.last_name, session.patient.first_name].filter(Boolean).length
                       ? ` · ${[session.patient.last_name, session.patient.first_name].filter(Boolean).join(', ')}` : ''}`
@@ -1035,18 +1239,40 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
             </div>
 
             <div className="row" style={{ gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
-              {mode === 'view' ? (
-                <button
-                  type="button"
-                  className="button button-ghost button-sm"
-                  onClick={() => { setMode('edit'); setSavingError(null); }}
-                  disabled={busy}
-                  title={busy ? 'Cargando los campos configurados…' : 'Editar esta sesión'}
-                >
-                  <Pencil size={13} />
-                  Editar
-                </button>
-              ) : (
+              {mode === 'view' && (
+                <>
+                  <button
+                    type="button"
+                    className="button button-ghost button-sm"
+                    onClick={() => { setMode('curva'); setElegirVersion(null); }}
+                    disabled={!puedeEditarCurva}
+                    title={!edicionInfo.disponible ? AVISO_SQL
+                      : busy || edicionInfo.cargando ? 'Cargando la sesión…'
+                        : edicionInfo.error || loadError ? 'No se pudo leer la sesión entera: no se puede editar ahora'
+                          : !conVadc ? 'La base no devolvió Vadc (voltage_v): no se edita para no perderlo'
+                            : 'Recortar, sacar tramos, suavizar, fijar basal/final, corregir eventos y comentar la curva'}
+                  >
+                    <PenLine size={13} />
+                    Editar curva
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-ghost button-sm"
+                    onClick={() => {
+                      // Desde lo guardado: el editor de curva pudo haber cambiado las notas
+                      setNotes(session.notes || '');
+                      setMode('edit');
+                      setSavingError(null);
+                    }}
+                    disabled={busy}
+                    title={busy ? 'Cargando los campos configurados…' : 'Editar los datos de esta sesión'}
+                  >
+                    <Pencil size={13} />
+                    Editar datos
+                  </button>
+                </>
+              )}
+              {mode === 'edit' && (
                 <button
                   type="button"
                   className="button button-ghost button-sm"
@@ -1062,24 +1288,24 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                 <>
                   <button
                     type="button"
-                    className="button button-ghost button-sm"
-                    onClick={downloadPDF}
+                    className={`button button-ghost button-sm${elegirVersion === 'pdf' ? ' is-pressed' : ''}`}
+                    onClick={() => pedirDescarga('pdf')}
                     title="Descargar reporte PDF"
                   >
                     <FileText size={13} /> PDF
                   </button>
                   <button
                     type="button"
-                    className="button button-ghost button-sm"
-                    onClick={downloadCSV}
-                    title="Descargar datos crudos (CSV)"
+                    className={`button button-ghost button-sm${elegirVersion === 'csv' ? ' is-pressed' : ''}`}
+                    onClick={() => pedirDescarga('csv')}
+                    title="Descargar datos (CSV)"
                   >
                     <Table size={13} /> CSV
                   </button>
                   <button
                     type="button"
-                    className="button button-ghost button-sm"
-                    onClick={downloadTXT}
+                    className={`button button-ghost button-sm${elegirVersion === 'txt' ? ' is-pressed' : ''}`}
+                    onClick={() => pedirDescarga('txt')}
                     title="Descargar texto plano"
                   >
                     <FileType2 size={13} /> TXT
@@ -1087,22 +1313,45 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                 </>
               )}
 
+              {mode !== 'curva' && (
+                <button
+                  type="button"
+                  className="button button-sm"
+                  onClick={() => setAskDelete(true)}
+                  title="Eliminar esta sesión y sus datos"
+                  style={{ borderColor: 'var(--alarm-line)', color: 'var(--alarm)' }}
+                >
+                  <Trash2 size={13} />
+                  Eliminar
+                </button>
+              )}
+
               <button
                 type="button"
-                className="button button-sm"
-                onClick={() => setAskDelete(true)}
-                title="Eliminar esta sesión y sus datos"
-                style={{ borderColor: 'var(--alarm-line)', color: 'var(--alarm)' }}
+                className="icon-button"
+                onClick={mode === 'curva' ? () => setMode('view') : onClose}
+                aria-label={mode === 'curva' ? 'Salir del editor sin guardar' : 'Cerrar'}
+                title={mode === 'curva' ? 'Salir del editor sin guardar' : 'Cerrar'}
               >
-                <Trash2 size={13} />
-                Eliminar
-              </button>
-
-              <button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar">
                 <X size={16} />
               </button>
             </div>
           </div>
+
+          {elegirVersion && (
+            <div className="version-chooser">
+              <span>¿Qué versión descargás en {elegirVersion.toUpperCase()}?</span>
+              <button type="button" className="button button-primary button-sm" onClick={() => descargar(elegirVersion, 'editada')}>
+                Editada
+              </button>
+              <button type="button" className="button button-sm" onClick={() => descargar(elegirVersion, 'original')}>
+                Original
+              </button>
+              <button type="button" className="button button-ghost button-sm" onClick={() => setElegirVersion(null)}>
+                Cancelar
+              </button>
+            </div>
+          )}
 
           <div className="modal-body stack-md">
             {savingError && (
@@ -1114,32 +1363,109 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                 de las descargadas hasta el corte.
               </div>
             )}
+            {edicionInfo.error && (
+              <div className="auth-feedback err">
+                No se pudo leer la versión editada ({edicionInfo.error}). Se muestra la original.
+              </div>
+            )}
 
-            {mode === 'view' ? (
+            {mode === 'curva' ? (
+              <CurveEditor
+                supabase={supabase}
+                session={session}
+                original={measurements}
+                eventosOriginales={events}
+                edicion={edicion}
+                comentarios={comentariosNum}
+                comentariosCargados={comentariosOk}
+                onCancel={() => setMode('view')}
+                onSaved={async () => {
+                  await cargarExtras();
+                  await onSessionUpdated?.(session.id);
+                  if (vivoRef.current) setMode('view');
+                }}
+              />
+            ) : mode === 'view' ? (
               <>
+                {edicion && (
+                  <div className="edit-banner">
+                    <div style={{ minWidth: 0 }}>
+                      <span className="tag-mini">editada</span>
+                      <span>
+                        Se muestra la curva editada; la original está intacta.
+                        {edicion.n_interpoladas > 0 && ` ${edicion.n_interpoladas.toLocaleString('es-AR')} puntos interpolados.`}
+                      </span>
+                      <span className="field-hint" style={{ display: 'block', marginTop: 4 }}>
+                        Editada por {autor?.display_name || emailToUsername(autor?.email) || 'una cuenta'} ·{' '}
+                        {new Date(edicion.edited_at).toLocaleString('es-AR')}
+                      </span>
+                      {lineasEdicion.length > 0 && (
+                        <ul className="edit-ops">
+                          {lineasEdicion.map((l) => <li key={l}>{l}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="readout" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
                   <div className="readout-cell">
                     <span className="readout-label">Z basal</span>
-                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{fmt(session.initial_impedance)} Ω</span>
+                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{fmt(resumen.basal)} Ω</span>
                   </div>
                   <div className="readout-cell">
                     <span className="readout-label">Z final</span>
-                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{fmt(session.final_impedance)} Ω</span>
+                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{fmt(resumen.final)} Ω</span>
                   </div>
                   <div className="readout-cell">
                     <span className="readout-label">Duración</span>
-                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{session.elapsed_time_str || '—'}</span>
+                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{resumen.duracion || '—'}</span>
                   </div>
                   <div className="readout-cell">
                     <span className="readout-label">Eventos</span>
-                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{session.total_events ?? events.length}</span>
+                    <span className="readout-value numeric" style={{ fontSize: 'var(--t-xl)' }}>{resumen.eventos}</span>
                   </div>
                 </div>
 
                 {/* La curva primero: es la lectura de la sesión. El resto son
                     los datos que la contextualizan, y el volcado crudo va
                     plegado al final. */}
-                <SessionChart ref={chartRef} measurements={measurements} events={events} busy={busy} loaded={loaded} />
+                <SessionChart
+                  ref={chartRef}
+                  measurements={principal.measurements}
+                  events={principal.events}
+                  comments={principal.comments}
+                  fondo={fondoOriginal}
+                  titulo={edicion ? 'Curva editada' : 'Curva de la sesión'}
+                  busy={busy || edicionInfo.cargando}
+                  loaded={loaded}
+                  accesorio={edicion ? (
+                    <button
+                      type="button"
+                      className="button button-ghost button-sm"
+                      onClick={() => setVerOriginal((v) => !v)}
+                      title="La original en gris, detrás de la editada"
+                    >
+                      {verOriginal ? <EyeOff size={13} /> : <Eye size={13} />}
+                      {verOriginal ? 'Ocultar original' : 'Mostrar original'}
+                    </button>
+                  ) : null}
+                />
+
+                <ReviewPanel
+                  key={revisionInfo.revision?.updated_at || 'sin-revision'}
+                  disponible={revisionInfo.disponible}
+                  revision={revisionInfo.revision}
+                  onGuardar={async (cambios) => {
+                    const r = await guardarRevision(supabase, session.id, cambios);
+                    if (vivoRef.current) setRevisionInfo({ disponible: true, revision: r });
+                    await onSessionUpdated?.(session.id);
+                  }}
+                />
+
+                {!edicionInfo.disponible && (
+                  <span className="field-hint">{AVISO_SQL}</span>
+                )}
 
                 <FieldGrid
                   title="Ficha del paciente"
@@ -1176,8 +1502,18 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                   </div>
                 )}
 
-                {events.length > 0 && <EventsList events={events} fmt={fmt} />}
-                <MeasurementsTable busy={busy} measurements={measurements} fmt={fmt} loaded={loaded} />
+                {principal.comments.length > 0 && (
+                  <CommentsList comments={principal.comments} editada={Boolean(editada)} total={comentariosNum.length} />
+                )}
+
+                {principal.events.length > 0 && <EventsList events={principal.events} fmt={fmt} />}
+                <MeasurementsTable
+                  busy={busy}
+                  measurements={principal.measurements}
+                  fmt={fmt}
+                  loaded={loaded}
+                  editada={Boolean(editada)}
+                />
               </>
             ) : (
               <EditForm
@@ -1195,6 +1531,7 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
                 legacy={legacy}
                 saving={saving}
                 onSave={handleSave}
+                editada={Boolean(edicion)}
               />
             )}
           </div>
@@ -1210,7 +1547,8 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
               Esta acción elimina la sesión de{' '}
               <strong>{patientLabel(patient) || session.patient_name || 'paciente sin identificar'}</strong>,
               todas sus mediciones ({measurements.length} puntos) y eventos asociados ({events.length}).
-              No se puede deshacer.
+              {edicion && ' También su versión editada.'}
+              {' '}No se puede deshacer.
             </p>
             <p>Mantenga presionado el botón para confirmar.</p>
           </>
@@ -1221,6 +1559,101 @@ function SessionDetailModal({ session, onClose, onSessionUpdated, onSessionDelet
         holdMs={1800}
       />
     </>
+  );
+}
+
+/**
+ * Apta / no apta para el análisis.
+ *
+ * Por defecto toda sesión es apta (no hay fila). Quien edita la puede sacar
+ * del análisis, con un texto libre opcional. Es independiente de la edición:
+ * vale para cualquier sesión y queda aunque se vuelva al original. En el EDA
+ * manda sobre etiquetas_manuales.csv; las exclusiones automáticas del EDA
+ * siguen aplicando igual.
+ */
+function ReviewPanel({ disponible, revision, onGuardar }) {
+  const apta = revision ? revision.apta : true;
+  const [nota, setNota] = useState(revision?.nota || '');
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState(null);
+  const [listo, setListo] = useState(false);
+
+  if (!disponible) return null;
+
+  const guardar = async (nuevaApta, nuevaNota = nota) => {
+    setGuardando(true);
+    setError(null);
+    setListo(false);
+    try {
+      await onGuardar({ apta: nuevaApta, nota: nuevaApta ? null : nuevaNota });
+      setListo(true);
+    } catch (e) {
+      setError(e.message || 'No se pudo guardar.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div className="review-panel">
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <span className="section-label">Análisis</span>
+        <div className="segment" role="radiogroup" aria-label="Apta para el análisis" style={{ width: 'fit-content' }}>
+          <button type="button" role="radio" aria-checked={apta}
+            className={`segment-item ${apta ? 'active' : ''}`}
+            disabled={guardando} onClick={() => !apta && guardar(true)}>
+            Apta
+          </button>
+          <button type="button" role="radio" aria-checked={!apta}
+            className={`segment-item ${!apta ? 'active is-alarm' : ''}`}
+            disabled={guardando} onClick={() => apta && guardar(false)}>
+            No apta
+          </button>
+        </div>
+        <span className="field-hint">
+          {guardando ? 'Guardando…' : listo ? 'Guardado.' : apta
+            ? 'Entra al análisis (por defecto entran todas).'
+            : 'No entra al análisis, aunque el EDA la considere buena.'}
+        </span>
+      </div>
+      {!apta && (
+        <textarea
+          className="input"
+          rows={2}
+          value={nota}
+          onChange={(e) => setNota(e.target.value)}
+          onBlur={() => { if ((nota.trim() || null) !== (revision?.nota || null)) guardar(false, nota); }}
+          placeholder="Por qué, si querés dejarlo escrito (opcional)"
+          style={{ resize: 'vertical', marginTop: 8, fontFamily: 'inherit', lineHeight: 1.45 }}
+        />
+      )}
+      {error && <div className="auth-feedback err" style={{ marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+/** Comentarios anclados, en la base de tiempo de la curva que se está viendo. */
+function CommentsList({ comments, editada, total }) {
+  return (
+    <Collapsible
+      title={`Comentarios en la curva (${comments.length})`}
+      meta={editada && comments.length < total
+        ? `${total - comments.length} quedaron fuera del recorte`
+        : 'C1, C2… en el gráfico'}
+      defaultOpen
+    >
+      <div className="surface" style={{ padding: '6px 16px' }}>
+        {comments.map((c) => (
+          <div key={c.id} className="comment-row">
+            <span className="editor-badge">C{c.n}</span>
+            <span className="numeric mute" style={{ minWidth: 104 }}>
+              {fmtTiempo(c.t_from)}{c.t_to != null ? `–${fmtTiempo(c.t_to)}` : ''}
+            </span>
+            <span style={{ whiteSpace: 'pre-wrap' }}>{c.body}</span>
+          </div>
+        ))}
+      </div>
+    </Collapsible>
   );
 }
 
@@ -1269,7 +1702,7 @@ function Collapsible({ title, meta, defaultOpen = false, children }) {
   );
 }
 
-function MeasurementsTable({ busy, measurements, fmt, loaded = 0 }) {
+function MeasurementsTable({ busy, measurements, fmt, loaded = 0, editada = false }) {
   const VIEW_H  = 280;
   const OVERSCAN = 12;
   const [scrollTop, setScrollTop] = useState(0);
@@ -1279,12 +1712,12 @@ function MeasurementsTable({ busy, measurements, fmt, loaded = 0 }) {
   const count  = Math.ceil(VIEW_H / ROW_H) + OVERSCAN * 2;
   const visible = measurements.slice(first, first + count);
 
-  const cols = '1fr 1fr 1fr';
+  const cols = editada ? '1fr 1fr 1fr 0.6fr' : '1fr 1fr 1fr';
   const cell = { padding: '0 14px', display: 'flex', alignItems: 'center', height: ROW_H };
 
   return (
     <Collapsible
-      title={`Mediciones (${total.toLocaleString('es-AR')})`}
+      title={`Mediciones${editada ? ' de la editada' : ''} (${total.toLocaleString('es-AR')})`}
       meta={busy
         ? (loaded > 0 ? `descargando ${loaded.toLocaleString('es-AR')}…` : 'descargando…')
         : 'ver la tabla de muestras'}
@@ -1300,6 +1733,7 @@ function MeasurementsTable({ busy, measurements, fmt, loaded = 0 }) {
             <span style={{ ...cell, height: 30 }}>t (s)</span>
             <span style={{ ...cell, height: 30, justifyContent: 'flex-end' }}>Z (Ω)</span>
             <span style={{ ...cell, height: 30, justifyContent: 'flex-end' }}>dZ/dt (Ω/min)</span>
+            {editada && <span style={{ ...cell, height: 30, justifyContent: 'flex-end' }}>interp.</span>}
           </div>
         )}
 
@@ -1337,6 +1771,9 @@ function MeasurementsTable({ busy, measurements, fmt, loaded = 0 }) {
                     <span style={{ ...cell, color: 'var(--type-med)' }}>{fmt(m.elapsed_time, 1)}</span>
                     <span style={{ ...cell, justifyContent: 'flex-end', color: 'var(--type-hi)' }}>{fmt(m.impedance, 3)}</span>
                     <span style={{ ...cell, justifyContent: 'flex-end', color: 'var(--type-med)' }}>{fmt(m.rate, 2)}</span>
+                    {editada && (
+                      <span style={{ ...cell, justifyContent: 'flex-end', color: 'var(--amber)' }}>{m.interpolated ? 'sí' : ''}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1374,11 +1811,15 @@ function EventsList({ events, fmt }) {
         <ol className="timeline" style={{ padding: '0 18px', maxHeight: 300, overflowY: 'auto' }}>
           {events.map((e) => {
             const t = tag(e);
-            const sinZ = e.kind === 'disconnect' || e.kind === 'reconnect';
+            const sinZ = e.kind === 'disconnect' || e.kind === 'reconnect' || e.impedance == null;
             return (
-              <li className={`timeline-row${t ? ` ${t[0]}` : ''}`} key={e.event_number}>
+              <li className={`timeline-row${t ? ` ${t[0]}` : ''}`} key={`${e.event_number}-${e.kind}`}>
                 <span className="timeline-id">#{String(e.event_number).padStart(2, '0')} · {fmt(e.elapsed_time, 0)} s</span>
-                <span className="timeline-z numeric">{sinZ ? '—' : `${fmt(e.impedance)} Ω`}</span>
+                <span className="timeline-z numeric">
+                  {e.fuera_del_recorte
+                    ? <span className="field-hint">fuera del recorte</span>
+                    : sinZ ? '—' : `${fmt(e.impedance)} Ω`}
+                </span>
                 {t ? (
                   <span className={`timeline-tag ${t[1]}`}>{t[2]}</span>
                 ) : (
@@ -1459,7 +1900,7 @@ function EditForm({
   editFields, setEditFields,
   patientFields, patientVals, setPatientVals,
   sessionFields, sessionVals, setSessionVals,
-  notes, setNotes, patient, legacy, saving, onSave,
+  notes, setNotes, patient, legacy, saving, onSave, editada = false,
 }) {
   const set = (k) => (e) => setEditFields((prev) => ({ ...prev, [k]: e.target.value }));
 
@@ -1549,6 +1990,7 @@ function EditForm({
         <span className="section-label">Resumen de la medición</span>
         <span className="field-hint" style={{ display: 'block', margin: '4px 0 10px' }}>
           Se calculan al cerrar la sesión: corregirlos acá no altera las muestras registradas.
+          {editada && ' Son los de la curva ORIGINAL: la versión editada tiene los suyos, que salen de la edición.'}
         </span>
         <div className="dyn-grid" style={{ '--dyn-cols': 4 }}>
           <div className="field">

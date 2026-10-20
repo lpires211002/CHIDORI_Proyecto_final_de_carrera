@@ -25,6 +25,9 @@
 --      Reclasifica por el K_CAL reportado las sesiones que entraron cuando
 --      su calibración todavía no estaba en el catálogo.
 --  6. Rehace `v_dataset_sesiones` con la escala nueva y las banderas.
+--  4.d (app 1.10.0) Si existen las ediciones de sesiones
+--      (sql/edicion_sesiones.sql), las reescala con la misma cuenta desde su
+--      `impedance_raw`, así una sesión editada sigue en la escala de su placa.
 --
 --  Resultado: la app muestra cada sesión en ohms reales según la placa con
 --  que se midió, sin tocar el frontend, y el dato tal como salió del equipo
@@ -401,6 +404,7 @@ declare
   n_mea int;
   n_evt int;
   n_sin int;
+  n_edi int := 0;
 begin
   select id into r_id from public.calibrations where is_reference;
   if r_id is null then
@@ -459,8 +463,33 @@ begin
      and h.id = s.calibration_hw_id;
   get diagnostics n_ses = row_count;
 
-  raise notice 'Recalculado desde _raw a la calibracion de cada placa: % sesiones, % muestras, % eventos.',
-               n_ses, n_mea, n_evt;
+  -- 4.d · ediciones de sesiones (sql/edicion_sesiones.sql, app 1.10.0).
+  --       Misma conversión, desde el `impedance_raw` de la serie editada,
+  --       que la función guardar_edicion_sesion() llena al activarla. Va con
+  --       EXECUTE porque en una base sin ediciones esas tablas no existen.
+  if to_regclass('public.measurements_edited') is not null then
+    execute $q$
+      update public.measurements_edited m
+         set impedance = m.impedance_raw * (f.k_cal / h.k_cal) + 2*(h.v_detector - f.v_detector)/h.k_cal
+        from public.sessions s
+        join public.calibrations f on f.id = s.calibration_id
+        join public.calibrations h on h.id = s.calibration_hw_id
+       where m.session_id = s.id
+         and m.impedance_raw is not null $q$;
+    get diagnostics n_edi = row_count;
+    execute $q$
+      update public.session_edits e
+         set initial_impedance = e.initial_impedance_raw * (f.k_cal / h.k_cal) + 2*(h.v_detector - f.v_detector)/h.k_cal,
+             final_impedance   = e.final_impedance_raw   * (f.k_cal / h.k_cal) + 2*(h.v_detector - f.v_detector)/h.k_cal,
+             escala            = s.calibration_hw_id
+        from public.sessions s
+        join public.calibrations f on f.id = s.calibration_id
+        join public.calibrations h on h.id = s.calibration_hw_id
+       where e.session_id = s.id $q$;
+  end if;
+
+  raise notice 'Recalculado desde _raw a la calibracion de cada placa: % sesiones, % muestras, % eventos, % muestras editadas.',
+               n_ses, n_mea, n_evt, n_edi;
 end $$;
 
 
@@ -591,3 +620,7 @@ order by 1, 2, 3;
 --   update public.sessions       set initial_impedance = initial_impedance_raw,
 --                                    final_impedance   = final_impedance_raw,
 --                                    calibration_shown = calibration_id;
+--   -- y, si existen las ediciones (sql/edicion_sesiones.sql):
+--   update public.measurements_edited set impedance = impedance_raw where impedance_raw is not null;
+--   update public.session_edits       set initial_impedance = initial_impedance_raw,
+--                                         final_impedance   = final_impedance_raw;
