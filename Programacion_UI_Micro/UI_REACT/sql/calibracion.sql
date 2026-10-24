@@ -24,6 +24,11 @@
 --      sesiones con el firmware de 1,1k (4) pasan solas a la placa 5.
 --      Reclasifica por el K_CAL reportado las sesiones que entraron cuando
 --      su calibración todavía no estaba en el catálogo.
+--  5e. (rev 6, oct 2026) PLACA 3.1 en todas las placas: R2 1,5k, R9 2k,
+--      R10 4,7k. Agrega la calibración 6, validada con una resistencia fija
+--      de 120 Ω (K 0,01800 · déficit 0,260 V). Las sesiones con el firmware
+--      nuevo se etiquetan solas por el K_CAL que reporta. La LISTA de la 3b
+--      ahora dice también con qué firmware se midió cada sesión listada.
 --  6. Rehace `v_dataset_sesiones` con la escala nueva y las banderas.
 --  4.d (app 1.10.0) Si existen las ediciones de sesiones
 --      (sql/edicion_sesiones.sql), las reescala con la misma cuenta desde su
@@ -84,9 +89,11 @@
 -- ║                                                                     ║
 -- ║  (3) LISTA · línea marcada «LISTA» (sección 3b). Sesiones medidas    ║
 -- ║  en una placa cuyo hardware NO coincide con el firmware que tenía    ║
--- ║  cargado. Hoy: P-004 sesión 9 (27/09 · R9 ya en 1,2k · firmware con  ║
--- ║  la calibración rev 3) → placa 5. Las sesiones con el firmware de    ║
--- ║  "1,1k" (calibración 4) NO van acá: pasan solas a la placa 5.        ║
+-- ║  cargado: (paciente, sesión, calibración del firmware, de la placa). ║
+-- ║  Hoy: P-004 sesión 9 (27/09 · R9 ya en 1,2k · firmware rev 3) → 5.   ║
+-- ║  Una sesión medida en una placa 3.1 con el firmware viejo va acá,    ║
+-- ║  p. ej. ('P-00X', N, 5, 6). Las del firmware "1,1k" (calibración 4)  ║
+-- ║  NO van: pasan solas a la placa 5.                                  ║
 -- ║  Si te equivocás, se arregla: ver "CORREGIR UNA CLASIFICACIÓN MAL"   ║
 -- ║  al final del archivo.                                              ║
 -- ╚═════════════════════════════════════════════════════════════════════╝
@@ -154,7 +161,11 @@ values
   (5, 'R9 1,2k (rev 5, medida 2026-10-09)', 0.34200, 0.230, 0.0003285, 1041.1,
       'sobre Luca, osciloscopio de mano: U3 pata 1 = 3,29 Vpp (Vrms 1,16) -> I = 328 uA pp con el Howland de 10k · U5B 0,11 Vpp · U4 pata 14 2,29 Vpp -> cadena U5B..U4D x20,8 · K = I x 5 (INA) x 10 (U5B) x 20,8 · deficit = Vpp14/2 - Vadc en tres tandas (0,215 a 0,245)',
       date '2026-09-27',
-      'Placa con R9 = 1,2k desde el 27/09/2026 (confirmado 09/10: SMD 1201, 1160 ohm de U4 pata 8 a 13 con soldaduras). La cadena cierra con los valores impresos: U4A 1,013 x U4B 3,19 x U4C 0,82 (CLP2 = 270 p) x U4D 8,15 = 21,6 contra 20,8 medido. Corriente 328 uA: confirma rev 3 (322) y descarta los 400 uA, que eran 3,22 V / 8,06k (lectura en circuito). LIMITACION: a 20 mV/div el osciloscopio marca 0,11 V en U5B pero la traza mide ~0,086 V; con 0,086 K seria 0,436. Incertidumbre ~12 %. Rango: 1,35 a ~13 ohm. Pendiente: resistencias patron de 2 a 12 ohm.')
+      'Placa con R9 = 1,2k desde el 27/09/2026 (confirmado 09/10: SMD 1201, 1160 ohm de U4 pata 8 a 13 con soldaduras). La cadena cierra con los valores impresos: U4A 1,013 x U4B 3,19 x U4C 0,82 (CLP2 = 270 p) x U4D 8,15 = 21,6 contra 20,8 medido. Corriente 328 uA: confirma rev 3 (322) y descarta los 400 uA, que eran 3,22 V / 8,06k (lectura en circuito). LIMITACION: a 20 mV/div el osciloscopio marca 0,11 V en U5B pero la traza mide ~0,086 V; con 0,086 K seria 0,436. Incertidumbre ~12 %. Rango: 1,35 a ~13 ohm. Pendiente: resistencias patron de 2 a 12 ohm.'),
+  (6, 'Placa 3.1 (rev 6, validada con 120 ohm)', 0.01800, 0.260, 0.000338, 53.2,
+      'laboratorio, resistencia fija de 120 ohm: entrada del INA 40,6 mVpp -> I = 338 uA pp · U5A 207 mVpp · U5B 307 (x1,48) · U4A 328 (x1,07) · U4B 1,12 Vpp (x3,39) · U4C 912 mVpp (x0,82) · U4 pata 14 2,160 Vpp (x2,37) · Vout 820 mV con tester · K = Vpp14 / R = 2,160 / 120 · deficit = 1,080 - 0,820',
+      null,
+      'Placa 3.1, oct 2026, en todas las placas: R2 10k -> 1,5k (U5B x1,5), R9 -> 2k y R10 10k -> 4,7k (U4D x2,35). Ganancia total 53,2 (antes ~1040): ~20 veces menos. K cierra por los dos lados: 2,160/120 = 0,01800 y 338 uA x 53,2 = 0,01798. Rango: 29 ohm (Vadc = 0) a ~250 ohm (Vadc 2,0 V). LIMITACION: un solo punto de calibracion; el deficit de un detector de diodos no es constante con la amplitud, asi que lejos de 120 ohm el error puede crecer. Vout medido con tester y no por el ADC del micro. Pendiente: dos o mas resistencias fijas (p. ej. 47, 100, 220 ohm) para ajustar la recta y medir el residuo.')
 on conflict (id) do update set
   label  = excluded.label,  k_cal      = excluded.k_cal,   v_detector = excluded.v_detector,
   i_pp_a = excluded.i_pp_a, g_receiver = excluded.g_receiver,
@@ -365,11 +376,14 @@ do $$
 declare esperadas int; aplicadas int;
 begin
   drop table if exists _placa_modificada;
-  create temp table _placa_modificada (codigo text, nro int, cal_hw smallint) on commit drop;
-  -- (código de paciente, número de sesión, calibración de la placa).
-  -- Para agregar: ..., ('P-004', 10, 5). En una base sin estas sesiones
-  -- (instalación nueva), comentá la línea entera y la lista queda vacía.
-  insert into _placa_modificada values ('P-004', 9, 5);   -- ◀── LISTA
+  create temp table _placa_modificada (codigo text, nro int, cal_fw smallint, cal_hw smallint) on commit drop;
+  -- (código de paciente, número de sesión, calibración con la que midió el
+  -- FIRMWARE, calibración de la PLACA). La del firmware es un control: si la
+  -- sesión no midió con esa, no se toca. Para agregar una sesión medida en
+  -- una placa 3.1 con el firmware de R9 1,2k: ..., ('P-00X', N, 5, 6).
+  -- En una base sin estas sesiones (instalación nueva), comentá la línea
+  -- entera y la lista queda vacía.
+  insert into _placa_modificada values ('P-004', 9, 3, 5);   -- ◀── LISTA
 
   select count(*) into esperadas from _placa_modificada;
 
@@ -379,11 +393,11 @@ begin
     join public.patients p on p.code = l.codigo
    where s.patient_id = p.id
      and s.session_number = l.nro
-     and s.calibration_id = 3;          -- solo si midió con firmware rev 3
+     and s.calibration_id = l.cal_fw;   -- solo si midió con ese firmware
   get diagnostics aplicadas = row_count;
 
   if aplicadas <> esperadas then
-    raise exception 'LISTA de placa modificada: esperaba % sesion(es) con firmware rev 3 y encontre %. No se aplico NADA. Revisar codigo de paciente y numero de sesion.', esperadas, aplicadas;
+    raise exception 'LISTA de placa modificada: esperaba % sesion(es) y encontre % con el paciente, el numero y el firmware indicados. No se aplico NADA.', esperadas, aplicadas;
   end if;
   raise notice 'Placa modificada: % sesion(es) reasignadas.', aplicadas;
 end $$;
