@@ -24,11 +24,15 @@
 --      sesiones con el firmware de 1,1k (4) pasan solas a la placa 5.
 --      Reclasifica por el K_CAL reportado las sesiones que entraron cuando
 --      su calibración todavía no estaba en el catálogo.
---  5e. (rev 6, oct 2026) PLACA 3.1 en todas las placas: R2 1,5k, R9 2k,
+--  5e. (rev 6, 24/10/2026) PLACA 3.1 en todas las placas: R2 1,5k, R9 2k,
 --      R10 4,7k. Agrega la calibración 6, validada con una resistencia fija
---      de 120 Ω (K 0,01800 · déficit 0,260 V). Las sesiones con el firmware
---      nuevo se etiquetan solas por el K_CAL que reporta. La LISTA de la 3b
---      ahora dice también con qué firmware se midió cada sesión listada.
+--      de 120 Ω (K 0,01800 · déficit 0,260 V). Y TODAS las sesiones pasan a
+--      esa escala: la placa con la que se midió tenía un componente que no
+--      amplificaba, así que su ganancia real era mucho menor que la que
+--      suponía el firmware y la Z salía mucho menor. La medición del 09/10
+--      lo confirma: con U5B en ×0,53 en vez de ×10 la ganancia total da ~55,
+--      contra 53,2 de la 3.1. La LISTA de la 3b ahora dice también con qué
+--      firmware se midió cada sesión listada.
 --  6. Rehace `v_dataset_sesiones` con la escala nueva y las banderas.
 --  4.d (app 1.10.0) Si existen las ediciones de sesiones
 --      (sql/edicion_sesiones.sql), las reescala con la misma cuenta desde su
@@ -90,12 +94,18 @@
 -- ║  (3) LISTA · línea marcada «LISTA» (sección 3b). Sesiones medidas    ║
 -- ║  en una placa cuyo hardware NO coincide con el firmware que tenía    ║
 -- ║  cargado: (paciente, sesión, calibración del firmware, de la placa). ║
--- ║  Hoy: P-004 sesión 9 (27/09 · R9 ya en 1,2k · firmware rev 3) → 5.   ║
+-- ║  Hoy: P-004 sesión 9 (27/09 · placa modificada · firmware rev 3) → 6.║
 -- ║  Una sesión medida en una placa 3.1 con el firmware viejo va acá,    ║
 -- ║  p. ej. ('P-00X', N, 5, 6). Las del firmware "1,1k" (calibración 4)  ║
 -- ║  NO van: pasan solas a la placa 5.                                  ║
 -- ║  Si te equivocás, se arregla: ver "CORREGIR UNA CLASIFICACIÓN MAL"   ║
 -- ║  al final del archivo.                                              ║
+-- ║                                                                     ║
+-- ║  (4) TODAS · línea marcada «TODAS» (sección 1). Desde la rev 6 todo  ║
+-- ║  firmware apunta a la placa 3.1 (6): todas las sesiones quedan en    ║
+-- ║  esa escala. La alternativa, comentada abajo de esa línea, pasa a la ║
+-- ║  6 solo las medidas con la placa modificada (firmware 4 y 5, desde   ║
+-- ║  el 27/09) y deja las de las placas originales en la 3.              ║
 -- ╚═════════════════════════════════════════════════════════════════════╝
 
 
@@ -165,19 +175,27 @@ values
   (6, 'Placa 3.1 (rev 6, validada con 120 ohm)', 0.01800, 0.260, 0.000338, 53.2,
       'laboratorio, resistencia fija de 120 ohm: entrada del INA 40,6 mVpp -> I = 338 uA pp · U5A 207 mVpp · U5B 307 (x1,48) · U4A 328 (x1,07) · U4B 1,12 Vpp (x3,39) · U4C 912 mVpp (x0,82) · U4 pata 14 2,160 Vpp (x2,37) · Vout 820 mV con tester · K = Vpp14 / R = 2,160 / 120 · deficit = 1,080 - 0,820',
       null,
-      'Placa 3.1, oct 2026, en todas las placas: R2 10k -> 1,5k (U5B x1,5), R9 -> 2k y R10 10k -> 4,7k (U4D x2,35). Ganancia total 53,2 (antes ~1040): ~20 veces menos. K cierra por los dos lados: 2,160/120 = 0,01800 y 338 uA x 53,2 = 0,01798. Rango: 29 ohm (Vadc = 0) a ~250 ohm (Vadc 2,0 V). LIMITACION: un solo punto de calibracion; el deficit de un detector de diodos no es constante con la amplitud, asi que lejos de 120 ohm el error puede crecer. Vout medido con tester y no por el ADC del micro. Pendiente: dos o mas resistencias fijas (p. ej. 47, 100, 220 ohm) para ajustar la recta y medir el residuo.')
+      'Placa 3.1, oct 2026, en todas las placas: R2 10k -> 1,5k (U5B x1,5), R9 -> 2k y R10 10k -> 4,7k (U4D x2,35). Ganancia total 53,2 (antes ~1040): ~20 veces menos. K cierra por los dos lados: 2,160/120 = 0,01800 y 338 uA x 53,2 = 0,01798. Rango: 29 ohm (Vadc = 0) a ~250 ohm (Vadc 2,0 V). LIMITACION: un solo punto de calibracion; el deficit de un detector de diodos no es constante con la amplitud, asi que lejos de 120 ohm el error puede crecer. Vout medido con tester y no por el ADC del micro. Pendiente: dos o mas resistencias fijas (p. ej. 47, 100, 220 ohm) para ajustar la recta y medir el residuo. Desde el 24/10 es la escala de TODAS las sesiones (hw_id de todas las demas = 6): la placa con la que se midio tenia un componente que no amplificaba. El 09/10 (U3 328 uA, U5B 0,11 Vpp, pata 14 2,29 Vpp) cierra con U5B en x0,53: ganancia ~55 contra 53,2.')
 on conflict (id) do update set
   label  = excluded.label,  k_cal      = excluded.k_cal,   v_detector = excluded.v_detector,
   i_pp_a = excluded.i_pp_a, g_receiver = excluded.g_receiver,
   method = excluded.method, valid_from = excluded.valid_from, notes = excluded.notes;
 
--- Placa real segun el firmware que reporto la sesion (rev 5). Null = la misma
--- calibracion. Hoy solo el firmware "1,1k" (4) apunta a otra placa (5).
+-- Placa real segun el firmware que reporto la sesion. Null = la misma.
+-- Rev 6 (24/10/2026): TODO firmware apunta a la placa 3.1 (6). La placa con
+-- la que se midio tenia un componente que no amplificaba: la ganancia real
+-- era mucho menor que la que suponia cada firmware, y la de la 3.1 es la que
+-- coincide con lo medido el 09/10. Ademas hoy todas las placas son 3.1: una
+-- sesion nueva con un firmware viejo tambien se mide en una 3.1.
 alter table public.calibrations
   add column if not exists hw_id smallint references public.calibrations(id);
 comment on column public.calibrations.hw_id is
-  'Si el firmware reporto esta calibracion, la placa real es esta otra. Null = la misma. Ej: 4 (firmware R9 1,1k) -> 5 (placa R9 1,2k).';
-update public.calibrations set hw_id = case id when 4 then 5 else null end;
+  'Si el firmware reporto esta calibracion, la placa real es esta otra. Null = la misma. Desde la rev 6 todo firmware apunta a la 6 (placa 3.1).';
+update public.calibrations set hw_id = case when id = 6 then null else 6 end;          -- ◀── TODAS
+-- Alternativa: solo la placa modificada (firmware 4 y 5) a la 3.1; las placas
+-- originales quedan en la 3. Para pasar de una a otra, poner
+-- calibration_hw_id = null en sessions y volver a correr el archivo entero.
+-- update public.calibrations set hw_id = case when id in (4, 5) then 6 else null end;
 
 -- La referencia la fija ESTE archivo. Desde la rev 4 es solo la calibracion
 -- que se SUPONE cuando el equipo no reporto la suya; la escala de cada sesion
@@ -360,8 +378,9 @@ update public.sessions s
  where c.id = s.calibration_id
    and s.calibration_hw_id is null;
 
--- El firmware "1,1k" (4) se cargó en una placa de 1,2k (5). Va SIEMPRE, no
--- solo en filas vacías: antes de la rev 5 el trigger les ponía placa 4.
+-- Firmware cuya placa real es otra según el catálogo (hw_id). Va SIEMPRE, no
+-- solo en filas vacías: así un cambio en el catálogo llega a todas las
+-- sesiones. Desde la rev 6 es todo firmware → placa 3.1 (6).
 update public.sessions s
    set calibration_hw_id = c.hw_id
   from public.calibrations c
@@ -383,7 +402,7 @@ begin
   -- una placa 3.1 con el firmware de R9 1,2k: ..., ('P-00X', N, 5, 6).
   -- En una base sin estas sesiones (instalación nueva), comentá la línea
   -- entera y la lista queda vacía.
-  insert into _placa_modificada values ('P-004', 9, 3, 5);   -- ◀── LISTA
+  insert into _placa_modificada values ('P-004', 9, 3, 6);   -- ◀── LISTA
 
   select count(*) into esperadas from _placa_modificada;
 
