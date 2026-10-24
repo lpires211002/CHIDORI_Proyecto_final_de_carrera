@@ -103,9 +103,7 @@
 -- ║                                                                     ║
 -- ║  (4) TODAS · línea marcada «TODAS» (sección 1). Desde la rev 6 todo  ║
 -- ║  firmware apunta a la placa 3.1 (6): todas las sesiones quedan en    ║
--- ║  esa escala. La alternativa, comentada abajo de esa línea, pasa a la ║
--- ║  6 solo las medidas con la placa modificada (firmware 4 y 5, desde   ║
--- ║  el 27/09) y deja las de las placas originales en la 3.              ║
+-- ║  esa escala. Todas se midieron con la placa 1, la de la falla.       ║
 -- ╚═════════════════════════════════════════════════════════════════════╝
 
 
@@ -191,11 +189,10 @@ alter table public.calibrations
   add column if not exists hw_id smallint references public.calibrations(id);
 comment on column public.calibrations.hw_id is
   'Si el firmware reporto esta calibracion, la placa real es esta otra. Null = la misma. Desde la rev 6 todo firmware apunta a la 6 (placa 3.1).';
+-- Confirmado el 24/10: TODAS las sesiones guardadas se midieron con la placa 1,
+-- la de la falla. El banco del 15/09 (rev 3, U5B x11) fue sobre la placa 3, que
+-- despues se modifico: no describe ninguna sesion de la base.
 update public.calibrations set hw_id = case when id = 6 then null else 6 end;          -- ◀── TODAS
--- Alternativa: solo la placa modificada (firmware 4 y 5) a la 3.1; las placas
--- originales quedan en la 3. Para pasar de una a otra, poner
--- calibration_hw_id = null en sessions y volver a correr el archivo entero.
--- update public.calibrations set hw_id = case when id in (4, 5) then 6 else null end;
 
 -- La referencia la fija ESTE archivo. Desde la rev 4 es solo la calibracion
 -- que se SUPONE cuando el equipo no reporto la suya; la escala de cada sesion
