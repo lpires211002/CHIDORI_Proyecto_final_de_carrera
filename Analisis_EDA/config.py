@@ -25,7 +25,17 @@ SALIDAS = BASE / "salidas"        # tablas y figuras (no se commitea)
 ETIQUETAS_MANUALES = BASE / "etiquetas_manuales.csv"   # SÍ se commitea (la real)
 ENV_APP = AQUI.parent / "Programacion_UI_Micro" / "UI_REACT" / ".env.local"
 
-FECHA_HW_REV3 = "2026-09-15"      # cambios de hardware (ver calibración rev 3)
+# Placa física. Confirmado el 24/10: TODAS las sesiones guardadas se midieron
+# con la placa 1 (la que tenía un componente que no amplificaba), y la base las
+# lleva a la escala de la placa 3.1 (calibracion.sql rev 6, cal 6: K 0,0180 ·
+# Vd 0,260). Si se carga `board_id` en la sesión, manda ese.
+PLACA_FISICA_POR_DEFECTO = "placa_1"
+# Pero esa placa cambió el 27/09: R9 de 2,2k a 1,2k (U4D ~×4,4 → ×8,15). La rev 6
+# usa la misma K para antes y después, y en los datos se ve: el mismo sujeto da
+# Z basal ~1,6× mayor desde el 27/09 (P-004: 81–95 Ω → 147–153 Ω; P-002 y P-003
+# igual). La caída % no se entera (es un cociente de amplitudes), pero el valor
+# absoluto de Z solo se compara dentro de una misma configuración.
+FECHA_CAMBIO_R9 = "2026-09-27"    # P-004 s9 (27/09 22:40) ya es con 1,2k
 PROTOCOLO_POR_DEFECTO = "libre"   # se puede pisar por sesión en etiquetas_manuales.csv
 # Sitio de los electrodos: campo `electrode_site` de la sesión (si existe) o
 # columna `sitio` del CSV manual. Lo que no es abdomen va como control.
@@ -35,7 +45,9 @@ SITIOS = {"abdomen": "abdomen", "abdomen (protocolo)": "abdomen", "muslo": "musl
 # ── Señal ────────────────────────────────────────────────────────────────
 VENTANA_TENDENCIA_S = 60      # mediana móvil CENTRADA (la app usa la misma, pero causal)
 ARTEFACTO_K_SIGMA = 5         # |z − tendencia| > max(K·σ, MIN) → artefacto
-ARTEFACTO_MIN_OHM = 0.05      # σ = 1,4826 · MAD de los residuos
+ARTEFACTO_MIN_REL = 0.007     # σ = 1,4826 · MAD de los residuos. Piso relativo:
+                              # 0,7 % de la tendencia (antes 0,05 Ω fijos, que con la
+                              # escala 3.1, ~20 veces mayor, marcaba ruido como artefacto)
 ARTEFACTO_DILATAR_S = 2       # se marca también ±2 s alrededor de cada artefacto
 
 # ── Ventanas que definen el objetivo ─────────────────────────────────────
@@ -115,7 +127,7 @@ MOTIVOS_EXCLUYENTES = {
 COVARIABLES = {
     "sexo":            ("pac_sex",            "patient_gender"),
     "altura_m":        ("pac_height_m",       "patient_height"),
-    "peso_kg":         ("ses_weight_kg",      "patient_weight"),
+    "peso_kg":         (("ses_weight_kg", "pac_weight_kg"), "patient_weight"),  # sesión, si no ficha
     "circ_iliaca_cm":  ("ses_iliac_circ_cm",  "patient_iliac_circ"),
     "temp_amb_c":      ("ses_temperature_c",  "temperature_c"),
     "humedad_pct":     ("ses_humidity_pct",   "humidity_pct"),
@@ -133,8 +145,9 @@ COVARIABLES_GRAFICO = [
     ("temp_amb_c", "Temp. ambiente (°C)"),
     ("humedad_pct", "Humedad ambiente (%)"),
     ("asentamiento_pct", "Asentamiento 0–10 min (%)"),
-    # Z basal NO va: el valor absoluto cambia con la placa y la calibración
-    # (agosto ≈ 8–15 Ω con hardware previo, octubre ≈ 6–9 Ω con la placa 5).
+    # Z basal: solo las sesiones con R9 = 1,2k (desde el 27/09), las únicas
+    # comparables entre sí en valor absoluto (ver FECHA_CAMBIO_R9).
+    ("z0_ohm_r9_1k2", "Z basal (Ω) · solo desde el 27/09"),
     # Campos nuevos propuestos (aparecen solos cuando se carguen)
     ("ses_minutes_since_void", "Min desde la micción previa"),
     ("ses_fluid_24h_ml", "Líquido últimas 24 h (ml)"),

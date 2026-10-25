@@ -46,6 +46,16 @@ plt.rcParams.update({
 COMA = FuncFormatter(lambda v, _: f"{v:g}".replace(".", ","))
 
 
+def etiqueta_placa(x):
+    """Placa física y configuración, no la etiqueta de la calibración (que dice
+    "Placa 3.1" porque esa es la escala, no la placa con la que se midió)."""
+    placa = x.get("placa_fisica") if isinstance(x.get("placa_fisica"), str) else ""
+    r9 = {"R9_2k2": "R9 2,2k", "R9_1k2": "R9 1,2k"}.get(x.get("config_r9"), "")
+    cal = x.get("cal_mostrada")
+    escala = f"escala cal {int(cal)}" if pd.notna(cal) else ""
+    return " · ".join(p for p in (placa.replace("_", " "), r9, escala) if p)
+
+
 def coma(x, d=1):
     return "—" if x is None or not np.isfinite(x) else f"{x:.{d}f}".replace(".", ",")
 
@@ -134,7 +144,7 @@ def figura_sesion(x, s, ev_s, destino):
     motivos = str(x["motivos"]) if isinstance(x["motivos"], str) else ""
     dup = x.get("duplicada_de")
     sub = (f"{estado}" + (f" · copia de {dup}" if isinstance(dup, str) else "")
-           + (f" · {motivos.replace(';', ', ')}" if motivos else "") + f" · {x.get('placa', '')}")
+           + (f" · {motivos.replace(';', ', ')}" if motivos else "") + f" · {etiqueta_placa(x)}")
     ax.text(0, 1.16, f"{x['paciente'] if isinstance(x['paciente'], str) else 'sin paciente'} · sesión "
             f"{x['nro_sesion'] if pd.notna(x['nro_sesion']) else '—'} · {x['fecha']:%d/%m/%Y}",
             transform=ax.transAxes, fontsize=9.5, fontweight="bold", color=COL["texto"])

@@ -37,7 +37,8 @@ y después lo mismo con `CHIDORI_DEMO=1` adelante. Todo eso queda en `demo/`.
   termina con un salto (electrodos despegados), esa cola se corta primero
   (`cola_recortada_s`).
 - Todo se calcula sobre la **tendencia** (mediana móvil centrada de 60 s), con
-  los artefactos excluidos: |z − tendencia| > max(5σ, 0,05 Ω), σ = 1,4826·MAD.
+  los artefactos excluidos: |z − tendencia| > max(5σ, 0,7 % de la tendencia),
+  σ = 1,4826·MAD. El piso es relativo para que no dependa de la escala.
 
 Además se calculan:
 
@@ -156,9 +157,14 @@ Todos los umbrales están en `config.py`.
 ## Notas técnicas
 
 - `fecha` es cuándo se **guardó** la sesión (`created_at`), no cuándo empezó.
-- El valor absoluto de Z solo se compara dentro de una misma `era_hw`
-  (hardware previo al 15/09, placa 3, placa 5). Por eso Z basal no está entre
-  las covariables.
+- Escala: todas las sesiones se midieron con la placa 1 y la base las lleva a
+  la escala de la placa 3.1 (`calibracion.sql` rev 6, cal 6). Pero el 27/09 a
+  esa placa se le cambió R9 (2,2k → 1,2k): la ganancia casi se duplicó y la
+  rev 6 no lo distingue. En los datos, el mismo sujeto da Z basal ~1,6× mayor
+  desde esa fecha. Por eso `config_r9` separa las dos configuraciones, y la
+  covariable Z basal (`z0_ohm_r9_1k2`) usa solo las sesiones desde el 27/09.
+  La caída % no se afecta. Columna `placa_fisica`: `board_id` de la sesión si
+  está cargado; si no, `placa_1`.
 - Los eventos llevan reloj de pared y las muestras el reloj del equipo. El
   desfase es de ~1 s, irrelevante a esta escala. La Z de cada evento se
   recalcula desde la serie: no se usa `session_events.impedance`, que es la

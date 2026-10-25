@@ -271,7 +271,8 @@ def procesar(row, med, ev_s, man, cal):
     tend0 = tendencia_centrada(t, z, C.VENTANA_TENDENCIA_S)
     res = z - tend0
     sig = sigma_robusta(res)
-    umbral = max(C.ARTEFACTO_K_SIGMA * sig, C.ARTEFACTO_MIN_OHM) if np.isfinite(sig) else C.ARTEFACTO_MIN_OHM
+    piso = C.ARTEFACTO_MIN_REL * abs(float(np.nanmedian(tend0)))
+    umbral = max(C.ARTEFACTO_K_SIGMA * sig, piso) if np.isfinite(sig) else piso
     art = dilatar(t, np.abs(res) > umbral, C.ARTEFACTO_DILATAR_S)
     ok = ~art
     tend = tendencia_centrada(t, np.where(ok, z, np.nan), C.VENTANA_TENDENCIA_S)
@@ -465,8 +466,12 @@ def etiquetar(row, r):
 
 def covariables(row):
     c, legacy_usado = {}, []
-    for nombre, (jkey, legcol) in C.COVARIABLES.items():
-        v = row.get(jkey)
+    for nombre, (jkeys, legcol) in C.COVARIABLES.items():
+        v = None
+        for jkey in (jkeys if isinstance(jkeys, tuple) else (jkeys,)):
+            v = row.get(jkey)
+            if not vacio(v):
+                break
         if vacio(v):
             v = row.get(f"leg_{legcol}")
             if not vacio(v):
@@ -542,7 +547,8 @@ def resumen(df, tomas):
         for m in [x for x in ms.split(";") if x]:
             cnt[m] = cnt.get(m, 0) + 1
     for m, n in sorted(cnt.items(), key=lambda kv: -kv[1]):
-        L.append(f"| {m} | {'sí' if m in C.MOTIVOS_EXCLUYENTES else 'aviso'} | {n} |")
+        excluye = m in C.MOTIVOS_EXCLUYENTES or m.startswith(("app:no_apta", "manual:")) or m == "fin_no_es_ganas"
+        L.append(f"| {m} | {'sí' if excluye else 'aviso'} | {n} |")
     L += [""]
 
     dup = df[df["duplicada_de"].notna()] if "duplicada_de" in df else df.iloc[0:0]
@@ -570,12 +576,12 @@ def resumen(df, tomas):
           "(después del asentamiento); Zf = mediana entre "
           f"{-C.PRE_FIN_VENTANA_S[0]} y {-C.PRE_FIN_VENTANA_S[1]} s antes del fin o de la M (las ganas). "
           "«asent.» = lo que cayó Z antes de la basal; «desde inicio» = la caída si la basal fuera el primer minuto.", "",
-          "| sujeto | s | fecha | era | fin por | basal→ganas (min) | agua (ml) | asent. % | caída % | desde inicio % | dB | %/h | artef. |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "| sujeto | s | fecha | editada | fin por | basal→ganas (min) | agua (ml) | Z0 (Ω) | asent. % | caída % | desde inicio % | dB | %/h | artef. |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for _, x in ap.sort_values(["paciente", "nro_sesion"]).iterrows():
-        L.append(f"| {x['paciente']} | {x['nro_sesion']} | {x['fecha']:%d/%m} | {x['era_hw'].replace('hw_previo_15_09', 'previo')} | "
+        L.append(f"| {x['paciente']} | {x['nro_sesion']} | {x['fecha']:%d/%m} | {x['editada'] if isinstance(x.get('editada'), str) else 'no'} | "
                  f"{x['fin_por']} | {coma(x['duracion_llenado_min'], 0)} | {coma(x['agua_eventos_ml'], 0)} | "
-                 f"{coma(x['asentamiento_pct'], 1)} | {coma(x['caida_pct'], 1)} | {coma(x['caida_pct_desde_inicio'], 1)} | "
+                 f"{coma(x['z0_ohm'], 1)} | {coma(x['asentamiento_pct'], 1)} | {coma(x['caida_pct'], 1)} | {coma(x['caida_pct_desde_inicio'], 1)} | "
                  f"{coma(x['caida_db'], 2)} | {coma(x['pendiente_pct_h'], 2)} | {coma(100 * x['fraccion_artefacto'], 0)} % |")
     L += [""]
 
@@ -590,6 +596,19 @@ def resumen(df, tomas):
               f"- fracción de la caída «desde el inicio» que es asentamiento (mediana): {coma(100 * frac.median(), 0)} %",
               "", "Con la basal en el primer minuto, el asentamiento se cuenta como llenado. Para que no pase: "
               "esperar la estabilización antes de tocar Iniciar (o dejar que el análisis tome la basal más tarde, como acá).", ""]
+
+    if "config_r9" in ap:
+        g = ap.dropna(subset=["z0_ohm"]).groupby(["paciente", "config_r9"])["z0_ohm"].median().unstack()
+        if {"R9_2k2", "R9_1k2"} <= set(g.columns):
+            g = g.dropna()
+            if len(g):
+                L += [f"## Z basal antes y después del {C.FECHA_CAMBIO_R9[8:]}/{C.FECHA_CAMBIO_R9[5:7]} (cambio de R9 en la placa 1)", "",
+                      "| sujeto | Z0 con R9 2,2k (Ω) | Z0 con R9 1,2k (Ω) | cociente |", "|---|---|---|---|"]
+                for p_, x in g.iterrows():
+                    L.append(f"| {p_} | {coma(x['R9_2k2'], 1)} | {coma(x['R9_1k2'], 1)} | {coma(x['R9_1k2'] / x['R9_2k2'], 2)} |")
+                L += ["", "La rev 6 usa la misma K antes y después del cambio de R9. Si la ganancia se hubiera "
+                      "tenido en cuenta, el cociente debería dar ~1. La caída % no se ve afectada (es un cociente "
+                      "de amplitudes); el valor absoluto de Z, sí.", ""]
 
     L += ["## ¿Cae siempre? (prueba de signos)", ""]
     c = ap["caida_pct"].dropna()
@@ -782,10 +801,13 @@ def main():
                  "desconexiones", "z_inicial", "z_final"]
     extra = [c for c in ses.columns if c.startswith(("pac_", "ses_"))]
     df = ses[[c for c in base_cols if c in ses.columns] + extra].merge(feat, on="session_id", how="left")
-    # El valor absoluto de Z solo se compara dentro de una misma era de hardware.
-    corte = pd.Timestamp(C.FECHA_HW_REV3, tz="UTC")
-    df["era_hw"] = np.where(df["fecha"] < corte, "hw_previo_15_09",
-                            "placa_" + df["cal_placa"].astype("Int64").astype(str))
+    # Placa física: la cargada en la sesión (`board_id`) o la que vale para todas.
+    placa_db = df["ses_board_id"] if "ses_board_id" in df else pd.Series(np.nan, index=df.index)
+    df["placa_fisica"] = placa_db.where(placa_db.notna() & (placa_db.astype(str).str.strip() != ""),
+                                        C.PLACA_FISICA_POR_DEFECTO)
+    corte_r9 = pd.Timestamp(C.FECHA_CAMBIO_R9, tz="America/Argentina/Buenos_Aires")
+    df["config_r9"] = np.where(df["fecha"] < corte_r9, "R9_2k2", "R9_1k2")
+    df["z0_ohm_r9_1k2"] = df["z0_ohm"].where(df["config_r9"] == "R9_1k2")
 
     orden = (["session_id", "paciente", "nro_sesion", "fecha", "apta", "motivos", "editada", "apta_app",
               "nota_app", "protocolo", "sitio",
@@ -796,7 +818,7 @@ def main():
               "n_tomas", "agua_eventos_ml", "agua_ml_h", "t_primera_toma_min", "n_marcas",
               "edad", "sexo", "altura_m", "peso_kg", "imc", "circ_iliaca_cm", "temp_amb_c", "humedad_pct",
               "agua_declarada_ml", "ingesta_24h_txt", "covariables_de_legacy",
-              "placa", "era_hw", "reescalada", "cal_placa", "cal_mostrada", "cal_confirmada", "k_cal_placa", "v_det_placa",
+              "placa", "placa_fisica", "config_r9", "z0_ohm_r9_1k2", "reescalada", "cal_placa", "cal_mostrada", "cal_confirmada", "k_cal_placa", "v_det_placa",
               "adc_lineal_asumido", "ruido_sigma_ohm", "umbral_artefacto_ohm", "fraccion_artefacto", "escalones",
               "fraccion_recorte", "recorte_fuente", "integridad", "microcortes", "segundos_perdidos",
               "desconexiones", "fs_hz", "n_muestras_bajadas", "t_basal_s", "t_fin_s", "cola_recortada_s",
