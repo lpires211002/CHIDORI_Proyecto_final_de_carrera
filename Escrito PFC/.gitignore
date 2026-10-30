@@ -1,0 +1,5 @@
+# Material que no interviene en la compilación del escrito (se conserva localmente)
+no_usados/
+
+# Configuración local del editor
+.vscode/
