@@ -3675,3 +3675,152 @@ body:not(.light-theme) .button-primary:hover:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   .app-backdrop__veil { transition: none; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+ * EDICIÓN DE SESIONES (panel admin · app 1.10.0)
+ * Ámbar = algo que se modificó o se rellenó; verde = basal/final; el
+ * índigo sigue reservado para lo activo.
+ * ───────────────────────────────────────────────────────────────────── */
+.tag-mini {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--amber);
+  border-radius: 999px;
+  color: var(--amber);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  font-weight: 500;
+}
+.tag-mini.is-alarm { border-color: var(--alarm-line); color: var(--alarm); }
+.edit-banner .tag-mini { margin: 0 8px 0 0; }
+
+.edit-banner {
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--amber);
+  border-radius: var(--r-sm);
+  color: var(--type-med);
+  font-size: var(--t-sm);
+}
+.edit-ops {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--type-mute);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.version-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 24px 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--signal-line);
+  border-radius: var(--r-sm);
+  background: var(--signal-soft);
+  color: var(--type-hi);
+  font-size: var(--t-sm);
+}
+.version-chooser > span { margin-right: auto; }
+.button.is-pressed { border-color: var(--signal); color: var(--signal); }
+
+.review-panel {
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+.review-panel .segment-item { flex: 0 0 auto; padding: 6px 14px; }
+.segment-item.active.is-alarm { background: var(--alarm-soft); color: var(--alarm); }
+
+.comment-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--t-sm);
+  color: var(--type-med);
+}
+.comment-row:last-child { border-bottom: 0; }
+
+.editor-badge {
+  display: inline-block;
+  min-width: 28px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--amber);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.tool-segment { flex-wrap: wrap; }
+.tool-segment .segment-item { flex: 1 0 auto; padding: 8px 11px; white-space: nowrap; }
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 900px) {
+  .editor-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.editor-panel {
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--ink-1);
+  min-width: 0;
+}
+.editor-list { display: flex; flex-direction: column; gap: 6px; }
+.editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--t-sm);
+  color: var(--type-med);
+  padding: 3px 0;
+}
+.editor-row.is-descartado { opacity: 0.5; text-decoration: line-through; }
+.editor-row.is-descartado .icon-button { text-decoration: none; }
+.editor-comment {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.editor-comment:last-child { border-bottom: 0; }
+.editor-aviso {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--amber);
+  border-radius: var(--r-sm);
+  color: var(--amber);
+  font-size: var(--t-sm);
+}
+.texto-amber { color: var(--amber); }
+.time-input.is-invalid { border-color: var(--alarm); box-shadow: 0 0 0 3px var(--alarm-soft); }
+
+.editor-savebar {
+  position: sticky;
+  bottom: -1px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 4px;
+  background: var(--ink-1);
+  border-top: 1px solid var(--hairline);
+}
+.curve-editor .readout { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 760px) {
+  .curve-editor .readout { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}

@@ -1,0 +1,7 @@
+# Datos de pacientes y salidas derivadas: no se suben
+datos/
+salidas/
+demo/datos/
+demo/salidas/
+demo/etiquetas_manuales.csv
+__pycache__/

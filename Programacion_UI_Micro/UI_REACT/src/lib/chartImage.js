@@ -18,6 +18,8 @@ export const PALETA_IMPRESION = {
   signal:   '#4f46e5',
   alarm:    '#dc2626',
   confirm:  '#15803d',
+  amber:    '#b45309',
+  original: '#9ca3af',
   onSignal: '#ffffff',
   mute:     '#4b5563',
   grid:     '#dfe3e8',
@@ -49,15 +51,28 @@ export function normalizarMuestras(rows) {
   }));
 }
 
+/** Comentarios anclados: { t_from, t_to | null, body } → numerados C1, C2… */
+export function normalizarComentarios(cs) {
+  return (cs || [])
+    .map((cm, i) => ({
+      n: cm.n ?? i + 1,
+      t_from: Number(cm.t_from),
+      t_to: cm.t_to == null ? null : Number(cm.t_to),
+      body: cm.body || '',
+    }))
+    .filter((cm) => Number.isFinite(cm.t_from));
+}
+
 /**
  * Marcadores y bandas de microcorte.
  *
  * @param getEvents  función · se lee en cada frame, así el chart no se recrea
  *                   cuando cambia la lista
- * @param c          paleta { signal, alarm, confirm, onSignal }
+ * @param c          paleta { signal, alarm, confirm, onSignal, amber }
  * @param escala     1 en pantalla; >1 al exportar (canvas más grande)
+ * @param getComentarios  opcional · comentarios anclados (abajo, en ámbar)
  */
-export function makeMarkersPlugin(getEvents, c, escala = 1) {
+export function makeMarkersPlugin(getEvents, c, escala = 1, getComentarios = null) {
   const colorFor = (kind) =>
     kind === 'disconnect' || kind === 'gap' ? c.alarm
     : kind === 'void' ? c.confirm
@@ -81,6 +96,21 @@ export function makeMarkersPlugin(getEvents, c, escala = 1) {
         ctx.save();
         ctx.globalAlpha = 0.13;
         ctx.fillStyle = c.alarm;
+        ctx.fillRect(xa, chartArea.top, Math.max(xb - xa, 1.5 * escala), chartArea.bottom - chartArea.top);
+        ctx.restore();
+      });
+
+      // Comentarios de tramo · banda ámbar muy suave
+      const color = c.amber || c.signal;
+      normalizarComentarios(getComentarios?.()).filter((cm) => cm.t_to != null).forEach((cm) => {
+        let xa = x.getPixelForValue(cm.t_from);
+        let xb = x.getPixelForValue(cm.t_to);
+        if (xb < chartArea.left || xa > chartArea.right) return;
+        xa = Math.max(xa, chartArea.left);
+        xb = Math.min(xb, chartArea.right);
+        ctx.save();
+        ctx.globalAlpha = 0.10;
+        ctx.fillStyle = color;
         ctx.fillRect(xa, chartArea.top, Math.max(xb - xa, 1.5 * escala), chartArea.bottom - chartArea.top);
         ctx.restore();
       });
@@ -120,6 +150,36 @@ export function makeMarkersPlugin(getEvents, c, escala = 1) {
         ctx.textBaseline = 'middle';
         ctx.fillText(label, xp, chartArea.top + 8 * escala);
       });
+
+      // Comentarios · etiqueta C# abajo, para no pisar las de los eventos
+      const color = c.amber || c.signal;
+      normalizarComentarios(getComentarios?.()).forEach((cm) => {
+        const xa = x.getPixelForValue(cm.t_from);
+        const xb = cm.t_to != null ? x.getPixelForValue(cm.t_to) : xa;
+        if (xb < chartArea.left || xa > chartArea.right) return;
+        const xp = Math.min(Math.max((xa + xb) / 2, chartArea.left + 8 * escala), chartArea.right - 8 * escala);
+        if (cm.t_to == null) {
+          ctx.beginPath();
+          ctx.setLineDash([2 * escala, 3 * escala]);
+          ctx.lineWidth = 1 * escala;
+          ctx.strokeStyle = color;
+          ctx.moveTo(xa, chartArea.top);
+          ctx.lineTo(xa, chartArea.bottom - 16 * escala);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        const label = `C${cm.n}`;
+        ctx.font = `600 ${9 * escala}px ${CHART_FONT}`;
+        const w = ctx.measureText(label).width + 9 * escala;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(xp - w / 2, chartArea.bottom - 15 * escala, w, 14 * escala, 3 * escala);
+        ctx.fill();
+        ctx.fillStyle = c.onSignal;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, xp, chartArea.bottom - 8 * escala);
+      });
       ctx.restore();
     },
   };
@@ -139,7 +199,7 @@ export const fondoOpaco = (color) => ({
 });
 
 /** Configuración base de la curva · la comparten pantalla e impresión. */
-export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, tooltip = true }) {
+export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, tooltip = true, fondo = null }) {
   const fuente = { family: CHART_FONT, size: 10 * escala };
   const eje = (titulo) => ({
     type: 'linear',
@@ -152,8 +212,20 @@ export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, 
   return {
     type: 'line',
     data: {
-      datasets: [{
+      datasets: [...(fondo ? [{
+        // Curva original detrás de la editada, en gris
+        label: 'Original',
+        data: fondo,
+        borderColor: c.original || c.mute,
+        borderWidth: 1 * escala,
+        tension: 0,
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        fill: false,
+        order: 2,
+      }] : []), {
         label: 'Impedancia',
+        order: 1,
         data: puntos,
         borderColor: c.signal,
         borderWidth: 1.4 * escala,
@@ -183,7 +255,7 @@ export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, 
           bodyFont:  { family: CHART_FONT, size: 11 },
           callbacks: {
             title: (items) => `t = ${Number(items[0].parsed.x).toFixed(1)} s`,
-            label: (item) => `${Number(item.parsed.y).toFixed(3)} ohm`,
+            label: (item) => `${item.dataset.label === 'Original' ? 'original · ' : ''}${Number(item.parsed.y).toFixed(3)} ohm`,
           },
         } : { enabled: false },
       },
@@ -197,7 +269,7 @@ export function buildChartConfig({ puntos, c, decimar, pointRadius, escala = 1, 
  * datos). Sin animación el primer frame es sincrónico, así que se puede leer
  * el canvas inmediatamente.
  */
-export function renderChartPNG({ measurements, events, width = 1500, height = 620 } = {}) {
+export function renderChartPNG({ measurements, events, comments = null, width = 1500, height = 620 } = {}) {
   const puntos = normalizarMuestras(measurements);
   if (puntos.length === 0) return null;
 
@@ -216,7 +288,7 @@ export function renderChartPNG({ measurements, events, width = 1500, height = 62
   });
   cfg.plugins = [
     fondoOpaco(PALETA_IMPRESION.fondo),
-    makeMarkersPlugin(() => events, PALETA_IMPRESION, escala),
+    makeMarkersPlugin(() => events, PALETA_IMPRESION, escala, () => comments),
   ];
 
   const chart = new Chart(canvas, cfg);

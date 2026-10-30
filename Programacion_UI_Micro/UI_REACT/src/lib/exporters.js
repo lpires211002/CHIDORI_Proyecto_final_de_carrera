@@ -14,6 +14,10 @@ import { jsPDF } from 'jspdf';
  *  - measurements: [{ elapsed_time | x, impedance | y, rate?: number }]
  *  - events: [{ id | event_number, time | elapsed_time, value | impedance, change | impedance_change }]
  *  - chartImage: dataURL PNG opcional (solo aplica a PDF)
+ *  - version:  { etiqueta: 'Editada' | 'Original', lineas: [texto] } opcional ·
+ *              una sesión editada nunca tiene que leerse como la cruda
+ *  - comments: comentarios anclados [{ t_from, t_to | null, body }], en la
+ *              misma base de tiempo que measurements
  */
 
 const ts = () => new Date().toISOString().slice(0, 10);
@@ -23,8 +27,41 @@ function normMeasurements(rows) {
     t:    r.elapsed_time ?? r.x ?? 0,
     z:    r.impedance    ?? r.y ?? 0,
     rate: r.rate         ?? 0,
+    interp: Boolean(r.interpolated),
   }));
 }
+
+function normComments(rows) {
+  return (rows || [])
+    .map((c, i) => ({
+      n: c.n ?? i + 1,
+      desde: Number(c.t_from),
+      hasta: c.t_to == null ? null : Number(c.t_to),
+      texto: String(c.body || '').trim(),
+    }))
+    .filter((c) => Number.isFinite(c.desde) && c.texto);
+}
+
+const rangoComentario = (c) => (c.hasta != null
+  ? `${formatMmSs(c.desde)}–${formatMmSs(c.hasta)}`
+  : formatMmSs(c.desde));
+
+/** Texto de cada comentario en la muestra más cercana a su inicio (para el CSV/TXT). */
+function comentariosPorMuestra(meas, comments) {
+  const out = new Map();
+  if (!meas.length) return out;
+  normComments(comments).forEach((c) => {
+    let lo = 0;
+    let hi = meas.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (Number(meas[mid].t) < c.desde) lo = mid + 1; else hi = mid; }
+    if (lo > 0 && Math.abs(meas[lo - 1].t - c.desde) < Math.abs(meas[lo].t - c.desde)) lo -= 1;
+    const txt = `C${c.n}: ${c.texto}${c.hasta != null ? ` (hasta ${formatMmSs(c.hasta)})` : ''}`;
+    out.set(lo, out.has(lo) ? `${out.get(lo)} | ${txt}` : txt);
+  });
+  return out;
+}
+
+const csvTexto = (txt) => `"${String(txt).replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
 
 function normEvents(rows) {
   return (rows || []).map((e) => ({
@@ -34,11 +71,18 @@ function normEvents(rows) {
     change: e.impedance_change ?? e.change ?? null,
     kind:   e.kind ?? 'mark',
     amount: e.amount_ml ?? e.amount ?? null,
+    // versión editada: agua / micción de antes del inicio o después del fin
+    fuera:  Boolean(e.fuera_del_recorte),
   }));
 }
 
 /** Etiqueta legible para los eventos automáticos de enlace. */
 function eventLabel(kind, e) {
+  const base = eventLabelBase(kind, e);
+  return base && e?.fuera ? `${base} · fuera del recorte` : base;
+}
+
+function eventLabelBase(kind, e) {
   if (kind === 'disconnect') return 'DESCONEXION del dispositivo';
   if (kind === 'reconnect')  return 'RECONEXION del dispositivo';
   if (kind === 'water' || kind === 'void') {
@@ -56,9 +100,11 @@ function eventLabel(kind, e) {
 }
 
 function formatMmSs(secs) {
-  const m = Math.floor((secs || 0) / 60);
-  const s = Math.floor((secs || 0) % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+  const v = Number(secs) || 0;
+  const a = Math.abs(v);
+  const m = Math.floor(a / 60);
+  const s = Math.floor(a % 60);
+  return `${v < 0 ? '-' : ''}${m}:${String(s).padStart(2, '0')}`;
 }
 
 /**
@@ -73,6 +119,8 @@ const PDF_REEMPLAZOS = [
   [/[ΩΩ]/g, 'ohm'],   // U+03A9 (omega griega) y U+2126 (signo ohm)
   [/μ/g, 'u'],
   [/Δ/g, 'delta'],
+  [/≈/g, '~'],
+  [/−/g, '-'],      // U+2212 (signo menos tipográfico)
 ];
 
 function pdfSafe(txt) {
@@ -100,10 +148,13 @@ export function exportPDF({
   events,
   chartImage,
   calibration,          // { kcal, vdet, matched } · con que se midio la sesion
+  version = null,       // { etiqueta, lineas } · original o editada
+  comments = null,      // comentarios anclados
 } = {}) {
   const pdf = sanitizar(new jsPDF());
   const meas = normMeasurements(measurements);
   const evs  = normEvents(events);
+  const coms = normComments(comments);
   let y = 22;
 
   pdf.setFontSize(18);
@@ -157,7 +208,24 @@ export function exportPDF({
   }
   pdf.text(`Duración: ${stats?.elapsedStr || '—'}`, 22, y); y += 5;
   pdf.text(`Eventos marcados: ${stats?.eventCount ?? evs.length}`, 22, y); y += 5;
-  pdf.text(`Puntos registrados: ${stats?.samples ?? meas.length}`, 22, y); y += 10;
+  pdf.text(`Puntos registrados: ${stats?.samples ?? meas.length}`, 22, y); y += 5;
+  const nInterp = meas.filter((m) => m.interp).length;
+  if (nInterp > 0) { pdf.text(`Puntos interpolados (tramos sacados): ${nInterp}`, 22, y); y += 5; }
+  y += 5;
+
+  /* Versión · un reporte de la curva editada dice qué se le hizo */
+  if (version) {
+    if (y > 250) { pdf.addPage(); y = 20; }
+    pdf.setFontSize(12); pdf.setTextColor(30); pdf.text(`Versión: ${version.etiqueta}`, 20, y); y += 6;
+    pdf.setFontSize(9.5); pdf.setTextColor(70);
+    (version.lineas || []).forEach((linea) => {
+      pdf.splitTextToSize(String(linea), 168).forEach((l) => {
+        if (y > 280) { pdf.addPage(); y = 20; }
+        pdf.text(l, 22, y); y += 5;
+      });
+    });
+    y += 5;
+  }
 
   /* Calibracion · sin esto, dos reportes con escalas distintas se ven iguales.
    * Es el bloque que evita que alguien compare un PDF viejo con uno nuevo y
@@ -222,6 +290,20 @@ export function exportPDF({
     y += 5;
   }
 
+  // Comentarios anclados a la curva (C1, C2… en el gráfico)
+  if (coms.length > 0) {
+    if (y > 250) { pdf.addPage(); y = 20; }
+    pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Comentarios en la curva', 20, y); y += 6;
+    pdf.setFontSize(9); pdf.setTextColor(70);
+    coms.forEach((c) => {
+      pdf.splitTextToSize(`C${c.n} · ${rangoComentario(c)} · ${c.texto}`, 168).forEach((l) => {
+        if (y > 280) { pdf.addPage(); y = 20; }
+        pdf.text(l, 22, y); y += 5;
+      });
+    });
+    y += 5;
+  }
+
   if (evs.length > 0) {
     if (y > 250) { pdf.addPage(); y = 20; }
     pdf.setFontSize(12); pdf.setTextColor(30); pdf.text('Eventos', 20, y); y += 6;
@@ -253,11 +335,24 @@ export function exportPDF({
 
 /* ──────────────────────────────────────────────────────────────────── */
 
-export function exportCSV({ filename = `chidori_datos_${ts()}.csv`, measurements } = {}) {
+export function exportCSV({
+  filename = `chidori_datos_${ts()}.csv`,
+  measurements,
+  comments = null,
+  editada = false,      // agrega la columna `interpolado` (1 = punto rellenado)
+} = {}) {
   const meas = normMeasurements(measurements);
-  let csv = 'tiempo_s,impedancia_ohm,tasa_ohm_min\n';
-  meas.forEach((m) => {
-    csv += `${Number(m.t).toFixed(2)},${Number(m.z).toFixed(3)},${Number(m.rate).toFixed(3)}\n`;
+  const porMuestra = comentariosPorMuestra(meas, comments);
+  const conComentarios = porMuestra.size > 0;
+  let csv = 'tiempo_s,impedancia_ohm,tasa_ohm_min'
+    + (editada ? ',interpolado' : '')
+    + (conComentarios ? ',comentario' : '')
+    + '\n';
+  meas.forEach((m, i) => {
+    csv += `${Number(m.t).toFixed(2)},${Number(m.z).toFixed(3)},${Number(m.rate).toFixed(3)}`;
+    if (editada) csv += `,${m.interp ? 1 : 0}`;
+    if (conComentarios) csv += `,${porMuestra.has(i) ? csvTexto(porMuestra.get(i)) : ''}`;
+    csv += '\n';
   });
   triggerDownload(filename, csv, 'text/csv;charset=utf-8;');
 }
@@ -270,9 +365,13 @@ export function exportTXT({
   stats,
   measurements,
   events,
+  version = null,
+  comments = null,
 } = {}) {
   const meas = normMeasurements(measurements);
   const evs  = normEvents(events);
+  const coms = normComments(comments);
+  const editada = meas.some((m) => m.interp) || version?.etiqueta === 'Editada';
   let txt = '';
 
   if (patient) {
@@ -300,16 +399,32 @@ export function exportTXT({
     txt += `Cambio total: ${c.toFixed(2)} Ω (${p.toFixed(1)}%)\n`;
   }
   txt += `Duración: ${stats?.elapsedStr || '—'}\nEventos: ${stats?.eventCount ?? evs.length}\n`;
-  txt += `Puntos: ${stats?.samples ?? meas.length}\n\n`;
+  txt += `Puntos: ${stats?.samples ?? meas.length}\n`;
+  const nInterp = meas.filter((m) => m.interp).length;
+  if (nInterp > 0) txt += `Puntos interpolados (tramos sacados): ${nInterp}\n`;
+  txt += '\n';
 
-  txt += '=== MEDICIONES ===\ntiempo_s\timpedancia_ohm\ttasa_ohm_min\n';
+  if (version) {
+    txt += `=== VERSIÓN: ${String(version.etiqueta).toUpperCase()} ===\n`;
+    (version.lineas || []).forEach((l) => { txt += `${l}\n`; });
+    txt += '\n';
+  }
+
+  txt += `=== MEDICIONES ===\ntiempo_s\timpedancia_ohm\ttasa_ohm_min${editada ? '\tinterpolado' : ''}\n`;
   meas.forEach((m) => {
-    txt += `${Number(m.t).toFixed(2)}\t${Number(m.z).toFixed(3)}\t${Number(m.rate).toFixed(3)}\n`;
+    txt += `${Number(m.t).toFixed(2)}\t${Number(m.z).toFixed(3)}\t${Number(m.rate).toFixed(3)}`;
+    if (editada) txt += `\t${m.interp ? 1 : 0}`;
+    txt += '\n';
   });
 
   if (patient?.notas) {
     txt += '\n=== NOTAS DE LA SESIÓN ===\n';
     txt += `${patient.notas}\n`;
+  }
+
+  if (coms.length > 0) {
+    txt += '\n=== COMENTARIOS EN LA CURVA ===\n';
+    coms.forEach((c) => { txt += `C${c.n} · ${rangoComentario(c)} · ${c.texto}\n`; });
   }
 
   if (evs.length > 0) {

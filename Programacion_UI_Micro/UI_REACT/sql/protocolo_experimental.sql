@@ -1,4 +1,16 @@
 -- ═══════════════════════════════════════════════════════════════════════
+--  ⛔ OBSOLETO · NO CORRER (mantenimiento 10/10/2026)
+--
+--  Lo reemplazaron pacientes_y_campos.sql (pacientes y campos configurables)
+--  y calibracion.sql (vista v_dataset_sesiones). Correrlo hoy pisaría la
+--  vista del dataset con una versión vieja, sin calibración, y volvería a
+--  abrir la tabla `subjects`. Se conserva solo como historia del esquema.
+--  La línea de abajo corta la ejecución a propósito.
+-- ═══════════════════════════════════════════════════════════════════════
+do $$ begin raise exception 'protocolo_experimental.sql es obsoleto: no se aplicó nada. Ver el encabezado del archivo.'; end $$;
+
+
+-- ═══════════════════════════════════════════════════════════════════════
 --  CHIDORI · Protocolo experimental (dataset para red neuronal)
 --  Correr una sola vez en Supabase → SQL Editor → Run
 --

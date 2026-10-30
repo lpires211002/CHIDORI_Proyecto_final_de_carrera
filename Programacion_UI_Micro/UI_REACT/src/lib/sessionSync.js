@@ -7,7 +7,7 @@
  * respaldo durable independiente de todo esto.
  */
 
-import { sincronizarPendientes } from './patients';
+import { sincronizarPendientes, countSessions } from './patients';
 import { esLocal } from './patientsCache';
 
 const DB_NAME = 'chidori';
@@ -64,6 +64,28 @@ export async function queuePendingSession(payload) {
 /** Cuántas sesiones quedan por subir. */
 export async function countPendingSessions() {
   try { return (await idbAll()).length; } catch { return 0; }
+}
+
+/** Cuántas de las que esperan en la cola son de ese paciente. */
+export async function countPendingSessionsFor(patientId) {
+  if (!patientId) return 0;
+  try {
+    return (await idbAll()).filter((s) => s.patientPayload?.patient_id === patientId).length;
+  } catch { return 0; }
+}
+
+/**
+ * Sesiones de un paciente para el "sesión N": las de la nube (o el último
+ * conteo guardado, sin internet) más las medidas offline que todavía no
+ * subieron. Sin las de la cola, dos sesiones seguidas sin internet saldrían
+ * con el mismo número.
+ */
+export async function contarSesionesPaciente(supabase, patientId) {
+  const [nube, cola] = await Promise.all([
+    countSessions(supabase, patientId),
+    countPendingSessionsFor(patientId),
+  ]);
+  return nube + cola;
 }
 
 /**

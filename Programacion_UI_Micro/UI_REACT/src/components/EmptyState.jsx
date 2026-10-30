@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { Plug, RefreshCw, UserRound, Check, Play } from 'lucide-react';
 import { patientLabel } from '../lib/patients';
+import { describirAntiguedad } from '../lib/patientsCache';
 import SpecularButton from './SpecularButton';
 
 // La placa 3D · carga diferida: three.js + el modelo (~1 MB) solo en esta pantalla.
@@ -24,6 +25,8 @@ const DeviceModel = lazy(() => import('./DeviceModel'));
  *   wsConfig     · { protocol, host, port } · para mostrar a dónde apunta
  *   patient      · paciente activo o null
  *   sessionCount · sesiones previas de ese paciente (para "sesión N")
+ *   pacientesGuardados · { n, at } | null · lista guardada en esta computadora
+ *                  (usePatientsPrefetch). Con ella se elige paciente sin internet.
  *   canStart     · si el botón de arranque está habilitado
  */
 export default function EmptyState({
@@ -32,6 +35,7 @@ export default function EmptyState({
   wsConfig,
   patient,
   sessionCount = 0,
+  pacientesGuardados = null,
   canStart = true,
   onOpenSettings,
   onToggleSimulator,
@@ -46,12 +50,19 @@ export default function EmptyState({
   const reconectando = wsStatus === 'CONNECTING';
   const listo        = enlazado && Boolean(patient);
 
-  // El Chidori es un access point sin salida a internet: mientras estás
-  // enlazado a él no se puede leer la lista de pacientes de Supabase. Hay que
-  // elegir el paciente ANTES de cambiar de red, y la pantalla tiene que
-  // decirlo — si no, el clínico descubre el problema recién al apretar Iniciar.
+  // El Chidori es un access point sin salida a internet: enlazado a él no se
+  // puede leer Supabase. La lista de pacientes se descarga sola al abrir la app
+  // con internet (usePatientsPrefetch) y queda guardada, así que normalmente se
+  // elige sin cambiar de red. Solo si esta computadora NUNCA la descargó hay
+  // que pasar una vez por internet, y la pantalla tiene que decirlo.
   const sinInternet = typeof navigator !== 'undefined' && navigator.onLine === false;
-  const ordenAlReves = !patient && (enlazado || sinInternet) && !isSimulator;
+  const hayGuardados = (pacientesGuardados?.n ?? 0) > 0;
+  const ordenAlReves = !patient && !hayGuardados && (enlazado || sinInternet) && !isSimulator;
+  const guardadosTxt = hayGuardados
+    ? `${pacientesGuardados.n} paciente${pacientesGuardados.n === 1 ? '' : 's'} guardado${pacientesGuardados.n === 1 ? '' : 's'} en esta compu`
+      + (pacientesGuardados.at ? ` · actualizado ${describirAntiguedad({ at: pacientesGuardados.at })}` : '')
+      + ' · se elige sin internet'
+    : null;
 
   const destino = wsConfig
     ? `${wsConfig.host}:${wsConfig.port}`
@@ -118,9 +129,11 @@ export default function EmptyState({
               <span className="prep-meta">
                 {patient
                   ? `${patientLabel(patient)} · sesión ${sessionCount + 1}`
-                  : sinInternet
-                    ? 'la lista se lee de la nube · sin internet'
-                    : 'sin seleccionar · la sesión queda sin atribuir'}
+                  : guardadosTxt
+                    ? `sin seleccionar · ${guardadosTxt}`
+                    : sinInternet
+                      ? 'sin lista guardada · hace falta internet una vez'
+                      : 'sin seleccionar · la sesión queda sin atribuir'}
               </span>
             </div>
 
@@ -136,16 +149,16 @@ export default function EmptyState({
           </div>
         </div>
 
-        {/* El orden importa y no es obvio: la ficha vive en la nube, el equipo
-            es una red sin internet. */}
+        {/* Solo aparece si esta computadora nunca descargó la lista: la ficha
+            vive en la nube y el equipo es una red sin internet. */}
         {ordenAlReves && (
           <div className="prep-orden" role="note">
-            <strong>El paciente se elige antes de enlazar el equipo.</strong>
+            <strong>Falta descargar la lista de pacientes en esta computadora.</strong>
             <span>
-              La red <strong>Chidori</strong> no tiene salida a internet, y la lista de
-              pacientes se lee de la nube. Volvé a tu WiFi habitual, elegí el paciente,
-              y recién ahí conectate al equipo. La medición se guarda igual sin internet:
-              queda en cola y sube sola cuando vuelve.
+              La red <strong>Chidori</strong> no tiene salida a internet. Conectate un
+              momento a tu WiFi habitual con la app abierta: la lista se descarga sola y
+              queda guardada. Desde ahí se elige paciente sin cambiar de red. La medición
+              se guarda igual sin internet: queda en cola y sube sola cuando vuelve.
             </span>
           </div>
         )}

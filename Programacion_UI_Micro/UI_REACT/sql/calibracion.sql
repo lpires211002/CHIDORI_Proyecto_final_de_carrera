@@ -18,7 +18,25 @@
 --        calibration_hw_id = estado real de la PLACA con la que se midió
 --      Cuando coinciden, Z ya salió bien del equipo. Cuando no (placa
 --      modificada y firmware sin actualizar), se corrige desde `_raw`.
+--  5d. (rev 5, 09/10) La placa modificada tiene R9 = 1,2k, no 1,1k. Agrega la
+--      calibración 5 MEDIDA en esa placa y `calibrations.hw_id`: "si el
+--      firmware reportó esta calibración, la placa real es esta otra". Las
+--      sesiones con el firmware de 1,1k (4) pasan solas a la placa 5.
+--      Reclasifica por el K_CAL reportado las sesiones que entraron cuando
+--      su calibración todavía no estaba en el catálogo.
+--  5e. (rev 6, 24/10/2026) PLACA 3.1 en todas las placas: R2 1,5k, R9 2k,
+--      R10 4,7k. Agrega la calibración 6, validada con una resistencia fija
+--      de 120 Ω (K 0,01800 · déficit 0,260 V). Y TODAS las sesiones pasan a
+--      esa escala: la placa con la que se midió tenía un componente que no
+--      amplificaba, así que su ganancia real era mucho menor que la que
+--      suponía el firmware y la Z salía mucho menor. La medición del 09/10
+--      lo confirma: con U5B en ×0,53 en vez de ×10 la ganancia total da ~55,
+--      contra 53,2 de la 3.1. La LISTA de la 3b ahora dice también con qué
+--      firmware se midió cada sesión listada.
 --  6. Rehace `v_dataset_sesiones` con la escala nueva y las banderas.
+--  4.d (app 1.10.0) Si existen las ediciones de sesiones
+--      (sql/edicion_sesiones.sql), las reescala con la misma cuenta desde su
+--      `impedance_raw`, así una sesión editada sigue en la escala de su placa.
 --
 --  Resultado: la app muestra cada sesión en ohms reales según la placa con
 --  que se midió, sin tocar el frontend, y el dato tal como salió del equipo
@@ -75,11 +93,17 @@
 -- ║                                                                     ║
 -- ║  (3) LISTA · línea marcada «LISTA» (sección 3b). Sesiones medidas    ║
 -- ║  en una placa cuyo hardware NO coincide con el firmware que tenía    ║
--- ║  cargado. Hoy: P-004 sesión 9 (27/09 · R9 ya en 1,1k · firmware con  ║
--- ║  la calibración rev 3). Si medís otra con la placa de 1,1k ANTES de  ║
--- ║  flashearle el firmware nuevo, agregala ahí y volvé a correr.        ║
+-- ║  cargado: (paciente, sesión, calibración del firmware, de la placa). ║
+-- ║  Hoy: P-004 sesión 9 (27/09 · placa modificada · firmware rev 3) → 6.║
+-- ║  Una sesión medida en una placa 3.1 con el firmware viejo va acá,    ║
+-- ║  p. ej. ('P-00X', N, 5, 6). Las del firmware "1,1k" (calibración 4)  ║
+-- ║  NO van: pasan solas a la placa 5.                                  ║
 -- ║  Si te equivocás, se arregla: ver "CORREGIR UNA CLASIFICACIÓN MAL"   ║
 -- ║  al final del archivo.                                              ║
+-- ║                                                                     ║
+-- ║  (4) TODAS · línea marcada «TODAS» (sección 1). Desde la rev 6 todo  ║
+-- ║  firmware apunta a la placa 3.1 (6): todas las sesiones quedan en    ║
+-- ║  esa escala. Todas se midieron con la placa 1, la de la falla.       ║
 -- ╚═════════════════════════════════════════════════════════════════════╝
 
 
@@ -138,14 +162,37 @@ values
       'banco tras ajustar la ganancia del Howland y los filtros: outAD 340 mVpp · U3A 3,22 Vpp · R_How 10k (las cuatro) -> I=322,0 uA pp · INAout 14 mVpp · U4 pin14 1450 mVpp · Vadc 556 mV',
       date '2026-09-15',
       'Cambios de hardware: RfAD1 ~9,5k, rhpad1 500->1k, R8 8,2k, R9 2,2k, CHP1 y CHP2 cambiados. Las cuatro del Howland siguen en 10k: el 8,06k de la hoja era una lectura EN CIRCUITO (10k en paralelo con RfAD1+RiAD1+rhpad1+3x10k = 41,5k), no el valor del componente. La ganancia total 517,9 sale de INAout (14 mVpp) por la ganancia de catalogo del INA122 (5 con Rg abierto), NO del diferencial anotado en la hoja: ese diferencial (5 mVpp) implicaria G_INA=2,8, imposible. Si se confirmara, K seria 0,1159. LIMITACION: el deficit del detector paso de 277 a 169 mV a la misma amplitud entre el 04/09 y el 15/09 (~1 ohm de offset). Sigue pendiente la calibracion con resistencias patron.'),
-  (4, 'R9 1,1k (rev 4, derivada de rev 3)', 0.33350, 0.169, 0.000322, 1035.8,
-      'derivada, NO medida en banco: rev 3 con U4D pasando de -10k/2,2k a -10k/1,1k (ganancia x2). K = 0,16675 x 2',
+  (4, 'firmware "R9 1,1k" (rev 4, derivada) · la placa real es la 5', 0.33350, 0.169, 0.000322, 1035.8,
+      'constantes que se cargaron en el firmware (R9_OHM 1100) creyendo que la placa modificada tenia R9 = 1,1k. Derivadas de rev 3 con K x 2, nunca medidas.',
       date '2026-09-27',
-      'Placa con R9 = 1,1k desde el 27/09/2026; el resto del hardware se toma igual a rev 3. Supuestos: (a) la corriente, el INA y los filtros no cambiaron; (b) el deficit del detector sigue en 0,169 V a la amplitud nueva, que es el doble. El GBW del TL084 le resta ~1 % a U4D con 1,1k (factor real 1,98-1,99, no 2): queda dentro del 13 % de incertidumbre de rev 3. Rango: 1,01 ohm (Vadc = 0) a ~13 ohm; el techo baja a la mitad. Verificacion pendiente en esta placa: U4 pin 8 y pin 14 (relacion esperada ~9) y Vadc.')
+      'La placa nunca tuvo 1,1k: R9 es 1,2k (SMD 1201, 1185 ohm con tester, 09/10/2026). Esta fila existe solo para saber con que constantes calculo el firmware las sesiones que la reportan; su placa real es la calibracion 5 (columna hw_id).'),
+  (5, 'R9 1,2k (rev 5, medida 2026-10-09)', 0.34200, 0.230, 0.0003285, 1041.1,
+      'sobre Luca, osciloscopio de mano: U3 pata 1 = 3,29 Vpp (Vrms 1,16) -> I = 328 uA pp con el Howland de 10k · U5B 0,11 Vpp · U4 pata 14 2,29 Vpp -> cadena U5B..U4D x20,8 · K = I x 5 (INA) x 10 (U5B) x 20,8 · deficit = Vpp14/2 - Vadc en tres tandas (0,215 a 0,245)',
+      date '2026-09-27',
+      'Placa con R9 = 1,2k desde el 27/09/2026 (confirmado 09/10: SMD 1201, 1160 ohm de U4 pata 8 a 13 con soldaduras). La cadena cierra con los valores impresos: U4A 1,013 x U4B 3,19 x U4C 0,82 (CLP2 = 270 p) x U4D 8,15 = 21,6 contra 20,8 medido. Corriente 328 uA: confirma rev 3 (322) y descarta los 400 uA, que eran 3,22 V / 8,06k (lectura en circuito). LIMITACION: a 20 mV/div el osciloscopio marca 0,11 V en U5B pero la traza mide ~0,086 V; con 0,086 K seria 0,436. Incertidumbre ~12 %. Rango: 1,35 a ~13 ohm. Pendiente: resistencias patron de 2 a 12 ohm.'),
+  (6, 'Placa 3.1 (rev 6, validada con 120 ohm)', 0.01800, 0.260, 0.000338, 53.2,
+      'laboratorio, resistencia fija de 120 ohm: entrada del INA 40,6 mVpp -> I = 338 uA pp · U5A 207 mVpp · U5B 307 (x1,48) · U4A 328 (x1,07) · U4B 1,12 Vpp (x3,39) · U4C 912 mVpp (x0,82) · U4 pata 14 2,160 Vpp (x2,37) · Vout 820 mV con tester · K = Vpp14 / R = 2,160 / 120 · deficit = 1,080 - 0,820',
+      null,
+      'Placa 3.1, oct 2026, en todas las placas: R2 10k -> 1,5k (U5B x1,5), R9 -> 2k y R10 10k -> 4,7k (U4D x2,35). Ganancia total 53,2 (antes ~1040): ~20 veces menos. K cierra por los dos lados: 2,160/120 = 0,01800 y 338 uA x 53,2 = 0,01798. Rango: 29 ohm (Vadc = 0) a ~250 ohm (Vadc 2,0 V). LIMITACION: un solo punto de calibracion; el deficit de un detector de diodos no es constante con la amplitud, asi que lejos de 120 ohm el error puede crecer. Vout medido con tester y no por el ADC del micro. Pendiente: dos o mas resistencias fijas (p. ej. 47, 100, 220 ohm) para ajustar la recta y medir el residuo. Desde el 24/10 es la escala de TODAS las sesiones (hw_id de todas las demas = 6): la placa con la que se midio tenia un componente que no amplificaba. El 09/10 (U3 328 uA, U5B 0,11 Vpp, pata 14 2,29 Vpp) cierra con U5B en x0,53: ganancia ~55 contra 53,2.')
 on conflict (id) do update set
   label  = excluded.label,  k_cal      = excluded.k_cal,   v_detector = excluded.v_detector,
   i_pp_a = excluded.i_pp_a, g_receiver = excluded.g_receiver,
   method = excluded.method, valid_from = excluded.valid_from, notes = excluded.notes;
+
+-- Placa real segun el firmware que reporto la sesion. Null = la misma.
+-- Rev 6 (24/10/2026): TODO firmware apunta a la placa 3.1 (6). La placa con
+-- la que se midio tenia un componente que no amplificaba: la ganancia real
+-- era mucho menor que la que suponia cada firmware, y la de la 3.1 es la que
+-- coincide con lo medido el 09/10. Ademas hoy todas las placas son 3.1: una
+-- sesion nueva con un firmware viejo tambien se mide en una 3.1.
+alter table public.calibrations
+  add column if not exists hw_id smallint references public.calibrations(id);
+comment on column public.calibrations.hw_id is
+  'Si el firmware reporto esta calibracion, la placa real es esta otra. Null = la misma. Desde la rev 6 todo firmware apunta a la 6 (placa 3.1).';
+-- Confirmado el 24/10: TODAS las sesiones guardadas se midieron con la placa 1,
+-- la de la falla. El banco del 15/09 (rev 3, U5B x11) fue sobre la placa 3, que
+-- despues se modifico: no describe ninguna sesion de la base.
+update public.calibrations set hw_id = case when id = 6 then null else 6 end;          -- ◀── TODAS
 
 -- La referencia la fija ESTE archivo. Desde la rev 4 es solo la calibracion
 -- que se SUPONE cuando el equipo no reporto la suya; la escala de cada sesion
@@ -265,10 +312,11 @@ begin
   if new.calibration_id is null then
     new.calibration_id := cal_id;
   end if;
-  -- la placa se supone la que el firmware dice. Si no lo es (placa
-  -- modificada sin reflashear), se corrige a mano en la LISTA de la 3b.
+  -- la placa se supone la que el firmware dice, salvo que el catalogo diga
+  -- otra (hw_id). Placa modificada sin reflashear: LISTA de la 3b.
   if new.calibration_hw_id is null then
-    new.calibration_hw_id := new.calibration_id;
+    select coalesce(c.hw_id, c.id) into new.calibration_hw_id
+      from public.calibrations c where c.id = new.calibration_id;
   end if;
   return new;
 end;
@@ -287,6 +335,19 @@ create trigger trg_calibration_id
 -- etiquetadas por fecha, que es una suposicion. Que se vea.
 update public.sessions set calibration_matched = false where calibration_matched is null;
 
+-- Sesiones que reportaron su K_CAL cuando esa calibracion todavia no estaba
+-- en el catalogo: el trigger las mando a la referencia como suposicion. El
+-- K_CAL reportado es el dato duro, asi que se reclasifican por el y se les
+-- borra la placa para que la 3b la vuelva a asignar.
+update public.sessions s
+   set calibration_id      = c.id,
+       calibration_matched = true,
+       calibration_hw_id   = null
+  from public.calibrations c
+ where s.k_cal_firmware is not null
+   and s.calibration_matched is distinct from true
+   and abs(c.k_cal - s.k_cal_firmware) <= 0.001 * s.k_cal_firmware;
+
 update public.sessions
    set adc_lineal_asumido = true
  where created_at < timestamptz '2026-08-03 00:00:00-03:00'
@@ -295,9 +356,9 @@ update public.sessions
 
 -- ─── 3b · CON QUÉ PLACA SE MIDIÓ CADA SESIÓN ───────────────────────────
 -- Hasta el 27/09 una sola calibración alcanzaba para todo. Ese día se
--- cambió R9 de 2,2k a 1,1k (U4D pasa de x4,5 a x9,1) y se midió P-004 s9
--- con el firmware todavía en rev 3: el equipo convirtió con la mitad de la
--- ganancia real y esa sesión quedó al DOBLE de su valor.
+-- cambió R9 de 2,2k a 1,2k (U4D pasa de x4,4 a x8,2; se registró como 1,1k
+-- hasta el 09/10) y se midió P-004 s9 con el firmware todavía en rev 3: el
+-- equipo convirtió con la mitad de la ganancia real y quedó ~al doble.
 --
 -- Regla general, solo para filas sin asignar (una re-corrida no pisa nada):
 --   · firmware con constantes de diseño (1) → placa rev 3. Es lo que ya se
@@ -306,10 +367,23 @@ update public.sessions
 --     del Howland del 14/09. Si esa placa resultara ser la del banco del
 --     04/09, cambiar el 3 por 2 acá abajo, poner calibration_hw_id = null en
 --     esas sesiones y volver a correr.
---   · resto → la misma que reportó el firmware.
-update public.sessions
-   set calibration_hw_id = case when calibration_id = 1 then 3 else calibration_id end
- where calibration_hw_id is null;
+--   · resto → la que diga el catálogo para ese firmware (hw_id), o la misma.
+update public.sessions s
+   set calibration_hw_id = case when s.calibration_id = 1 then 3
+                                else coalesce(c.hw_id, c.id) end
+  from public.calibrations c
+ where c.id = s.calibration_id
+   and s.calibration_hw_id is null;
+
+-- Firmware cuya placa real es otra según el catálogo (hw_id). Va SIEMPRE, no
+-- solo en filas vacías: así un cambio en el catálogo llega a todas las
+-- sesiones. Desde la rev 6 es todo firmware → placa 3.1 (6).
+update public.sessions s
+   set calibration_hw_id = c.hw_id
+  from public.calibrations c
+ where c.id = s.calibration_id
+   and c.hw_id is not null
+   and s.calibration_hw_id is distinct from c.hw_id;
 
 -- Excepciones: placa modificada, firmware sin actualizar. Se aplica SIEMPRE
 -- (no solo si está vacío), así esta lista es la única fuente de verdad.
@@ -318,11 +392,14 @@ do $$
 declare esperadas int; aplicadas int;
 begin
   drop table if exists _placa_modificada;
-  create temp table _placa_modificada (codigo text, nro int, cal_hw smallint) on commit drop;
-  -- (código de paciente, número de sesión, calibración de la placa).
-  -- Para agregar: ..., ('P-004', 10, 4). En una base sin estas sesiones
-  -- (instalación nueva), comentá la línea entera y la lista queda vacía.
-  insert into _placa_modificada values ('P-004', 9, 4);   -- ◀── LISTA
+  create temp table _placa_modificada (codigo text, nro int, cal_fw smallint, cal_hw smallint) on commit drop;
+  -- (código de paciente, número de sesión, calibración con la que midió el
+  -- FIRMWARE, calibración de la PLACA). La del firmware es un control: si la
+  -- sesión no midió con esa, no se toca. Para agregar una sesión medida en
+  -- una placa 3.1 con el firmware de R9 1,2k: ..., ('P-00X', N, 5, 6).
+  -- En una base sin estas sesiones (instalación nueva), comentá la línea
+  -- entera y la lista queda vacía.
+  insert into _placa_modificada values ('P-004', 9, 3, 6);   -- ◀── LISTA
 
   select count(*) into esperadas from _placa_modificada;
 
@@ -332,11 +409,11 @@ begin
     join public.patients p on p.code = l.codigo
    where s.patient_id = p.id
      and s.session_number = l.nro
-     and s.calibration_id = 3;          -- solo si midió con firmware rev 3
+     and s.calibration_id = l.cal_fw;   -- solo si midió con ese firmware
   get diagnostics aplicadas = row_count;
 
   if aplicadas <> esperadas then
-    raise exception 'LISTA de placa modificada: esperaba % sesion(es) con firmware rev 3 y encontre %. No se aplico NADA. Revisar codigo de paciente y numero de sesion.', esperadas, aplicadas;
+    raise exception 'LISTA de placa modificada: esperaba % sesion(es) y encontre % con el paciente, el numero y el firmware indicados. No se aplico NADA.', esperadas, aplicadas;
   end if;
   raise notice 'Placa modificada: % sesion(es) reasignadas.', aplicadas;
 end $$;
@@ -357,6 +434,7 @@ declare
   n_mea int;
   n_evt int;
   n_sin int;
+  n_edi int := 0;
 begin
   select id into r_id from public.calibrations where is_reference;
   if r_id is null then
@@ -415,8 +493,33 @@ begin
      and h.id = s.calibration_hw_id;
   get diagnostics n_ses = row_count;
 
-  raise notice 'Recalculado desde _raw a la calibracion de cada placa: % sesiones, % muestras, % eventos.',
-               n_ses, n_mea, n_evt;
+  -- 4.d · ediciones de sesiones (sql/edicion_sesiones.sql, app 1.10.0).
+  --       Misma conversión, desde el `impedance_raw` de la serie editada,
+  --       que la función guardar_edicion_sesion() llena al activarla. Va con
+  --       EXECUTE porque en una base sin ediciones esas tablas no existen.
+  if to_regclass('public.measurements_edited') is not null then
+    execute $q$
+      update public.measurements_edited m
+         set impedance = m.impedance_raw * (f.k_cal / h.k_cal) + 2*(h.v_detector - f.v_detector)/h.k_cal
+        from public.sessions s
+        join public.calibrations f on f.id = s.calibration_id
+        join public.calibrations h on h.id = s.calibration_hw_id
+       where m.session_id = s.id
+         and m.impedance_raw is not null $q$;
+    get diagnostics n_edi = row_count;
+    execute $q$
+      update public.session_edits e
+         set initial_impedance = e.initial_impedance_raw * (f.k_cal / h.k_cal) + 2*(h.v_detector - f.v_detector)/h.k_cal,
+             final_impedance   = e.final_impedance_raw   * (f.k_cal / h.k_cal) + 2*(h.v_detector - f.v_detector)/h.k_cal,
+             escala            = s.calibration_hw_id
+        from public.sessions s
+        join public.calibrations f on f.id = s.calibration_id
+        join public.calibrations h on h.id = s.calibration_hw_id
+       where e.session_id = s.id $q$;
+  end if;
+
+  raise notice 'Recalculado desde _raw a la calibracion de cada placa: % sesiones, % muestras, % eventos, % muestras editadas.',
+               n_ses, n_mea, n_evt, n_edi;
 end $$;
 
 
@@ -483,6 +586,22 @@ begin
 end $$;
 
 
+-- Permisos de la vista (mantenimiento 10/10/2026). La vista se borra y se
+-- vuelve a crear en cada corrida, y Supabase le da todos los permisos a la
+-- clave pública a lo que se crea en `public`. Sin este bloque, cada corrida
+-- de este archivo volvía a dejar el dataset legible con la clave pública.
+do $$
+begin
+  revoke all on public.v_dataset_sesiones from anon;
+  revoke insert, update, delete, truncate, references, trigger on public.v_dataset_sesiones from authenticated;
+  if current_setting('server_version_num')::int >= 150000 then
+    alter view public.v_dataset_sesiones set (security_invoker = true);
+  else
+    revoke all on public.v_dataset_sesiones from authenticated;
+  end if;
+end $$;
+
+
 -- ─── 6 · REPORTE FINAL ─────────────────────────────────────────────────
 -- Lo que devuelve el editor. Si algo salió mal, se ve acá.
 
@@ -531,3 +650,7 @@ order by 1, 2, 3;
 --   update public.sessions       set initial_impedance = initial_impedance_raw,
 --                                    final_impedance   = final_impedance_raw,
 --                                    calibration_shown = calibration_id;
+--   -- y, si existen las ediciones (sql/edicion_sesiones.sql):
+--   update public.measurements_edited set impedance = impedance_raw where impedance_raw is not null;
+--   update public.session_edits       set initial_impedance = initial_impedance_raw,
+--                                         final_impedance   = final_impedance_raw;

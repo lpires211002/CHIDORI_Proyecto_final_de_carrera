@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Release de Chidori v1.9.0 · correr ESTE script en la terminal de la Mac.
+# Release de Chidori v1.10.0 · correr ESTE script en la terminal de la Mac.
 #
 #   cd ~/Desktop/TESIS/CHIDORI-Proyecto-final-de-carrera
-#   bash release_v1.9.0.sh
+#   bash release_v1.10.0.sh
 #
 # Hace, en orden:
-#   1. chequeos previos (SQL corrido, placa de 1,1k flasheada)
-#   2. versión 1.9.0, árbol limpio y .env.local con valores reales
-#   3. tag v1.9.0 y push  → GitHub Actions compila el .exe y lo adjunta al
+#   1. chequeo previo (sql/edicion_sesiones.sql corrido)
+#   2. versión 1.10.0, código de la app sin cambios sueltos y .env.local real
+#   3. tag v1.10.0 y push  → GitHub Actions compila el .exe y lo adjunta al
 #      release solo (~10 min)
 #   4. build del .dmg en la Mac
 #   5. si está `gh`, crea/actualiza el release y sube el .dmg
@@ -18,11 +18,11 @@
 
 set -euo pipefail
 
-VERSION="1.9.0"
+VERSION="1.10.0"
 TAG="v${VERSION}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UI_DIR="${REPO_DIR}/Programacion_UI_Micro/UI_REACT"
-NOTES="${UI_DIR}/RELEASE_v${VERSION}.md"
+NOTES="${UI_DIR}/MD releases/RELEASE_v${VERSION}.md"
 
 cd "$REPO_DIR"
 echo "▸ Repo: $REPO_DIR"
@@ -31,19 +31,19 @@ echo
 
 # ── 0. Chequeos de datos ─────────────────────────────────────────────────────
 cat <<'AVISO'
-⚠  Antes de seguir, confirmá estas dos cosas:
+⚠  Antes de seguir, confirmá:
 
-   1. Corriste sql/calibracion.sql en Supabase (rev 4). El editor tiene que
-      haber dicho "Placa modificada: 1 sesion(es) reasignadas".
-   2. Flasheaste la placa de R9 = 1,1k con R9_OHM 1100 (DESPUÉS del SQL).
-      Por el monitor serie tiene que decir:
-        K_CAL = 0.33350 A  ·  V_DETECTOR = 0.169 V
-        Placa: R9 = 1100 ohm
-      Las placas de 2,2k no se tocan.
+   1. Corriste sql/edicion_sesiones.sql en Supabase. Al final muestra una
+      tabla con session_edits, measurements_edited, session_review y
+      session_comments, todas con rls = t y 1 política.
 
 AVISO
-read -r -p "¿Las dos hechas? [s/N] " ok
-[[ "$ok" =~ ^[sS]$ ]] || { echo "Cortado. Hacelas y volvé."; exit 1; }
+read -r -p "¿Corriste sql/edicion_sesiones.sql? [s/N] " ok
+[[ "$ok" =~ ^[sS]$ ]] || { echo "Cortado. Corrélo y volvé."; exit 1; }
+if [ ! -f "$NOTES" ]; then
+  echo "❌ No encuentro las notas del release: $NOTES"
+  exit 1
+fi
 echo
 
 # ── 1. Versión y árbol limpio ────────────────────────────────────────────────
@@ -54,13 +54,19 @@ if [ "$VER_PKG" != "$VERSION" ]; then
 fi
 echo "▸ package.json en $VER_PKG ✓"
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "❌ Hay cambios sin commitear. No se publica un release con el árbol sucio:"
-  git status --short
+# Solo importa lo que entra al build. Cambios sueltos en la tesis, el KiCad o
+# sql/ no frenan el release: no forman parte de la app.
+APP_PATHS=("$UI_DIR/src" "$UI_DIR/electron" "$UI_DIR/public" "$UI_DIR/build"
+           "$UI_DIR/index.html" "$UI_DIR/package.json" "$UI_DIR/package-lock.json"
+           "$UI_DIR/vite.config.js")
+SUCIO="$(git status --porcelain -- "${APP_PATHS[@]}")"
+if [ -n "$SUCIO" ]; then
+  echo "❌ Hay cambios sin commitear en el código de la app. No se publica así:"
+  echo "$SUCIO"
   echo "   Commitealos (o descartalos) y volvé a correr."
   exit 1
 fi
-echo "▸ Árbol limpio ✓"
+echo "▸ Código de la app sin cambios sueltos ✓"
 
 # ── 2. .env.local con valores reales ─────────────────────────────────────────
 # Vite hornea estas variables en el build: si quedan las de ejemplo, la app

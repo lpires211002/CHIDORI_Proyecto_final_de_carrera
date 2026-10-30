@@ -3,9 +3,11 @@ import { UserPlus, ArrowLeft, Check } from 'lucide-react';
 import DynamicFields from './DynamicFields';
 import {
   fetchFields, fetchPatients, createPatient, nextPatientCode,
-  countSessions, patientLabel, coerceValues, missingRequired,
+  pacientesGuardados, camposGuardados, conteoGuardado,
+  patientLabel, coerceValues, missingRequired,
 } from '../lib/patients';
 import { describirAntiguedad } from '../lib/patientsCache';
+import { contarSesionesPaciente } from '../lib/sessionSync';
 
 /**
  * Paso previo a la medición: elegir (o crear) el paciente y completar los
@@ -22,11 +24,20 @@ import { describirAntiguedad } from '../lib/patientsCache';
  *   onError  · (msg) => void
  */
 export default function PatientGate({ supabase, onReady, onCancel, onError }) {
+  // Lo guardado en esta computadora se muestra AL INSTANTE, sin esperar a la
+  // red: en la red del Chidori la consulta a la nube no llega nunca, y antes
+  // eso dejaba el selector en "Cargando…" o obligaba a cambiar de WiFi.
+  // La lista la mantiene al día usePatientsPrefetch (Dashboard).
+  const [guardado] = useState(() => pacientesGuardados());
+
   const [step, setStep]         = useState('pick');   // 'pick' | 'new' | 'session'
-  const [fields, setFields]     = useState([]);
-  const [patients, setPatients] = useState([]);
+  const [fields, setFields]     = useState(() => camposGuardados());
+  const [patients, setPatients] = useState(() => guardado?.filas || []);
   const [search, setSearch]     = useState('');
-  const [loading, setLoading]   = useState(true);
+  // Sin nada guardado no hay qué mostrar hasta que responda la nube.
+  const [loading, setLoading]   = useState(() => !guardado);
+  // Buscando cambios en la nube mientras ya se muestra lo guardado.
+  const [actualizando, setActualizando] = useState(true);
   // Etiqueta de antigüedad si la lista salió del caché · null si vino de la nube
   const [desdeCache, setDesdeCache] = useState(null);
 
@@ -45,16 +56,25 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
     let alive = true;
     (async () => {
       try {
-        const [fs, ps] = await Promise.all([fetchFields(supabase), fetchPatients(supabase)]);
+        const [fs, ps] = await Promise.all([
+          fetchFields(supabase, { soloNube: true }),
+          fetchPatients(supabase, { soloNube: true }),
+        ]);
         if (!alive) return;
         setFields(fs);
         setPatients(ps.filas);
-        setDesdeCache(ps.deCache ? (describirAntiguedad(ps.cache) || 'sin fecha') : null);
+        setDesdeCache(null);
       } catch (e) {
-        onError?.('No se pudieron cargar los pacientes. ¿Corriste el SQL de configuración?');
-        console.error('[PatientGate]', e);
+        if (!alive) return;
+        if (guardado) {
+          // Sin internet: se sigue con lo guardado, y se dice de cuándo es.
+          setDesdeCache(describirAntiguedad(guardado.cache) || 'sin fecha');
+        } else {
+          onError?.('Sin internet y sin lista guardada en esta computadora. Abrí la app una vez con internet: la lista se descarga sola.');
+          console.error('[PatientGate]', e);
+        }
       } finally {
-        if (alive) setLoading(false);
+        if (alive) { setLoading(false); setActualizando(false); }
       }
     })();
     return () => { alive = false; };
@@ -68,10 +88,13 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
       [p.code, p.first_name, p.last_name].filter(Boolean).join(' ').toLowerCase().includes(s));
   }, [patients, search]);
 
-  const choose = async (p) => {
+  // El paso siguiente se muestra ya, con el último conteo guardado, y se
+  // corrige cuando contesta la nube (o la cola local, sin internet).
+  const choose = (p) => {
     setSelected(p);
-    setSessionCount(await countSessions(supabase, p.id));
+    setSessionCount(conteoGuardado(p.id));
     setStep('session');
+    contarSesionesPaciente(supabase, p.id).then((n) => setSessionCount(n)).catch(() => {});
   };
 
   const startNew = async () => {
@@ -133,13 +156,17 @@ export default function PatientGate({ supabase, onReady, onCancel, onError }) {
                   pacientes. */}
               {desdeCache && (
                 <div className="cache-aviso" role="note">
-                  <strong>Lista guardada · {desdeCache}</strong>
+                  <strong>Lista guardada en esta computadora · actualizada {desdeCache}</strong>
                   <span>
-                    Sin conexión a la nube. Podés elegir y crear pacientes igual: se
-                    suben solos cuando vuelva internet. Si el paciente que buscás fue
-                    creado en otra máquina, todavía no está acá.
+                    Sin conexión a la nube, normal en la red del Chidori. Podés elegir y
+                    crear pacientes igual: lo nuevo sube solo cuando vuelva internet. Un
+                    paciente cargado en otra computadora después de esa hora todavía no
+                    aparece.
                   </span>
                 </div>
+              )}
+              {!desdeCache && actualizando && guardado && (
+                <span className="field-hint">Buscando cambios en la nube…</span>
               )}
 
               <div className="field">

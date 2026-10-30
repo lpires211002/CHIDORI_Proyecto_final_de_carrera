@@ -51,6 +51,14 @@
 //      el firmware todavia en 2,2k: quedo al doble. R9_OHM elige entre rev 3
 //      (2,2k, medida) y rev 4 (1,1k, K_CAL x2, derivada). SETEARLO ANTES DE
 //      FLASHEAR, segun la placa.
+//  14. Esa placa tiene R9 = 1,2k, no 1,1k (SMD "1201", 1185 ohm). Rev 5
+//      MEDIDA el 09/10/2026: K_CAL 0,342 y V_DETECTOR 0,230, ahora por placa.
+//      Se quita la opcion 1100: esa placa nunca existio.
+//  15. PLACA 3.1 (oct 2026), en TODAS las placas: R2 10k -> 1,5k (U5B x1,5),
+//      R9 -> 2k y R10 10k -> 4,7k (U4D x2,35). Ganancia ~20 veces menor:
+//      rango ~29 a ~250 ohm. Validada con una resistencia fija de 120 ohm:
+//      K_CAL 0,01800 y V_DETECTOR 0,260 (rev 6). PLACA reemplaza a R9_OHM
+//      para elegir la calibracion: ahora cambian tres resistencias, no una.
 //
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  ⚠️  CONFIGURACIÓN OBLIGATORIA EN ARDUINO IDE  ⚠️             ║
@@ -216,42 +224,78 @@
 
 /* ================= PLACA · ELEGIR ANTES DE FLASHEAR =================
  *
- * No todas las placas tienen la misma ganancia. El 27/09/2026 se cambio R9
- * (entrada de U4D, con R10 = 10k) de 2,2k a 1,1k en una placa: U4D pasa de
- * x4,5 a x9,1 y la cadena entera gana el doble. Con el firmware equivocado
- * la Z sale al doble (o a la mitad) SIN NINGUN AVISO: asi quedo la sesion 9
- * de P-004, medida con R9 = 1,1k y este firmware todavia en 2,2k.
+ * Cada placa tiene su ganancia y su calibracion. Con el firmware equivocado
+ * la Z sale escalada SIN NINGUN AVISO: asi quedo la sesion 9 de P-004, medida
+ * con R9 ya en 1,2k y el firmware todavia en 2,2k.
  *
- *   R9_OHM 2200 -> rev 3: la calibracion MEDIDA en banco el 15/09 (arriba).
- *   R9_OHM 1100 -> rev 4: DERIVADA de rev 3, K_CAL x 2. No medida en banco.
+ *   PLACA_3_1     rev 6 · PLACA 3.1, oct 2026: R2 1,5k · R9 2k · R10 4,7k.
+ *                 Todas las placas pasan a esta. Es el default.
+ *   PLACA_R9_1K2  rev 5 · R9 1,2k con R2 y R10 en 10k. Medida el 09/10.
+ *   PLACA_R9_2K2  rev 3 · placas originales, R9 2,2k. Medida el 15/09.
  *
- * Para saber cual tiene una placa: mirar R9, al lado de U4 (pin 13). Si hay
- * duda, osciloscopio en U4 pin 8 y pin 14: la relacion da ~4,5 con 2,2k y
- * ~9 con 1,1k.
+ * Para reconocer una 3.1: R2 (realimentacion de U5B, U5 patas 6-7) es 1,5k
+ * (SMD "1501"/"152"), R9 (U4 pata 13) es 2k ("2001"/"202") y R10 (U4 patas
+ * 13-14) es 4,7k ("4701"/"472"). Con osciloscopio, U4 pata 14 sobre pata 8
+ * da ~2,4 (3.1), ~8,2 (R9 1,2k) o ~4,4 (R9 2,2k).
  *
- * Supuestos de la rev 4: (a) el resto de la placa es igual a rev 3
- * (corriente, INA, filtros); (b) el deficit del detector sigue en 0,169 V
- * con el doble de amplitud. El GBW del TL084 le resta ~1 % a U4D con 1,1k
- * (factor real 1,98-1,99, no 2): queda dentro del 13 % de rev 3.
+ * PLACA 3.1 · rev 6 · laboratorio, resistencia fija de 120 ohm:
+ *   entrada del INA122 (sobre los 120 ohm) .... 40,6 mVpp -> I = 338 uA pp
+ *   U5A (= INAout, x5 con Rg abierto) ......... 207 mVpp
+ *   U5B (R2 1,5k / R1 1k) ..................... 307 mVpp   x1,48
+ *   U4A ....................................... 328 mVpp   x1,07
+ *   U4B ....................................... 1,12 Vpp   x3,39
+ *   U4C (CLP2 270 p) .......................... 912 mVpp   x0,82
+ *   U4D, pata 14 (R10 4,7k / R9 2k) ........... 2,160 Vpp  x2,37
+ *   Vout del detector (tester) ................ 820 mV
+ *   K_CAL = Vpp14 / R = 2,160 / 120 ........................... 0,01800
+ *           (= 338 uA x 53,2, ganancia total 2160 / 40,6: cierra)
+ *   deficit = Vpp14/2 - Vout = 1,080 - 0,820 .................. 0,260 V
+ * Control al flashear: con la misma resistencia de 120 ohm la app tiene que
+ * mostrar ~120 ohm. Si muestra Z', el deficit real es 0,260 + (120 - Z')
+ * x 0,0090 V (cada 10 mV de deficit son 1,1 ohm).
+ * LIMITACION: un solo punto. K y el deficit salen de esa medicion; el
+ * deficit de un detector de diodos no es constante con la amplitud, asi que
+ * lejos de 120 ohm el error puede crecer. Con dos o mas resistencias fijas
+ * (p. ej. 47, 100, 220 ohm) se ajusta la recta y se mide el residuo.
  *
- * El rango se achica a la mitad con 1,1k:
- *   R9 2,2k : 2,03 ohm (Vadc = 0) a ~26 ohm
- *   R9 1,1k : 1,01 ohm (Vadc = 0) a ~13 ohm   <- pegado a ~13 es RECORTE
+ * Rango con la 3.1: 2 x 0,260 / 0,0180 = 29 ohm (Vadc = 0) a ~250 ohm
+ * (Vadc 2,0 V; el ADC llega a ~2,5 V, ~300 ohm). Debajo de ~30 ohm la lectura
+ * queda en el piso: senal nula, no tejido de baja impedancia.
  *
- * El equipo reporta su K_CAL en cada STATUS y la base etiqueta sola cada
- * sesion con la calibracion que corresponde (tabla `calibrations`, 3 y 4).
+ * REV 5 · R9 = 1,2k · 09/10/2026, sobre Luca: I 328 uA pp · U5B 0,11 Vpp ·
+ * pata 14 2,29 Vpp -> K_CAL = 328 uA x 5 x 10 x 20,8 = 0,342; deficit 0,230 V
+ * (0,215 a 0,245 en tres tandas). Rango 1,35 a ~13 ohm. Incertidumbre ~12 %.
+ * Entre el 28/09 y el 09/10 esa placa se creyo de 1,1k y se flasheo con
+ * K_CAL 0,33350 (rev 4, derivada): la base reasigna esas sesiones sola.
+ *
+ * El equipo reporta K_CAL y V_DETECTOR en cada STATUS y la base etiqueta sola
+ * cada sesion (tabla `calibrations`: 3 = R9 2,2k, 5 = R9 1,2k, 6 = placa 3.1).
+ * La calibracion tiene que estar en el catalogo ANTES de medir: correr
+ * sql/calibracion.sql (rev 6) antes de flashear.
  */
-#define R9_OHM              1100      // <-- 2200 o 1100, SEGUN LA PLACA
+#define PLACA_R9_2K2        1
+#define PLACA_R9_1K2        2
+#define PLACA_3_1           3
 
-#define V_DETECTOR          0.169f    // deficit del detector de envolvente [V]
-#if   R9_OHM == 2200
+#define PLACA               PLACA_3_1   // <-- SEGUN LA PLACA (todas son 3.1 desde oct 2026)
+
+#if   PLACA == PLACA_3_1
+  #define K_CAL             0.01800f  // rev 6 · Vpp14 / 120 ohm, placa 3.1
+  #define V_DETECTOR        0.260f    // deficit del detector [V], rev 6
+  #define PLACA_NOMBRE      "3.1 (R2 1,5k - R9 2k - R10 4,7k)"
+  #define CAL_TAG           "rev6 · placa 3.1 · 120 ohm fija"
+#elif PLACA == PLACA_R9_1K2
+  #define K_CAL             0.34200f  // rev 5 · I_pp x G, medida 2026-10-09
+  #define V_DETECTOR        0.230f    // deficit del detector [V], rev 5
+  #define PLACA_NOMBRE      "R9 1,2k (R2 y R10 10k)"
+  #define CAL_TAG           "rev5 · R9 1,2k · medida 2026-10-09"
+#elif PLACA == PLACA_R9_2K2
   #define K_CAL             0.16675f  // rev 3 · I_pp x G, medida 2026-09-15
+  #define V_DETECTOR        0.169f    // deficit del detector [V], rev 3
+  #define PLACA_NOMBRE      "R9 2,2k (original)"
   #define CAL_TAG           "rev3 · R9 2,2k · banco 2026-09-15"
-#elif R9_OHM == 1100
-  #define K_CAL             0.33350f  // rev 4 · rev 3 x (2,2k / 1,1k)
-  #define CAL_TAG           "rev4 · R9 1,1k · rev3 x2, derivada"
 #else
-  #error "R9_OHM tiene que ser 2200 o 1100: no hay calibracion para otro valor"
+  #error "PLACA tiene que ser PLACA_3_1, PLACA_R9_1K2 o PLACA_R9_2K2"
 #endif
 
 #define VREF                3.3
@@ -410,7 +454,7 @@ void setup() {
   // Calibracion en uso (ver el bloque CALIBRACION arriba)
   Serial.print("K_CAL = ");             Serial.print(K_CAL, 5);
   Serial.print(" A  ·  V_DETECTOR = "); Serial.print(V_DETECTOR, 3); Serial.println(" V");
-  Serial.print("Placa: R9 = ");         Serial.print(R9_OHM);    Serial.println(" ohm");
+  Serial.print("Placa: ");              Serial.println(PLACA_NOMBRE);
   Serial.print("Z = 2*(Vadc + V_DETECTOR) / K_CAL   ["); Serial.print(CAL_TAG); Serial.println("]");
 
   Chidori.estado = INACTIVO;
