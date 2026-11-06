@@ -9,6 +9,7 @@
 \usepackage[export]{adjustbox}
 \usepackage{rotating} % figura apaisada del DER (sidewaysfigure)
 \usepackage{xcolor}
+\newcommand{\pendiente}[1]{\textcolor{red}{[#1]}} % marca de citas por completar
 \usepackage{parskip}
 \usepackage{csquotes}
 \usepackage[backend=bibtex,style=ieee]{biblatex}
@@ -86,9 +87,8 @@ frecuente en mujeres que en hombres. Además, su incidencia aumenta progresivame
 y, debido a su elevada prevalencia e impacto negativo en personas mayores de 65 años, es
 considerada un síndrome geriátrico \cite{robles2006incontinencia}.
 
-Si bien la incontinencia urinaria se asocia con mayor frecuencia al envejecimiento, puede
-presentarse en individuos de cualquier grupo etario. En las mujeres, el embarazo, el parto y la
-menopausia constituyen factores de riesgo relevantes, mientras que en los hombres suele asociarse
+Además de la edad, existen otros factores de riesgo. En las mujeres, el embarazo, el parto y la
+menopausia son especialmente relevantes, mientras que en los hombres suele asociarse
 con patologías prostáticas. Asimismo, diversas enfermedades neurológicas, como las lesiones
 medulares, la esclerosis múltiple y la enfermedad de Parkinson, pueden alterar el control vesical
 y favorecer la aparición de esta condición \cite{leslie2024incontinence}.
@@ -116,8 +116,8 @@ distintas cirugías correctivas. Si bien estos procedimientos pueden mejorar sig
 síntomas, algunos se caracterizan por ser costosos, invasivos y estar asociados con posibles
 complicaciones \cite{eau2025femaleLUTS}.
 
-En la práctica clínica, especialmente en pacientes adultos mayores, es frecuente recurrir a
-productos absorbentes como estrategia de contención. Sin embargo, esta solución también presenta
+En la práctica clínica, especialmente en pacientes adultos mayores, es frecuente recurrir a apósitos
+absorbentes para incontinencia como estrategia de contención. Sin embargo, esta solución también presenta
 limitaciones, ya que puede representar una carga económica sostenida y no aborda el mecanismo que
 origina la pérdida de orina.
 
@@ -147,18 +147,19 @@ El presente proyecto propone estudiar la bioimpedancia como herramienta no invas
 estado de llenado vesical y anticipar la necesidad de micción. Su relevancia radica en aportar
 evidencia científica sobre un enfoque accesible, continuo y objetivo, con potencial para mejorar el
 manejo de pacientes con incontinencia urinaria. El trabajo parte de un prototipo desarrollado
-previamente y aborda su rediseño electrónico, la mejora de la calidad de señal, la recolección
+previamente por los autores en el marco de la asignatura Instrumentación Biomédica II
+\cite{informe_grupo2_2025} y aborda su rediseño electrónico, la mejora de la calidad de señal, la recolección
 experimental de datos y la evaluación de métodos de predicción personalizados.
 
 \subsection{Objetivos}
 
 \subsubsection{Objetivo general}
 
-Desarrollar un dispositivo médico portátil y económico para el monitoreo no invasivo del
-llenado vesical mediante bioimpedancia eléctrica, optimizando un prototipo existente y realizando un
-estudio experimental orientado a la generación de una base de datos poblacional que permita analizar
-la relación entre la impedancia y el volumen vesical, así como explorar técnicas de predicción del
-momento de la micción para la prevención de episodios de incontinencia urinaria.
+Desarrollar un dispositivo médico portátil de bajo costo para el monitoreo no invasivo del
+llenado vesical mediante bioimpedancia eléctrica, basado en un prototipo existente, realizando 
+además un estudio experimental con voluntarios para generar una base de datos con los resultados
+y para explorar técnicas de predicción del momento de micción.
+
 
 \subsubsection{Objetivos específicos}
 
@@ -166,18 +167,17 @@ El presente trabajo tiene como objetivo el rediseño y la optimización de un si
 bioimpedancia orientado al monitoreo del llenado vesical. Para ello, se propone desarrollar una nueva
 placa electrónica que incorpore un esquema de filtrado en la etapa de adquisición de la señal, con el
 fin de reducir el nivel de ruido y mejorar la sensibilidad y estabilidad general del dispositivo.
-Asimismo, se buscará optimizar la portabilidad del sistema mediante la reducción del consumo
-energético y del tamaño de la placa electrónica.
+Asimismo, se buscará optimizar la portabilidad y el consumo energético del sistema.
 
 Además, se plantea desarrollar una interfaz gráfica que facilite la interacción con el usuario y
 permita una visualización clara e intuitiva de los resultados. En paralelo, se construirá una base
-de datos experimental a partir de mediciones obtenidas durante pruebas controladas. Esta base
+de datos experimental a partir de mediciones obtenidas durante pruebas controladas en voluntarios. Esta base
 permitirá explorar la implementación y evaluación de modelos de análisis de datos orientados a predecir 
 el estado de llenado vesical a partir de cambios en la bioimpedancia. Se propone presentar los resultados 
 obtenidos en una revista científica o congreso relacionado con las áreas de bioingeniería y bioimpedancia.
 
-Entre los objetivos de máxima se plantea explorar el uso de técnicas estadísticas y/o de machine 
-learning para el análisis de los resultados. Además, investigar y definir métricas cuantitativas para evaluar la
+Entre los objetivos de máxima se plantea explorar el uso de técnicas estadísticas y/o de aprendizaje automático (\textit{machine
+learning}) para el análisis de los resultados. Además, investigar y definir métricas cuantitativas para evaluar la
 confiabilidad, estabilidad y desempeño del sistema, estableciendo criterios objetivos para su
 validación. Se buscará realizar pruebas experimentales en distintos escenarios de uso con el propósito
 de analizar la seguridad y eficacia del sistema, considerando su potencial aplicación clínica. 
@@ -187,12 +187,12 @@ de analizar la seguridad y eficacia del sistema, considerando su potencial aplic
 \subsection{Vejiga urinaria}
 
 \subsubsection{Anatomía y fisiología}
+\label{sec:anatomia}
 
-La vejiga urinaria es un órgano muscular hueco ubicado en la cavidad pélvica y constituye la víscera
-más anterior de la pelvis. Su función principal es almacenar temporalmente la orina producida por los
-riñones hasta que pueda ser eliminada mediante la micción. Cuando se encuentra vacía permanece dentro
-de la pelvis, por detrás de la sínfisis del pubis; a medida que se llena, se distiende y asciende hacia
-la cavidad abdominal \cite{drake2015gray,shermadou2023bladder}.
+La vejiga urinaria es un órgano muscular hueco cuya función es almacenar temporalmente la orina
+producida por los riñones hasta su eliminación mediante la micción. Cuando se encuentra vacía, se
+ubica dentro de la cavidad pélvica, por detrás de la sínfisis del pubis; a medida que se llena, se
+distiende y asciende hacia la cavidad abdominal \cite{drake2015gray,shermadou2023bladder}. 
 
 En estado de vaciamiento presenta una forma aproximadamente piramidal y puede describirse mediante un
 vértice, una base o fondo, un cuerpo y un cuello. El vértice se orienta hacia la sínfisis del pubis y
@@ -201,28 +201,28 @@ base se orienta en dirección posteroinferior y el cuerpo constituye la región 
 almacenamiento. Inferiormente, la vejiga se estrecha para formar el cuello vesical, que se continúa con
 la uretra \cite{drake2015gray,shermadou2023bladder}.
 
-Los dos uréteres ingresan por la región posterior de la vejiga y la uretra se origina en su extremo
-inferior. Los orificios ureterales y el orificio uretral interno delimitan sobre la superficie interna
-una región triangular denominada trígono vesical. El trayecto oblicuo de los uréteres a través de la
-pared vesical contribuye a limitar el reflujo de orina hacia el tracto urinario superior cuando la
-vejiga se llena o se contrae durante la micción \cite{lanzotti2023physiology}. Esta pared se encuentra
-revestida internamente por urotelio y contiene una capa de músculo liso denominada músculo detrusor,
-cuya contracción coordinada permite expulsar la orina \cite{drake2015gray}.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.62\textwidth]{figuras/vejiga_esquema.png}
+    \caption{Estructura de la vejiga urinaria femenina y masculina. Reproducida de
+    Generalitat de Catalunya \cite{gencat_vejiga}.}
+    \label{fig:vejiga_pelvis}
+\end{figure}
 
-La función vesical comprende una fase de almacenamiento y otra de vaciamiento o micción. Durante el
-llenado, la distensibilidad de la pared permite que el volumen aumente con una elevación relativamente
-pequeña de la presión intravesical, propiedad denominada acomodación o \textit{compliance} vesical. La
-capacidad funcional varía entre individuos; en el adulto, el volumen que puede almacenarse cómodamente
-es, en promedio, de 300 a 400~mL \cite{drake2015gray,lanzotti2023physiology}.
+La pared vesical contiene una capa de músculo liso denominada músculo detrusor, cuya contracción
+coordinada permite expulsar la orina \cite{drake2015gray}. La Figura~\ref{fig:vejiga_pelvis} muestra
+las principales estructuras de la vejiga femenina y masculina. Durante el llenado, la distensibilidad de
+la pared permite que el volumen aumente con una elevación relativamente pequeña de la presión
+intravesical, propiedad denominada acomodación o \textit{compliance} vesical. La capacidad funcional
+varía entre individuos; en el adulto, el volumen que puede almacenarse cómodamente es, en promedio,
+de 300 a 400~mL \cite{drake2015gray,lanzotti2023physiology}.
 
 A medida que la vejiga se llena, la distensión de su pared activa receptores sensitivos que informan
-el estado de llenado a la médula espinal y a los centros encefálicos. Durante el almacenamiento, la
-actividad simpática y somática mantiene relajado el detrusor y cerrada la salida uretral. Cuando el
-grado de llenado y el contexto permiten iniciar la micción, aumenta la actividad parasimpática, se
-contrae el detrusor y disminuye la resistencia uretral. Esto requiere la relajación coordinada del
-cuello vesical y del esfínter uretral externo, este último formado por músculo estriado y sujeto al
-control voluntario. De este modo, circuitos espinales y encefálicos coordinan la expulsión de la orina
-\cite{fowler2008neural,lanzotti2023physiology}.
+el estado de llenado a la médula espinal y a los centros encefálicos, y que dan origen a la sensación
+de plenitud. Durante el almacenamiento, el detrusor permanece relajado y la salida uretral cerrada;
+cuando el grado de llenado y el contexto permiten iniciar la micción, el detrusor se contrae y se
+relajan de forma coordinada el cuello vesical y el esfínter uretral externo, este último sujeto al
+control voluntario \cite{fowler2008neural,lanzotti2023physiology}.
 
 
 \subsubsection{Incontinencia urinaria}
@@ -251,14 +251,19 @@ esfinteriana. Por ello, la pérdida involuntaria de orina debe entenderse como u
 responder a mecanismos y enfermedades diferentes, cuya identificación es necesaria para orientar el
 tratamiento \cite{chiang2013incontinencia}.
 
-El monitoreo del llenado no corrige por sí mismo la causa de la incontinencia; busca aportar una señal anticipatoria para personas que
-conservan capacidad de almacenamiento y pueden beneficiarse de una indicación de vaciado. Esto puede
-ser especialmente útil cuando la percepción de plenitud está disminuida.
+El monitoreo del llenado no corrige por sí mismo la causa de la incontinencia, sino que busca aportar
+una señal anticipatoria que permita vaciar la vejiga antes de que se produzca la pérdida. Por ello,
+resulta más pertinente cuando la vejiga conserva su capacidad de almacenamiento pero la persona no
+percibe a tiempo el llenado o no puede llegar al sanitario con la anticipación necesaria, como en la
+incontinencia funcional o cuando la sensación de plenitud está disminuida. También puede ser útil para
+detectar volúmenes elevados en personas con retención, en las que el vaciado insuficiente da lugar a
+incontinencia por rebosamiento. En cambio, aporta poco frente a la incontinencia de esfuerzo, en la que
+la pérdida depende de aumentos bruscos de la presión abdominal más que del grado de llenado.
 
 
 \subsubsection{Tratamientos y estrategias de manejo actuales}
 
-El abordaje se selecciona según el subtipo, la gravedad, las comorbilidades y las preferencias del
+El abordaje de la incontinencia urinaria se selecciona según el subtipo, la gravedad, las comorbilidades y las preferencias del
 paciente. Las intervenciones conservadoras suelen constituir la primera línea e incluyen educación,
 ajustes en la ingesta de líquidos, reducción de peso cuando está indicada, entrenamiento vesical y
 ejercicios supervisados de la musculatura del piso pélvico. Existe evidencia de beneficio del
@@ -268,46 +273,128 @@ entrenamiento del piso pélvico en mujeres con incontinencia de esfuerzo y mixta
 En la incontinencia de urgencia pueden emplearse antimuscarínicos o agonistas $\beta_3$. La elección
 requiere valorar contraindicaciones, adherencia y efectos adversos, particularmente en personas mayores.
 Cuando las medidas previas son insuficientes se consideran, según el cuadro, toxina botulínica
-intradetrusor, neuromodulación, agentes de relleno uretral o procedimientos quirúrgicos. Los productos
-absorbentes y la micción asistida o programada ayudan a contener o prevenir episodios, pero no tratan
+intradetrusor, neuromodulación, agentes de relleno uretral o procedimientos quirúrgicos. Otras estrategias, como
+el uso de apósitos o productos
+absorbentes, y la micción asistida o programada, ayudan a contener o prevenir episodios, pero no tratan
 necesariamente el mecanismo subyacente \cite{eau2025femaleLUTS}.
 
-El intervalo entre micciones cambia con la ingesta, la diuresis, la actividad y
-otros factores. Una estimación continua del llenado mediante bioimpedancia podría permitir avisos personalizados; su utilidad
-clínica, sin embargo, deberá demostrarse mediante estudios comparativos y no puede inferirse únicamente
-del desempeño electrónico.
+Varias de estas estrategias comparten una limitación: no disponen de información sobre el estado real
+de llenado de la vejiga. La micción programada se basa en intervalos fijos, aunque el tiempo que tarda
+la vejiga en llenarse varía con la ingesta, la diuresis y la actividad de cada persona, por lo que el
+aviso puede llegar antes de que sea necesario o después de producida la pérdida. Los productos
+absorbentes actúan una vez ocurrido el episodio, y los tratamientos farmacológicos e invasivos no
+resultan adecuados para todos los pacientes.
+
+\subsubsection{Alternativas para el monitoreo del llenado vesical}
+
+Un método que estime de forma continua y no invasiva el llenado vesical, que permita un uso
+prolongado y que no requiera un operador entrenado, podría mejorar la prevención de episodios de
+incontinencia y la calidad de vida de quienes la padecen. Con este fin se han explorado distintas
+tecnologías no invasivas, entre las que se destacan la ecografía, la espectroscopía en el infrarrojo
+cercano y la bioimpedancia eléctrica \cite{palla2023review}.
+
+La ecografía es la técnica no invasiva de referencia en la práctica clínica para estimar el volumen
+vesical. Los ecógrafos vesicales portátiles calculan el volumen a partir de imágenes de la vejiga y se
+emplean, por ejemplo, para medir el residuo posmiccional. Sin embargo, requieren gel de acoplamiento y
+un operador que posicione el transductor, por lo que se utilizan para mediciones puntuales y no para
+el monitoreo continuo. También se desarrollaron dispositivos de ultrasonido portables que se fijan
+sobre el abdomen y avisan al usuario cuando la vejiga alcanza cierto nivel de llenado, aunque la
+necesidad de mantener un acoplamiento acústico estable dificulta su uso prolongado
+\cite{palla2023review}.
+
+La espectroscopía en el infrarrojo cercano (NIRS, por sus siglas en inglés) ilumina el abdomen con luz
+de longitudes de onda de aproximadamente 700 a 1000~nm y registra la luz que regresa a la superficie,
+cuya atenuación depende de la absorción del agua y de otros componentes del tejido. Es una técnica no
+invasiva y compatible con dispositivos pequeños, pero la luz penetra solo algunos centímetros, por lo
+que la medición se ve afectada por el espesor del tejido adiposo y por la profundidad de la vejiga
+\cite{palla2023review}.
+
+La bioimpedancia eléctrica reúne las características buscadas: se mide con electrodos
+superficiales y corrientes de baja amplitud, puede registrarse de forma continua y se implementa con
+electrónica sencilla y de bajo consumo. Por estos motivos se la considera una técnica prometedora para
+el monitoreo vesical, aunque su capacidad para estimar el llenado de manera confiable fuera de
+condiciones controladas todavía debe establecerse \cite{palla2023review,noyori2022review}.
 
 \subsection{Bioimpedancia eléctrica}
 
-\subsubsection{Principios generales}
+Los tejidos biológicos no son eléctricamente inertes: conducen la corriente y, al mismo tiempo,
+almacenan carga. La bioimpedancia describe cómo se oponen al paso de una corriente alterna y depende
+de su composición, de su estructura y de la frecuencia de la señal aplicada. Como esas propiedades
+cambian cuando se modifica el contenido de fluidos de una región del cuerpo, su medición permite
+seguir de forma no invasiva procesos fisiológicos como el llenado vesical. En esta sección se
+presentan el origen de estas propiedades, los modelos que las representan, la forma de medirlas y
+la evidencia que vincula la bioimpedancia con el volumen de la vejiga.
 
-La bioimpedancia caracteriza la oposición que presenta un tejido al paso de corriente.
-Para una excitación sinusoidal en régimen estacionario, se define como
+\subsubsection{Propiedades eléctricas de los tejidos}
 
+Desde el punto de vista eléctrico, un tejido puede describirse como un conjunto de células inmersas
+en un medio extracelular. Tanto el líquido intracelular como el extracelular son soluciones
+electrolíticas: contienen iones libres que pueden desplazarse y, por lo tanto, conducen la corriente.
+Ambos medios están separados por la membrana celular, una doble capa lipídica de muy baja
+conductividad que actúa como un dieléctrico entre dos conductores y se comporta, en consecuencia,
+como un capacitor \cite{grimnes2015bioimpedance}.
+
+Esta estructura hace que el camino que sigue la corriente dependa de la frecuencia. A frecuencias
+bajas, la reactancia de la membrana es muy elevada y la corriente rodea las células, circulando
+principalmente por el espacio extracelular. A medida que la frecuencia aumenta, la reactancia de la
+membrana disminuye y una fracción creciente de la corriente atraviesa las células, de modo que el
+medio intracelular también contribuye a la conducción. Por este motivo, la impedancia de un tejido
+disminuye al aumentar la frecuencia \cite{grimnes2015bioimpedance}.
+
+
+Esta dependencia no es uniforme en todo el espectro. Las propiedades dieléctricas de los tejidos
+presentan tres regiones de variación pronunciada, denominadas dispersiones $\alpha$, $\beta$ y
+$\gamma$. La dispersión $\alpha$, a frecuencias del orden de los hercios a pocos kilohercios, se
+asocia con fenómenos de difusión iónica en torno a las células. La dispersión $\beta$, que se
+extiende aproximadamente desde algunos kilohercios hasta decenas de megahercios, se debe a la
+polarización de las membranas celulares y es la región en la que se realiza la mayoría de las
+mediciones de bioimpedancia. La dispersión $\gamma$, en el rango de los gigahercios, corresponde a
+la relajación de las moléculas de agua \cite{grimnes2015bioimpedance}. Las tres dispersiones se
+muestran en la Figura~\ref{fig:dispersiones}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.72\textwidth]{figuras/dispersiones_bourne.png}
+    \caption{Variación de la permitividad relativa $\varepsilon'$ y de la conductividad $\sigma'$ de un
+    tejido biológico con la frecuencia, con las dispersiones $\alpha$, $\beta$ y $\gamma$. Reproducida de
+    Moncada et al.~\cite[p.~56]{moncada2010revision}, a partir de Bourne et al.
+    \cite{bourne1996bioelectrical}.}
+    \label{fig:dispersiones}
+\end{figure}
+
+Para una excitación sinusoidal en régimen estacionario, la bioimpedancia se define como el cociente
+entre los fasores de tensión y de corriente:
 \begin{equation}
     Z(\omega)=\frac{\underline{V}(\omega)}{\underline{I}(\omega)}
              =R(\omega)+jX(\omega),
 \end{equation}
-
-donde $R$ es la componente resistiva, $X$ la reactancia y $\omega=2\pi f$. Su módulo y fase resultan
-
+donde $R$ es la componente resistiva, $X$ la reactancia y $\omega=2\pi f$. La resistencia representa
+la disipación de energía asociada con la conducción iónica, mientras que la reactancia refleja la
+carga y descarga de las membranas y produce un desfase entre la tensión y la corriente. Su módulo y
+fase resultan
 \begin{equation}
     |Z|=\sqrt{R^2+X^2}, \qquad
     \phi=\tan^{-1}\left(\frac{X}{R}\right).
 \end{equation}
 
-Los líquidos intra y extracelulares aportan caminos conductivos, mientras que las membranas celulares
-se comportan aproximadamente como elementos capacitivos. Por esta razón la impedancia depende de la
-frecuencia. A bajas frecuencias la corriente circula principalmente por el espacio extracelular; al
-aumentar la frecuencia, la reactancia de membrana disminuye y una fracción mayor atraviesa el medio
-intracelular \cite{grimnes2015bioimpedance}. El tejido es heterogéneo y anisótropo, de modo que un
-modelo concentrado representa un comportamiento macroscópico y no una descripción anatómica exacta.
-
-El modelo equivalente presentado por Al-Rawi et al. representa el medio extracelular mediante
-$R_o$ y el intracelular mediante $R_i$, mientras que $C_{in}$ modela el comportamiento capacitivo de
-la membrana celular. Esta disposición permite visualizar cómo el aumento de la frecuencia reduce la
-reactancia capacitiva y habilita una mayor contribución del camino intracelular
-\cite{alrawi2013howland}.
+Este comportamiento puede representarse mediante un circuito equivalente. El modelo presentado por
+Al-Rawi et al. (Figura~\ref{fig:modelo_equivalente_alrawi}) representa el medio extracelular mediante
+la resistencia $R_o$ y el intracelular mediante $R_i$, mientras que $C_{in}$ modela el comportamiento
+capacitivo de la membrana celular \cite{alrawi2013howland}. El camino intracelular, formado por $R_i$
+en serie con $C_{in}$, queda en paralelo con el extracelular, de modo que la impedancia del modelo es
+\begin{equation}
+    Z(\omega)=R_o\parallel\left(R_i+\frac{1}{j\omega C_{in}}\right),
+    \qquad
+    \lim_{\omega\to0}Z=R_o,
+    \qquad
+    \lim_{\omega\to\infty}Z=R_o\parallel R_i.
+\end{equation}
+A frecuencias bajas, el capacitor bloquea el camino intracelular y la impedancia coincide con la
+resistencia extracelular. A frecuencias altas, el capacitor se comporta prácticamente como un
+cortocircuito y ambos medios conducen en paralelo, por lo que la impedancia disminuye. Entre ambos
+extremos, el modelo reproduce cómo el aumento de la frecuencia reduce la reactancia capacitiva y
+habilita una mayor contribución del camino intracelular. Este circuito de tres elementos se conoce en la literatura como modelo de Fricke
+\cite{grimnes2015bioimpedance}.
 
 \begin{figure}[htbp]
     \centering
@@ -318,23 +405,49 @@ reactancia capacitiva y habilita una mayor contribución del camino intracelular
     \label{fig:modelo_equivalente_alrawi}
 \end{figure}
 
-Una representación habitual es el modelo de Cole--Cole:
+Un tejido real no está formado por células idénticas, sino que es heterogéneo y anisótropo, con
+células de distintos tamaños y formas. Por ello, un modelo de parámetros concentrados como el anterior
+representa un comportamiento macroscópico y no una descripción anatómica exacta.
 
-\begin{equation}
- Z(\omega)=R_{\infty}+\frac{R_0-R_{\infty}}
- {1+(j\omega\tau)^{1-\alpha}},
-\end{equation}
+\subsubsection{Interfaz electrodo--piel}
 
-donde $R_0$ y $R_{\infty}$ son los límites resistivos de baja y alta frecuencia, $\tau$ es una constante
-de tiempo y $\alpha$ describe la dispersión de los tiempos de relajación \cite{cole1940permeability}.
-Este modelo es especialmente útil en espectroscopía. En una medición a frecuencia única, se sigue la 
-evolución temporal de un punto del espectro y no es posible identificar de forma independiente todos sus parámetros.
+Para medir la bioimpedancia es necesario establecer un contacto eléctrico con el cuerpo mediante
+electrodos. En el tejido la corriente es transportada por iones, mientras que en el electrodo y en los
+cables la transportan electrones. El electrodo actúa, por lo tanto, como un transductor entre ambos
+tipos de conducción, y la interfaz en la que se produce esta transformación tiene propiedades
+eléctricas propias \cite{grimnes2015bioimpedance}.
+
+En electrodos superficiales, como los de tipo Ag/AgCl con gel conductor, la interfaz
+electrodo--electrolito puede representarse mediante el circuito equivalente de la
+Figura~\ref{fig:circuito_electrodo}. En él, $E_\mathrm{hc}$ es el potencial de media celda; $R_\mathrm{d}$
+y $C_\mathrm{d}$, en paralelo, modelan la transferencia de carga y la capacidad de la doble capa que se
+forma en la interfaz; y $R_\mathrm{s}$ representa la resistencia del gel o electrolito
+\cite{webster2010medical}. Debido a $C_\mathrm{d}$, la impedancia de la interfaz tiende a
+$R_\mathrm{d}+R_\mathrm{s}$ a baja frecuencia y a $R_\mathrm{s}$ a alta frecuencia.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{figuras/electrodo_circuito.png}
+    \caption{Circuito equivalente de un electrodo de biopotencial en contacto con un electrolito.
+    Reproducida de Webster \cite{webster2010medical}.}
+    \label{fig:circuito_electrodo}
+\end{figure}
+
+A esta impedancia se suma la de la capa más externa de la piel, la epidermis, cuya capa córnea
+de células muertas presenta una conductividad baja y un comportamiento también capacitivo
+\cite{grimnes2015bioimpedance}. Como consecuencia, la impedancia de contacto suele ser mayor que la
+del tejido que se desea medir, disminuye al aumentar la frecuencia y depende fuertemente del estado de
+la piel, de su preparación y de la adherencia del electrodo. Además, el desplazamiento del electrodo
+respecto de la piel perturba la distribución de carga en la interfaz y genera artefactos. Estas
+características condicionan tanto la elección del método de medición como la preparación de la piel
+antes de colocar los electrodos.
 
 \subsubsection{Métodos de medición}
 
 La medición de impedancia eléctrica en el cuerpo se realiza principalmente mediante el método
 corriente--tensión: se inyecta una corriente alterna de amplitud conocida y se mide la tensión
-resultante sobre la superficie corporal. Según la cantidad y función de los electrodos, pueden
+resultante sobre la superficie corporal. La forma en que la impedancia de contacto interviene en esa
+tensión depende de la cantidad y la función de los electrodos, y según este criterio pueden
 distinguirse tres configuraciones \cite{noyori2022review}:
 
 \begin{itemize}
@@ -350,10 +463,17 @@ distinguirse tres configuraciones \cite{noyori2022review}:
     sensado y es la configuración más utilizada en estudios experimentales sobre seres humanos.
 \end{itemize}
 
-En la configuración tetrapolar, los electrodos de tensión se conectan a una entrada de impedancia muy
-alta, por lo que la corriente que circula a través de ellos es despreciable. La impedancia se estima
-como
-
+La diferencia entre las configuraciones bipolar y tetrapolar puede expresarse de forma cuantitativa.
+En la configuración bipolar, la corriente atraviesa las dos interfaces de contacto y la tensión se
+mide sobre los mismos electrodos, de modo que la impedancia obtenida es
+\begin{equation}
+    Z_{B}=Z_{\mathrm{tejido}}+Z_{c1}+Z_{c2},
+\end{equation}
+donde $Z_{c1}$ y $Z_{c2}$ son las impedancias de contacto. Como estas pueden superar a la del tejido y
+variar durante la medición, sus cambios se confunden con los del tejido. En la configuración
+tetrapolar, en cambio, los electrodos de tensión se conectan a una entrada de impedancia muy alta,
+por lo que la corriente que circula a través de ellos es despreciable y casi no se produce caída de
+tensión en sus interfaces. La impedancia se estima entonces como
 \begin{equation}
     Z_{T}=\frac{V_{\mathrm{med}}}{I_{\mathrm{iny}}}.
 \end{equation}
@@ -361,29 +481,27 @@ como
 De esta manera, la impedancia de contacto electrodo--piel, generalmente mayor que la del tejido, tiene
 un efecto mucho menor sobre la tensión registrada y se obtiene una mejor relación señal--ruido que con
 las configuraciones bipolar y tripolar. Esta ventaja justifica la elección del método tetrapolar para
-el monitoreo vesical. Sin embargo, no se eliminan por completo los errores asociados con el desbalance
-de los contactos, las capacitancias parásitas y la distribución no uniforme de sensibilidad; por ello,
-la geometría debe mantenerse constante entre mediciones
-\cite{grimnes2015bioimpedance,noyori2022review}.
-
+el monitoreo vesical. 
 
 \subsubsection{Relación entre bioimpedancia y llenado vesical}
+\label{sec:bioz_llenado}
 
-La orina presenta una conductividad eléctrica mayor que la de muchos de los tejidos circundantes. Al llenarse
-la vejiga aumenta su tamaño, sustituye parte del volumen ocupado por otros tejidos y modifica la
-distribución de las líneas de corriente en el abdomen inferior. En configuraciones apropiadas, este
-cambio produce una disminución de la impedancia. Esta relación se estudia desde los
-primeros trabajos de medición resistiva del volumen vesical y fue posteriormente evaluada de forma no
-invasiva en seres humanos \cite{waltz1971bladder,abbey1983bladder,liao2011bladder}.
+La orina es una solución electrolítica sin estructura celular, con una conductividad eléctrica mayor
+que la de muchos de los tejidos circundantes. Al llenarse, la vejiga aumenta su tamaño, sustituye
+parte del volumen ocupado por otros tejidos y modifica la distribución de las líneas de corriente en
+el abdomen inferior. Como el volumen conductor atravesado por la corriente aumenta, en configuraciones
+apropiadas este cambio produce una disminución de la impedancia medida. En términos del modelo de la
+Figura~\ref{fig:modelo_equivalente_alrawi}, la orina, al carecer de estructura celular, no aporta
+membranas que almacenen carga: se comporta como un camino resistivo adicional, y el aumento de su
+volumen reduce principalmente la componente resistiva de la impedancia. Esta relación se estudia desde
+los primeros trabajos de medición resistiva del volumen vesical y fue posteriormente evaluada de forma
+no invasiva en seres humanos \cite{waltz1971bladder,abbey1983bladder,liao2011bladder}.
 
 Li et al. desarrollaron en 2013 un sistema tetrapolar que inyectaba una corriente sinusoidal de
 1~mA pico a pico a 50~kHz y estimaba la impedancia mediante amplificación diferencial y demodulación
-sensible a fase. Los autores indicaron que la impedancia abdominal de interés se encontraba
-aproximadamente entre 10 y 30~$\Omega$ y que el cambio asociado con el llenado podía ser inferior a
-1~$\Omega$. Esto exige una cadena de adquisición capaz de resolver variaciones pequeñas sobre un valor
-basal mayor. En una prueba preliminar con un voluntario observaron una tendencia decreciente en la bioimpedancia durante la
-acumulación de orina, consistente con el aumento de un volumen conductor dentro de la vejiga
-\cite{li2013monitoring}.
+sensible a fase. En una prueba preliminar con un voluntario observaron una tendencia decreciente en la
+bioimpedancia durante la acumulación de orina, consistente con el aumento de un volumen conductor
+dentro de la vejiga \cite{li2013monitoring}.
 
 Estudios posteriores aportaron evidencia con diseños más amplios. En ocho voluntarios, Li et al.
 hallaron una correlación negativa entre la tensión medida y el tiempo de acumulación para tres
@@ -392,53 +510,21 @@ y regresión lineal \cite{noyori2021device}. También se desarrollaron dispositi
 portátiles que emplean algoritmos de aprendizaje profundo para reducir interferencias y artefactos en
 la señal \cite{dheman2023bladder}.
 
-La medición superficial no registra únicamente la vejiga, sino también la contribución eléctrica de
-la piel, la grasa, los músculos, otros órganos y los fluidos atravesados por la corriente. La magnitud observada también depende de la distancia
-entre electrodos, antropometría, postura, respiración, movimiento, temperatura, sudoración y composición
-de la orina. En consecuencia, una tendencia decreciente es fisiológicamente plausible, pero no basta
-para asumir una conversión universal entre ohmios y mililitros. Revisiones recientes coinciden en que la bioimpedancia es
-prometedora para monitoreo continuo, aunque su robustez fuera de condiciones controladas sigue siendo
-un desafío \cite{li2013monitoring,palla2023review,noyori2022review}.
-
-\subsubsection{Frecuencia de excitación}
-
-La impedancia de los tejidos depende de la frecuencia de excitación debido al comportamiento capacitivo
-de las membranas celulares y a la interfaz entre los electrodos y la piel. A frecuencias bajas, la
-corriente circula principalmente por el medio extracelular y aumenta la influencia de la impedancia de
-contacto. Al elevar la frecuencia, disminuye la reactancia de las membranas y aumenta la contribución de
-los caminos intracelulares; sin embargo, también adquieren mayor importancia las capacitancias parásitas,
-el ancho de banda de los amplificadores y los errores de fase \cite{grimnes2015bioimpedance}.
-
-La revisión de Noyori et al. indica que la mayoría de los estudios de monitoreo vesical en seres humanos
-empleó señales sinusoidales entre 10 y 100~kHz. Otros trabajos describen información útil de los tejidos
-en un intervalo más amplio, aproximadamente entre 10 y 300~kHz
-\cite{noyori2022review,li2013monitoring}. Estos valores representan rangos explorados en la literatura y
-no garantizan por sí solos el funcionamiento correcto de cualquier circuito dentro de toda la banda.
-
-En este trabajo se seleccionó una frecuencia fija de 50~kHz porque se encuentra dentro del intervalo más
-utilizado en estudios humanos y constituye un compromiso entre sensibilidad fisiológica y complejidad
-electrónica. Frente a frecuencias menores, reduce la influencia relativa de la interfaz electrodo--piel;
-frente a frecuencias mayores, permite controlar
-mejor los efectos parásitos y las limitaciones de ancho de banda.
-
-\subsection{Fundamentos del sistema de medición}
-
-\subsubsection{Cadena de adquisición}
-
-Un sistema tetrapolar de bioimpedancia comprende un generador sinusoidal, una fuente de corriente, dos
-electrodos de inyección, dos de medición, amplificación diferencial, filtrado, demodulación y conversión
-analógico--digital. La fuente debe mantener una corriente aproximadamente constante frente a cambios de
-carga, mientras que la etapa de adquisición debe recuperar una pequeña tensión diferencial en presencia
-de ruido y modo común. El filtrado y la demodulación permiten extraer la amplitud de la señal \cite{alrawi2013howland}.
-
-Como la medición requiere aplicar una corriente al cuerpo, su amplitud debe seleccionarse de acuerdo con
-los límites de seguridad establecidos por la norma IEC~60601-1. Estos límites dependen de la frecuencia
-de la señal, del tipo de parte aplicada y de las condiciones de funcionamiento del equipo, por lo que su
-cumplimiento debe verificarse antes de realizar mediciones en seres humanos \cite{iec60601}.
+Sin embargo, la medición superficial no registra únicamente la vejiga, sino también la contribución
+eléctrica de la piel, la grasa, los músculos, otros órganos y los fluidos atravesados por la corriente.
+La magnitud observada también depende de la distancia entre electrodos, la antropometría, la postura,
+la respiración, el movimiento, la temperatura, la sudoración y la composición de la orina. En
+consecuencia, una tendencia decreciente es fisiológicamente plausible, pero no basta para asumir una
+conversión universal entre ohms y mililitros. Revisiones recientes coinciden en que la bioimpedancia
+es prometedora para el monitoreo continuo, aunque su robustez fuera de condiciones controladas sigue
+siendo un desafío \cite{li2013monitoring,palla2023review,noyori2022review}.
 
 \subsubsection{Posicionamiento de electrodos}
 
-La ubicación de los electrodos determina qué regiones contribuyen en mayor medida a la tensión medida.
+Como se describió en la Sección~\ref{sec:anatomia}, a medida que se llena la vejiga asciende por
+encima de la sínfisis del pubis, por lo que los cambios asociados con el llenado se concentran en el
+abdomen inferior. Dentro de esa región, la ubicación de los electrodos determina qué zonas contribuyen
+en mayor medida a la tensión medida.
 Por ello, una disposición reproducible en el abdomen inferior debe favorecer la sensibilidad a los
 cambios de la vejiga y reducir la variación causada por desplazamientos \cite{li2019electrode}.
 
@@ -465,11 +551,239 @@ adiposo, la geometría pélvica y la posición de la vejiga modifican la distrib
 aplicación en el prototipo requiere evaluar repetibilidad y sensibilidad entre distintos sujetos
 \cite{li2019electrode}.
 
-\clearpage
+\subsubsection{Frecuencia de excitación}
+
+La elección de la frecuencia de excitación surge de los fenómenos descriptos en las subsecciones
+anteriores. A frecuencias bajas, la corriente circula principalmente por el medio extracelular y
+aumenta la influencia de la impedancia de contacto, que es mayor cuanto menor es la frecuencia. Al
+elevar la frecuencia, disminuye la reactancia de las membranas y de las interfaces y aumenta la
+contribución de los caminos intracelulares; sin embargo, también adquieren mayor importancia las
+capacitancias parásitas, el ancho de banda de los amplificadores y los errores de fase
+\cite{grimnes2015bioimpedance}.
+
+La revisión de Noyori et al. indica que la mayoría de los estudios de monitoreo vesical en seres humanos
+empleó señales sinusoidales entre 10 y 100~kHz. Otros trabajos describen información útil de los tejidos
+en un intervalo más amplio, aproximadamente entre 10 y 300~kHz
+\cite{noyori2022review,li2013monitoring}. Estos valores representan rangos explorados en la literatura y
+no garantizan por sí solos el funcionamiento correcto de cualquier circuito dentro de toda la banda.
+
+En este trabajo se seleccionó una frecuencia fija de 50~kHz porque se encuentra dentro de la dispersión
+$\beta$ y del intervalo más utilizado en estudios humanos, y constituye un compromiso entre sensibilidad
+fisiológica y complejidad electrónica. Frente a frecuencias menores, reduce la influencia relativa de la
+interfaz electrodo--piel; frente a frecuencias mayores, permite controlar mejor los efectos parásitos y
+las limitaciones de ancho de banda.
+
+\subsection{Fundamentos del sistema de medición}
+
+\subsubsection{Cadena de adquisición}
+
+Un sistema tetrapolar de bioimpedancia comprende un generador sinusoidal, una fuente de corriente, dos
+electrodos de inyección, dos de medición, amplificación diferencial, filtrado, demodulación y conversión
+analógico--digital. La fuente debe mantener una corriente aproximadamente constante frente a cambios de
+carga, mientras que la etapa de adquisición debe recuperar una pequeña tensión diferencial en presencia
+de ruido y modo común. El filtrado y la demodulación permiten extraer la amplitud de la señal \cite{alrawi2013howland}.
+
+\subsubsection{Seguridad eléctrica}
+
+Como la medición requiere aplicar una corriente al cuerpo, su amplitud debe respetar los límites de
+seguridad establecidos por la norma IEC~60601-1 \cite{iec60601}. Los efectos fisiológicos de una
+corriente alterna dependen de su frecuencia. A frecuencias bajas, la corriente puede estimular nervios
+y músculos; por encima de aproximadamente 1~kHz, en cambio, cada semiciclo es demasiado breve para
+despolarizar las membranas excitables, y el umbral de estimulación aumenta de forma aproximadamente
+proporcional a la frecuencia \cite{webster2010medical,grimnes2015bioimpedance}. Por este motivo, a
+50~kHz pueden emplearse corrientes considerablemente mayores que a la frecuencia de la red sin
+producir efectos fisiológicos.
+
+En los términos de la norma, la corriente de excitación es una corriente auxiliar de paciente: circula
+por el cuerpo entre los elementos de la parte aplicada y no tiene por finalidad producir un efecto
+fisiológico. Sus límites dependen del tipo de parte aplicada. Las partes de tipo BF (\textit{body
+floating}) están en contacto con el paciente y aisladas de tierra, mientras que las de tipo CF
+(\textit{cardiac floating}) admiten además la aplicación cardíaca directa y tienen límites más
+estrictos. Para electrodos colocados sobre la piel del abdomen corresponde considerar los límites de
+tipo BF. La norma fija valores para la condición normal de funcionamiento y para la condición de
+primer defecto, en la que falla uno de los medios de protección. Para corriente alterna, los valores
+de referencia se definen hasta 1~kHz; a frecuencias mayores, la corriente se pondera en frecuencia,
+lo que equivale a multiplicar el límite por la frecuencia expresada en kilohercios, con un máximo de
+10~mA eficaces en cualquier caso \cite{iec60601}. La Tabla~\ref{tab:limites_iec} resume los límites
+resultantes para una parte aplicada de tipo BF.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Límites de corriente auxiliar de paciente alterna para partes aplicadas de tipo BF
+    establecidos por la norma IEC~60601-1, en valores eficaces \cite{iec60601}.}
+    \label{tab:limites_iec}
+    \begin{tabular}{lcc}
+        \hline
+        Frecuencia & Condición normal & Primer defecto \\
+        \hline
+        Hasta 1~kHz & 100~$\mu$A & 500~$\mu$A \\
+        50~kHz & 5~mA & 10~mA \\
+        \hline
+    \end{tabular}
+\end{table}
+
+A 50~kHz y en condición normal, el límite resulta de 5~mA eficaces, cincuenta veces mayor que a
+frecuencias de hasta 1~kHz. La componente continua, en cambio, se limita a 10~$\mu$A, ya que produce
+efectos electroquímicos en la interfaz electrodo--piel. La verificación
+de estos límites sobre el equipo debe realizarse antes de efectuar mediciones en seres humanos.
+
+\subsubsection{Fuente de corriente}
+
+En el método tetrapolar, la impedancia se obtiene como el cociente entre la tensión medida y la
+corriente inyectada. Por lo tanto, cualquier variación de la corriente se confunde con una variación
+de impedancia, y la fuente debe entregar una corriente que no dependa de la carga conectada. Esa
+carga no es solo el tejido comprendido entre los electrodos de medición: la fuente ve en serie la
+impedancia del tejido atravesado por la corriente y las dos impedancias de contacto de los electrodos
+de inyección, que pueden ser mayores que la del tejido y variar durante la medición
+\cite{grimnes2015bioimpedance}. Para que la corriente se mantenga prácticamente constante frente a
+estas variaciones, la impedancia de salida de la fuente debe ser mucho mayor que la carga total.
+
+La fuente de Howland es una de las topologías más empleadas con este fin en bioimpedancia
+\cite{alrawi2013howland,nwokoye2024howland}. Está formada por un amplificador operacional y cuatro
+resistencias que combinan una realimentación negativa y una positiva; cuando las resistencias están
+balanceadas, la corriente de salida queda determinada por la tensión de entrada y una de las
+resistencias. En la práctica, su impedancia de salida está limitada por el apareamiento de las
+resistencias, por la ganancia finita del amplificador, que disminuye con la frecuencia según su
+producto ganancia--ancho de banda \cite{ti_gbw_model}, y por las capacidades parásitas en paralelo
+con la salida, como las de la entrada del amplificador, las pistas y los cables hacia los electrodos
+\cite{nwokoye2024howland}. Además, la fuente solo mantiene la corriente mientras la tensión necesaria
+sobre la carga no supere su tensión de cumplimiento, que depende de la tensión de alimentación y de la
+excursión de salida del amplificador. En un equipo alimentado con baterías de baja tensión, este
+límite condiciona la amplitud de corriente que puede emplearse y la impedancia de contacto tolerable
+\cite{nwokoye2024howland}.
+
+\subsubsection{Demodulación de la señal}
+
+La tensión registrada por los electrodos de medición es una senoide de la frecuencia de excitación,
+cuya amplitud y fase dependen de la impedancia:
+\begin{equation}
+    v(t)=I_0\,|Z|\,\sin(\omega_0 t+\phi),
+    \label{eq:portadora}
+\end{equation}
+donde $I_0$ es la amplitud de la corriente, $\omega_0=2\pi\cdot50~\mathrm{kHz}$ y $\phi$ la fase de la
+impedancia. En este trabajo se mide el módulo $|Z|$, que se obtiene de la amplitud de la senoide. Esta
+elección es adecuada para el monitoreo vesical porque la orina es un electrolito sin estructura
+celular, cuyo comportamiento eléctrico es esencialmente resistivo, de modo que su acumulación modifica
+principalmente la componente resistiva de la impedancia del camino de corriente
+\cite{grimnes2015bioimpedance}. Además, el interés está en la variación de la impedancia respecto de
+un valor basal y no en su valor absoluto, por lo que el módulo resulta suficiente para seguir la
+evolución del llenado.
+
+Como el llenado vesical modifica la impedancia en una escala de minutos, mucho más lenta que el
+período de la excitación (20~$\mu$s), la amplitud de la senoide varía muy lentamente: la información
+sobre el llenado no está en la oscilación de 50~kHz, sino en su envolvente. La señal puede tratarse,
+por lo tanto, como una portadora modulada en amplitud (AM), y demodular consiste en extraer la
+envolvente, es decir, recuperar la variación lenta a partir de la señal de alta frecuencia. Dado que
+esas variaciones son lentas, la información útil ocupa una banda muy angosta alrededor de 50~kHz, lo
+que permite filtrar el resto del espectro sin perderla. Las principales estrategias para demodular una
+señal AM son \cite{lathi2009communication}:
+
+\begin{itemize}
+    \item \textbf{Detección de envolvente o de pico:} un diodo seguido de un capacitor carga este
+    último hasta el valor de pico de la señal y lo mantiene entre ciclos sucesivos, de modo que la
+    salida sigue la envolvente.
+    \item \textbf{Rectificación y filtrado pasabajos:} la señal se rectifica y se filtra, y se obtiene
+    una tensión continua proporcional a su valor medio, que en una senoide es proporcional a la
+    amplitud.
+    \item \textbf{Demodulación coherente o síncrona:} la señal se multiplica por una referencia de la
+    misma frecuencia y fase que la portadora y el producto se filtra con un pasabajos. Requiere
+    disponer de la señal del generador y de un multiplicador, pero rechaza mejor el ruido fuera de
+    la frecuencia de la portadora y, con una segunda referencia en cuadratura, permite recuperar
+    también la fase. Es el enfoque empleado por Li et al. en su sistema de monitoreo vesical
+    \cite{li2013monitoring}.
+\end{itemize}
+
+En este trabajo se emplea la detección de pico. Para una señal de amplitud de pico $V_p$, la tensión
+obtenida es aproximadamente
+\begin{equation}
+    V_{\mathrm{det}}\approx V_p-V_F=\frac{V_{\mathrm{pp}}}{2}-V_F,
+\end{equation}
+donde $V_F$ es la caída directa del diodo. Este método se implementa con dos componentes, no necesita
+una referencia y produce una tensión continua que puede digitalizarse a baja frecuencia de muestreo,
+lo que lo hace compatible con un equipo portátil de bajo consumo.
+
+El detector de pico presenta, sin embargo, limitaciones que condicionan el resto de la cadena. En
+primer lugar, la caída $V_F$ introduce un desplazamiento y una zona muerta: por debajo de cierta
+amplitud el diodo no conduce y la salida no sigue a la señal. Además, $V_F$ depende de la corriente y
+de la temperatura \cite{nexperia_bat54s}, por lo que la relación entre la lectura y la amplitud debe
+calibrarse experimentalmente. El uso de diodos Schottky, con una caída directa menor que la de los
+diodos de silicio convencionales, reduce estos efectos \cite{nexperia_bat54s}. En segundo lugar, a
+diferencia de la demodulación coherente, el detector no discrimina frecuencias: responde al valor
+máximo de la señal total, incluidos el ruido y las interferencias superpuestas. Por este motivo
+necesita un filtrado pasabanda previo, centrado en la frecuencia de excitación, que limite el ruido
+que llega al diodo. Por último, la constante de tiempo del capacitor con la carga del detector debe
+ser mucho mayor que el período de la portadora, para que el \textit{ripple} entre ciclos sea pequeño, y
+a la vez mucho menor que la escala temporal del llenado, para seguir sus variaciones. Con una
+portadora de 50~kHz y cambios fisiológicos en escalas de segundos a minutos, ambas condiciones pueden
+satisfacerse con holgura.
+
+\subsubsection{Antecedente: prototipo previo}
+
+El presente trabajo parte de un prototipo desarrollado previamente por los autores en el marco de la
+asignatura Instrumentación Biomédica II \cite{informe_grupo2_2025}. Ese equipo implementaba la
+arquitectura general descripta en esta sección: una fuente de corriente de Howland con electrodos en
+configuración tetrapolar, un amplificador de instrumentación, una etapa de filtrado pasabanda y un
+detector de pico, cuya salida era digitalizada por un microcontrolador ESP8266. Constituyó una primera
+implementación del sistema, pero su evaluación puso de manifiesto limitaciones que motivan el rediseño
+abordado en este trabajo \cite{informe_grupo2_2025}:
+
+\begin{itemize}
+    \item \textbf{Alimentación:} el equipo se alimentaba con dos baterías de 9~V y empleaba un regulador
+    lineal para obtener la tensión del microcontrolador. A medida que las baterías se descargaban, su
+    tensión se acercaba al mínimo requerido por el regulador, lo que se asoció con inconsistencias en
+    las mediciones y con interrupciones en el envío de datos.
+    \item \textbf{Filtrado:} el pasabanda estaba formado por dos etapas de primer orden que concentraban
+    una ganancia elevada, y la ganancia real a 50~kHz resultó de solo el 24~\% de la teórica. Además,
+    una atenuación fuera de banda de 20~dB por década resulta limitada para un detector de pico, que,
+    como se discutió, responde a todo el contenido de la señal y no solo a la componente de 50~kHz.
+    \item \textbf{Implementación:} la placa utilizaba componentes pasantes, no contaba con capacitores
+    de desacople junto a los integrados ni con plano de masa, y el amplificador de instrumentación se
+    montaba en un módulo externo sobre zócalos.
+    \item \textbf{Procesamiento:} el microcontrolador adquiría una muestra por segundo y transmitía el
+    promedio de diez muestras, sin un tratamiento específico de valores extremos.
+\end{itemize}
+
+Estas limitaciones orientan los objetivos específicos del trabajo: rediseñar la alimentación y el
+filtrado de la cadena de adquisición, mejorar la implementación de la placa y su portabilidad, y
+revisar el procesamiento de la señal. La comparación detallada entre ambos diseños se presenta en la
+Sección~\ref{sec:comparacion_prototipo}.
 
 \subsection{Modelos predictivos}
 
+Como se discutió en la Sección~\ref{sec:bioz_llenado}, la relación entre la impedancia medida y el
+volumen vesical depende de la anatomía de cada persona, de la ubicación de los electrodos y de las
+condiciones de medición, por lo que no existe una conversión universal entre ambas magnitudes. Por
+este motivo, para estimar el estado de llenado a partir de la bioimpedancia se recurre a modelos que
+se ajustan a partir de datos experimentales.
 
+El problema puede plantearse de distintas maneras según el uso previsto. En un enfoque de regresión,
+el modelo estima el volumen de orina, o una magnitud relacionada, como el tiempo transcurrido o el
+volumen ingerido, a partir de la señal. En un enfoque de clasificación, en cambio, asigna la medición
+a categorías de llenado o decide si corresponde emitir un aviso de vaciado. Para una aplicación
+orientada a anticipar la micción, este segundo planteo puede resultar suficiente, ya que no requiere
+conocer el volumen exacto sino detectar cuándo se aproxima un nivel de llenado determinado.
+
+En la literatura se han empleado modelos de complejidad creciente. Noyori et al. estimaron el volumen
+de orina mediante regresión lineal a partir de las mediciones de un arreglo de ocho electrodos
+\cite{noyori2021device}, mientras que Dheman et al. combinaron la medición tetrapolar con algoritmos de
+aprendizaje automático para suprimir artefactos y estimar el volumen \cite{dheman2023bladder}. En
+ambos casos, los modelos se alimentan con variaciones de la impedancia más que con su valor absoluto.
+Expresar la señal respecto de un valor basal, por ejemplo como $\Delta Z/Z_0$, reduce la influencia de
+las diferencias entre sujetos y entre sesiones en la impedancia inicial.
+
+La variabilidad entre personas también plantea la elección entre un modelo general, ajustado con
+datos de todos los sujetos, y modelos personalizados, ajustados con mediciones previas de cada
+individuo. Los primeros no requieren calibración para cada nuevo usuario, pero deben capturar
+diferencias anatómicas importantes; los segundos se adaptan mejor a cada persona, a costa de requerir
+una etapa de calibración.
+
+Por último, con un número reducido de sujetos y varias sesiones por cada uno, la forma de validar el
+modelo condiciona la interpretación de su desempeño. Si mediciones de una misma persona o sesión se
+emplean a la vez para ajustar y para evaluar el modelo, el error estimado resulta optimista. Por ello
+se emplean esquemas de validación cruzada que separan los datos por sujeto, para evaluar un modelo
+general, o por sesión, para evaluar un modelo personalizado \cite{hastie2009elements}. El desempeño se
+cuantifica con métricas como el error absoluto medio o la raíz del error cuadrático medio, en el caso
+de la regresión, y la sensibilidad y la especificidad, en el caso de la clasificación.
 
 \section{Metodología}
 
@@ -596,7 +910,7 @@ dentro de los límites seguros.
 \paragraph{Criterios de diseño de la cadena de acondicionamiento.}
 La cadena posterior al INA incorpora amplificación antes del primer bloque de filtrado,
 dos acoplamientos pasaaltos y dos redes pasabajos, además de una etapa final de amplificación.
-En particular, el último pasabajos es pasivo y está seguido por un buffer, mientras que la
+En particular, el último pasabajos es pasivo y está seguido por un \textit{buffer}, mientras que la
 ganancia final se establece en un amplificador inversor separado. Esta organización permite
 ajustar la ganancia final de manera independiente del polo del último pasabajos en el modelo
 ideal. El criterio de diseño fue conservar la excitación de 50~kHz, atenuar componentes fuera
@@ -960,7 +1274,7 @@ capacitor alcanza aproximadamente el pico y que su descarga entre ciclos es pequ
 La tensión en Vout se aplica al ADC del ESP32-C3 SuperMini. La magnitud digitalizada representa el
 nivel entregado por el detector y se utiliza para estimar la amplitud
 de la señal anterior a la rectificación. La relación entre ambas tensiones se caracteriza
-experimentalmente considerando la caída del diodo, la carga y el ripple. Esa caracterización,
+experimentalmente considerando la caída del diodo, la carga y el \textit{ripple}. Esa caracterización,
 junto con la ganancia de la cadena de adquisición, permite establecer la conversión de la lectura del ADC
 a impedancia. 
 
@@ -1027,7 +1341,7 @@ comparables.
 El ESP32-C3 SuperMini opera como punto de acceso WiFi propio, de modo que el equipo no depende de infraestructura
 de red externa y mantiene una dirección IP fija. La comunicación con la interfaz gráfica se establece
 mediante \textit{WebSocket} sobre un puerto dedicado, protocolo que permite mantener abierto un canal
-bidireccional entre el microcontrolador y el navegador. El firmware transmite periódicamente un mensaje
+bidireccional entre el microcontrolador y el navegador. El \textit{firmware} transmite periódicamente un mensaje
 con tres valores: la impedancia filtrada $Z$, la tensión pico a pico reconstruida a la salida del
 receptor y la tensión continua leída directamente en el pin del conversor, esta última incluida para
 poder contrastarla experimentalmente con un instrumento de banco. La interfaz, a su vez, envía comandos
@@ -1038,7 +1352,7 @@ evitando que sesiones de navegador inactivas degraden la transmisión.
 
 \subsubsection{Máquina de estados y control físico}
 
-El firmware implementa una máquina de estados con los modos \textit{Inactivo} y \textit{Midiendo}; la
+El \textit{firmware} implementa una máquina de estados con los modos \textit{Inactivo} y \textit{Midiendo}; la
 evaluación de los umbrales de alarma se realiza en la interfaz y no en el microcontrolador, que actúa
 como un sensor de propósito simple. El equipo puede iniciarse y detenerse tanto desde la interfaz como
 mediante un botón físico. Para evitar que un roce accidental o una vibración interrumpan una sesión de
@@ -1119,7 +1433,7 @@ Las muestras y los eventos dependen de su sesión, por lo que al eliminarse una 
 
 \paragraph{Variables configurables.} Las características de cada paciente y las condiciones de cada sesión no se almacenan en columnas fijas, sino en campos de tipo JSONB (\texttt{data} en pacientes y \texttt{session\_data} en sesiones), que admiten un conjunto variable de pares clave-valor. Las claves válidas, su tipo de dato (numérico, texto, fecha, booleano o lista de opciones), su unidad, su obligatoriedad y el orden en que se presentan se definen en el catálogo \texttt{field\_definitions}. La interfaz construye los formularios de carga a partir de este catálogo, por lo que incorporar una variable al protocolo se resuelve desde el panel de administración, sin modificar el esquema de la base ni distribuir una nueva versión de la aplicación.
 
-\paragraph{Trazabilidad de la calibración.} Dado que la constante de calibración del equipo se corrigió a lo largo del proyecto, cada sesión registra con qué calibración fue medida. El catálogo \texttt{calibrations} guarda, para cada una, la constante $K_{CAL}$, la tensión del detector $V_{det}$, la corriente de excitación, la ganancia del receptor, el método con que se obtuvo y su fecha de vigencia, y señala una única calibración como referencia. Al iniciar la medición, el equipo informa la $K_{CAL}$ con la que opera; al guardar la sesión, un disparador (\textit{trigger}) de la base la busca en el catálogo y asocia la sesión a la calibración correspondiente. Si no se encuentra coincidencia, se asigna la calibración de referencia y la sesión queda marcada como no confirmada. Como una misma configuración del firmware puede corresponder a una placa cuya calibración medida es otra, se registran por separado la calibración del firmware (\texttt{calibration\_id}), la de la placa (\texttt{calibration\_hw\_id}) y la escala en la que están expresados los valores almacenados (\texttt{calibration\_shown}). 
+\paragraph{Trazabilidad de la calibración.} Dado que la constante de calibración del equipo se corrigió a lo largo del proyecto, cada sesión registra con qué calibración fue medida. El catálogo \texttt{calibrations} guarda, para cada una, la constante $K_{CAL}$, la tensión del detector $V_{det}$, la corriente de excitación, la ganancia del receptor, el método con que se obtuvo y su fecha de vigencia, y señala una única calibración como referencia. Al iniciar la medición, el equipo informa la $K_{CAL}$ con la que opera; al guardar la sesión, un disparador (\textit{trigger}) de la base la busca en el catálogo y asocia la sesión a la calibración correspondiente. Si no se encuentra coincidencia, se asigna la calibración de referencia y la sesión queda marcada como no confirmada. Como una misma configuración del \textit{firmware} puede corresponder a una placa cuya calibración medida es otra, se registran por separado la calibración del \textit{firmware} (\texttt{calibration\_id}), la de la placa (\texttt{calibration\_hw\_id}) y la escala en la que están expresados los valores almacenados (\texttt{calibration\_shown}). 
 
 Los valores originales se conservan sin modificar en columnas con sufijo \texttt{\_raw}. Si una calibración se corrige, los datos se reescalan siempre a partir del valor original, por lo que la operación puede repetirse o revertirse sin pérdida de información. Siendo $Z = 2\,(V_{ADC} + V_{det})/K_{CAL}$, una impedancia $Z_a$ obtenida con la calibración $a$ se expresa en la calibración $b$ como
 \begin{equation}
@@ -1166,6 +1480,14 @@ altura del punto medio entre el ombligo y la sínfisis del pubis, en forma simé
 línea media. Siguiendo la configuración tetrapolar, los electrodos de inyección de corriente
 (I$+$ e I$-$) se ubicaron en los extremos y los de medición de tensión (V$+$ y V$-$) entre ellos,
 como se muestra en la Figura~\ref{fig:electrodos_posicion}.
+
+La configuración propuesta por Li et al. ubica los electrodos de medición sobre los laterales del
+abdomen, por lo que la distancia entre ellos depende de la contextura de cada sujeto
+\cite{li2019electrode}. Dado que la impedancia medida depende de la geometría del arreglo, en este
+trabajo se optó por una separación fija entre electrodos, empleando referencias anatómicas únicamente
+para definir la altura y el centrado del arreglo. De este modo, la geometría de medición se mantuvo
+constante entre participantes y sesiones, lo que facilita la comparación de los registros y permite
+que el propio participante coloque los electrodos de forma reproducible.
 
 \begin{figure}[htbp]
     \centering
@@ -1593,6 +1915,7 @@ equivalente de aproximadamente 140~$\Omega$, que se encuentra dentro del interva
 equipo y lejos del límite de saturación.
 
 \subsection{Comparación con el prototipo anterior}
+\label{sec:comparacion_prototipo}
 
 La placa actual se diseñó a partir del prototipo desarrollado previamente \cite{informe_grupo2_2025}.
 Las ganancias de ambas cadenas de acondicionamiento no son directamente comparables, ya que
