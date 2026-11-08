@@ -960,7 +960,7 @@ Figura~\ref{fig:ina_estructura}.
 
 En este diseño no se coloca una resistencia externa de ganancia, por lo que se adopta el valor mínimo
 de 5. Esta elección permite conservar un mayor ancho de banda que el disponible con ganancias más
-elevadas y distribuir la amplificación restante entre las etapas de acondicionamiento. Para esta
+elevadas y distribuir la amplifcación restante entre las etapas de acondicionamiento. Para esta
 ganancia, el ancho de banda típico considerado es del orden de 100~kHz, por encima de la frecuencia
 de excitación de 50~kHz, aunque su respuesta no es completamente plana a esa frecuencia
 \cite{ti_ina122}. Esta respuesta se ilustra en la Figura~\ref{fig:respuesta_frecuencia_ina122}.
@@ -1328,13 +1328,6 @@ Las primeras cinco muestras de cada medición se descartan como período de esta
 el fin de que el transitorio de arranque no contamine el valor basal de referencia $Z_0$, que se fija con
 la primera muestra válida obtenida a continuación.
 
-Con la frecuencia de adquisición indicada, cada bloque de 192 lecturas genera un nuevo valor
-aproximadamente cada 274~ms. Esto permite actualizar la serie de impedancia con mayor frecuencia
-que el promedio de diez muestras a 1~Hz documentado anteriormente, aunque las ventanas móviles
-introducen suavizado y retardo. La frecuencia de actualización no equivale, por tanto, al tiempo
-de respuesta ante un cambio. La comparación describe modificaciones del método de procesamiento;
-cuantificar su efecto sobre el ruido o los artefactos requiere evaluar ambos métodos sobre señales
-comparables.
 
 \subsubsection{Comunicación inalámbrica y protocolo de control}
 
