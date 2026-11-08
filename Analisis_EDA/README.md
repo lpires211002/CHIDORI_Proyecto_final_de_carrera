@@ -157,14 +157,15 @@ Todos los umbrales están en `config.py`.
 ## Notas técnicas
 
 - `fecha` es cuándo se **guardó** la sesión (`created_at`), no cuándo empezó.
-- Escala: todas las sesiones se midieron con la placa 1 y la base las lleva a
-  la escala de la placa 3.1 (`calibracion.sql` rev 6, cal 6). Pero el 27/09 a
-  esa placa se le cambió R9 (2,2k → 1,2k): la ganancia casi se duplicó y la
-  rev 6 no lo distingue. En los datos, el mismo sujeto da Z basal ~1,6× mayor
-  desde esa fecha. Por eso `config_r9` separa las dos configuraciones, y la
-  covariable Z basal (`z0_ohm_r9_1k2`) usa solo las sesiones desde el 27/09.
-  La caída % no se afecta. Columna `placa_fisica`: `board_id` de la sesión si
-  está cargado; si no, `placa_1`.
+- Escala (`config.py`, `CALIBRACION_ANALISIS`). Por defecto `cargas`: la Z
+  guardada se lleva a Vadc con las constantes de su calibración y se vuelve a
+  Z con la recta de banco de la placa 3.1 (7 resistencias de 23 a 220 Ω:
+  Vadc = 7,14 mV/Ω · R − 47 mV, R² = 0,9988). Las sesiones de la placa 1
+  anteriores al 27/09 (R9 2,2k) se multiplican además por 8,15/4,4. Con eso,
+  el mismo sujeto da el mismo Z basal con las tres configuraciones (ver
+  `resumen.md`). `caida_pct_base` es la caída con la Z de la base (cal 6),
+  para comparar. `config_hw`: `placa1_R9_2k2`, `placa1_R9_1k2` o `placa3.1`
+  (firmware rev 6).
 - Los eventos llevan reloj de pared y las muestras el reloj del equipo. El
   desfase es de ~1 s, irrelevante a esta escala. La Z de cada evento se
   recalcula desde la serie: no se usa `session_events.impedance`, que es la

@@ -1,6 +1,11 @@
-# Datos de pacientes y salidas derivadas: no se suben
+# Datos de pacientes y tablas derivadas: no se suben.
+# Las figuras y el resumen sí, para que el equipo los vea en el repo
+# (solo llevan el código P-00X, nunca nombre, notas ni datos de la ficha crudos).
 datos/
-salidas/
+salidas/*
+!salidas/figuras/
+!salidas/resumen.md
+salidas/figuras/**/* copia*
 demo/datos/
 demo/salidas/
 demo/etiquetas_manuales.csv

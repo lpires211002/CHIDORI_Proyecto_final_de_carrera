@@ -47,13 +47,14 @@ COMA = FuncFormatter(lambda v, _: f"{v:g}".replace(".", ","))
 
 
 def etiqueta_placa(x):
-    """Placa física y configuración, no la etiqueta de la calibración (que dice
-    "Placa 3.1" porque esa es la escala, no la placa con la que se midió)."""
-    placa = x.get("placa_fisica") if isinstance(x.get("placa_fisica"), str) else ""
-    r9 = {"R9_2k2": "R9 2,2k", "R9_1k2": "R9 1,2k"}.get(x.get("config_r9"), "")
-    cal = x.get("cal_mostrada")
-    escala = f"escala cal {int(cal)}" if pd.notna(cal) else ""
-    return " · ".join(p for p in (placa.replace("_", " "), r9, escala) if p)
+    """Placa física, configuración y escala de Z (no la etiqueta de la calibración
+    de la base, que dice "Placa 3.1" porque esa es la escala)."""
+    hw = {"placa1_R9_2k2": "placa 1 · R9 2,2k", "placa1_R9_1k2": "placa 1 · R9 1,2k",
+          "placa3.1": "placa 3.1"}.get(x.get("config_hw"), "")
+    if not hw and isinstance(x.get("placa_fisica"), str):
+        hw = x["placa_fisica"].replace("_", " ")
+    escala = {"cargas": "Z por cargas", "base": "Z de la base"}.get(x.get("escala_z"), "")
+    return " · ".join(p for p in (hw, escala) if p)
 
 
 def coma(x, d=1):
@@ -192,7 +193,8 @@ def curvas_por_sujeto(ap):
             y = 100 * (s["tendencia_ohm"] / x["z0_ohm"] - 1)
             ax.plot(tm, y, color=COL["s1"], lw=1.2, alpha=0.85)
             ax.plot(tm.iat[-1], -x["caida_pct"], "o", ms=4, color=COL["s1"], mec="white", mew=1)
-            ax.text(tm.iat[-1], -x["caida_pct"], f" s{x['nro_sesion']}", fontsize=7, color=COL["texto2"], va="center")
+            ax.text(tm.iat[-1], -x["caida_pct"], f" s{x['nro_sesion'] if pd.notna(x['nro_sesion']) else '?'}",
+                    fontsize=7, color=COL["texto2"], va="center")
         ax.axhline(0, color=COL["texto2"], lw=0.7)
         ax.set_title(f"{p} · {len(g)} {'sesión' if len(g) == 1 else 'sesiones'}")
         ejes_coma(ax)
@@ -335,9 +337,12 @@ def main():
             s = serie(x["session_id"])
             if s is None:
                 continue
-            nombre = (f"sesion_{x['paciente']}_s{int(x['nro_sesion']):02d}.png"
-                      if isinstance(x["paciente"], str) and pd.notna(x["nro_sesion"])
-                      else f"sesion_sinpaciente_{x['session_id'][:8]}.png")
+            if isinstance(x["paciente"], str) and pd.notna(x["nro_sesion"]):
+                nombre = f"sesion_{x['paciente']}_s{int(x['nro_sesion']):02d}.png"
+            elif isinstance(x["paciente"], str):      # reasignada a un paciente, sin número
+                nombre = f"sesion_{x['paciente']}_sin_nro_{x['session_id'][:8]}.png"
+            else:
+                nombre = f"sesion_sinpaciente_{x['session_id'][:8]}.png"
             figura_sesion(x, s, ev[ev["session_id"] == x["session_id"]], C.SALIDAS / "figuras" / "sesiones" / nombre)
     curvas_por_sujeto(ap)
     caida_por_sujeto(ap)

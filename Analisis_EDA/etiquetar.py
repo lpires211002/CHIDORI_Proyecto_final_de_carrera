@@ -213,6 +213,28 @@ def reescalar(med, row, cal):
     return med, f"{a}->{b}"
 
 
+def recalibrar_cargas(med, row, cal):
+    """Lleva la Z guardada (escala de su calibración, hoy la cal 6) a la recta
+    de banco por cargas. Afín por sesión: Z_c = α·Z + β. Ver config."""
+    if C.CALIBRACION_ANALISIS != "cargas" or med is None:
+        return med, None
+    cm = row.get("cal_mostrada")
+    if vacio(cm):                 # sin reescalar en la base: está en la escala del firmware
+        cm = row.get("cal_firmware")
+    if vacio(cm) or int(cm) not in cal.index:
+        return med, None
+    k, vd = float(cal.loc[int(cm), "k_cal"]), float(cal.loc[int(cm), "v_detector"])
+    m, b = C.CARGAS_PENDIENTE_V_OHM, C.CARGAS_ORDENADA_V
+    f = row.get("fecha")
+    corte = pd.Timestamp(C.FECHA_CAMBIO_R9, tz="America/Argentina/Buenos_Aires")
+    g = C.GANANCIA_R9_1K2_SOBRE_2K2 if (pd.notna(f) and f < corte) else 1.0
+    alfa = g * k / (2 * m)
+    beta = g * (-b - vd) / m
+    med = med.copy()
+    med["impedance"] = alfa * med["impedance"] + beta
+    return med, {"alfa": alfa, "beta": beta, "g": g}
+
+
 def sincronizar_manuales(ses):
     """Crea o actualiza etiquetas_manuales.csv sin pisar lo que cargaste."""
     base = ses[["session_id", "paciente", "nro_sesion", "fecha"]].copy()
@@ -384,6 +406,12 @@ def procesar(row, med, ev_s, man, cal):
         m_ = np.isfinite(vv) & ok
         frac_rec = float(np.mean(vv[m_] >= C.VADC_TECHO_V - 0.02)) if m_.any() else np.nan
         r["recorte_fuente"] = "voltage_v"
+    elif np.isfinite(row.get("_cargas_g", np.nan)):
+        g_ = row["_cargas_g"]
+        zmax = g_ * (C.VADC_TECHO_V - C.CARGAS_ORDENADA_V) / C.CARGAS_PENDIENTE_V_OHM
+        zmin = g_ * (-C.CARGAS_ORDENADA_V) / C.CARGAS_PENDIENTE_V_OHM
+        frac_rec = float(np.mean((z[ok] >= 0.98 * zmax) | (z[ok] <= 1.02 * zmin))) if ok.any() else np.nan
+        r["recorte_fuente"] = "rango_cargas"
     elif np.isfinite(k_m):
         zmax, zmin = 2 * (C.VADC_TECHO_V + vd_m) / k_m, 2 * vd_m / k_m
         frac_rec = float(np.mean((z[ok] >= 0.98 * zmax) | (z[ok] <= 1.02 * zmin))) if ok.any() else np.nan
@@ -540,6 +568,11 @@ def resumen(df, tomas):
           f"{df['paciente'].nunique()} sujetos · {int(df['n_muestras_bajadas'].fillna(0).sum())} muestras", "",
           f"**Aptas para el EDA: {len(ap)} sesiones de {ap['paciente'].nunique()} sujetos** "
           f"(abdomen; los controles en otro sitio van aparte).", ""]
+    if C.CALIBRACION_ANALISIS == "cargas" and "caida_pct_base" in ap:
+        L += [f"**Escala: calibración por cargas** (recta de banco {coma(1000 * C.CARGAS_PENDIENTE_V_OHM, 2)} mV/Ω, "
+              f"{coma(1000 * C.CARGAS_ORDENADA_V, 0)} mV; antes del 27/09 × {coma(C.GANANCIA_R9_1K2_SOBRE_2K2, 2)} por R9). "
+              f"Caída mediana de las aptas: {coma(ap['caida_pct'].median(), 2)} % con esta escala, "
+              f"{coma(ap['caida_pct_base'].median(), 2)} % con la Z de la base (cal 6).", ""]
 
     L += ["## Motivos (una sesión puede tener varios)", "", "| motivo | excluye | sesiones |", "|---|---|---|"]
     cnt = {}
@@ -579,7 +612,7 @@ def resumen(df, tomas):
           "| sujeto | s | fecha | editada | fin por | basal→ganas (min) | agua (ml) | Z0 (Ω) | asent. % | caída % | desde inicio % | dB | %/h | artef. |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for _, x in ap.sort_values(["paciente", "nro_sesion"]).iterrows():
-        L.append(f"| {x['paciente']} | {x['nro_sesion']} | {x['fecha']:%d/%m} | {x['editada'] if isinstance(x.get('editada'), str) else 'no'} | "
+        L.append(f"| {x['paciente']} | {x['nro_sesion'] if pd.notna(x['nro_sesion']) else '—'} | {x['fecha']:%d/%m} | {x['editada'] if isinstance(x.get('editada'), str) else 'no'} | "
                  f"{x['fin_por']} | {coma(x['duracion_llenado_min'], 0)} | {coma(x['agua_eventos_ml'], 0)} | "
                  f"{coma(x['z0_ohm'], 1)} | {coma(x['asentamiento_pct'], 1)} | {coma(x['caida_pct'], 1)} | {coma(x['caida_pct_desde_inicio'], 1)} | "
                  f"{coma(x['caida_db'], 2)} | {coma(x['pendiente_pct_h'], 2)} | {coma(100 * x['fraccion_artefacto'], 0)} % |")
@@ -597,18 +630,28 @@ def resumen(df, tomas):
               "", "Con la basal en el primer minuto, el asentamiento se cuenta como llenado. Para que no pase: "
               "esperar la estabilización antes de tocar Iniciar (o dejar que el análisis tome la basal más tarde, como acá).", ""]
 
-    if "config_r9" in ap:
-        g = ap.dropna(subset=["z0_ohm"]).groupby(["paciente", "config_r9"])["z0_ohm"].median().unstack()
-        if {"R9_2k2", "R9_1k2"} <= set(g.columns):
-            g = g.dropna()
-            if len(g):
-                L += [f"## Z basal antes y después del {C.FECHA_CAMBIO_R9[8:]}/{C.FECHA_CAMBIO_R9[5:7]} (cambio de R9 en la placa 1)", "",
-                      "| sujeto | Z0 con R9 2,2k (Ω) | Z0 con R9 1,2k (Ω) | cociente |", "|---|---|---|---|"]
-                for p_, x in g.iterrows():
-                    L.append(f"| {p_} | {coma(x['R9_2k2'], 1)} | {coma(x['R9_1k2'], 1)} | {coma(x['R9_1k2'] / x['R9_2k2'], 2)} |")
-                L += ["", "La rev 6 usa la misma K antes y después del cambio de R9. Si la ganancia se hubiera "
-                      "tenido en cuenta, el cociente debería dar ~1. La caída % no se ve afectada (es un cociente "
-                      "de amplitudes); el valor absoluto de Z, sí.", ""]
+    if "config_hw" in df:
+        # Z basal por configuración de hardware. Entra toda sesión con una basal
+        # válida (no hace falta que sea apta: acá se compara la escala, no la caída).
+        no_validas = ("adc_lineal", "posible_prueba", "duplicada", "sin_basal", "sin_mediciones", "sin_paciente")
+        ok_z = df["motivos"].fillna("").apply(lambda m: not any(x in m.split(";") for x in no_validas))
+        g = df[ok_z].dropna(subset=["z0_ohm"]).groupby(["paciente", "config_hw"])["z0_ohm"].median().unstack()
+        cols = [c for c in ("placa1_R9_2k2", "placa1_R9_1k2", "placa3.1") if c in g.columns]
+        g = g[cols][g[cols].notna().sum(axis=1) >= 2] if len(cols) >= 2 else g.iloc[0:0]
+        if len(g):
+            nombres = {"placa1_R9_2k2": "placa 1 · R9 2,2k", "placa1_R9_1k2": "placa 1 · R9 1,2k", "placa3.1": "placa 3.1"}
+            L += ["## Z basal del mismo sujeto con cada configuración de hardware", "",
+                  "Mediana de Z0 (Ω) de las sesiones con basal válida (aptas o no). Si la escala es "
+                  "consistente, cada fila debería dar parecido en todas las columnas.", "",
+                  "| sujeto | " + " | ".join(nombres[c] for c in cols) + " |", "|---" * (len(cols) + 1) + "|"]
+            for p_, x in g.iterrows():
+                L.append(f"| {p_} | " + " | ".join(coma(x[c], 1) for c in cols) + " |")
+            if C.CALIBRACION_ANALISIS == "cargas":
+                L += ["", "Escala: recta de banco por cargas; la placa 1 con R9 2,2k además × "
+                      f"{coma(C.GANANCIA_R9_1K2_SOBRE_2K2, 2)}. Con la Z de la base (cal 6) la columna de R9 2,2k "
+                      "daba 1,6–1,7 veces menos.", ""]
+            else:
+                L += ["", "Escala de la base (cal 6): no corrige el cambio de R9 del 27/09.", ""]
 
     L += ["## ¿Cae siempre? (prueba de signos)", ""]
     c = ap["caida_pct"].dropna()
@@ -658,7 +701,10 @@ def resumen(df, tomas):
           f"- Variables de sesión: n = {len(ap)} sesiones, pero agrupadas por sujeto. "
           f"Umbral aproximado: {coma(r_critico(len(ap)), 2)} (optimista).",
           "- Con 10 covariables probadas, la chance de al menos un falso positivo es ~40 %.",
-          "- La caída % no depende de K_CAL pero sí de V_det: caída = ΔVadc / (Vadc0 + V_det).", ""]
+          ("- La caída % depende de la ordenada de la recta de calibración: caída = ΔVadc / (Vadc0 + 0,047) "
+           "con la calibración por cargas (con la cal 6 era ΔVadc / (Vadc0 + 0,260))."
+           if C.CALIBRACION_ANALISIS == "cargas" else
+           "- La caída % no depende de K_CAL pero sí de V_det: caída = ΔVadc / (Vadc0 + V_det)."), ""]
     (C.SALIDAS / "resumen.md").write_text("\n".join(L), encoding="utf-8")
 
 
@@ -726,8 +772,19 @@ def main():
         if reesc:
             row = row.copy()
             row["cal_mostrada"] = row["cal_placa"]
+        med, cargas = recalibrar_cargas(med, row, cal)
+        if cargas:
+            row = row.copy()
+            row["_cargas_g"] = cargas["g"]
         r, serie, tomas, curvas = procesar(row, med, ev_s, mrow, cal)
         r["reescalada"] = reesc
+        r["escala_z"] = "cargas" if cargas else "base"
+        if cargas:
+            a_, b_ = cargas["alfa"], cargas["beta"]
+            r["cargas_alfa"], r["cargas_beta"], r["ganancia_r9"] = a_, b_, cargas["g"]
+            # la misma caída con la Z de la base (cal 6), para comparar
+            z0b, zfb = (r.get("z0_ohm", np.nan) - b_) / a_, (r.get("zf_ohm", np.nan) - b_) / a_
+            r["caida_pct_base"] = 100 * (z0b - zfb) / z0b if np.isfinite(z0b) and z0b else np.nan
         r["editada"] = editada
         if ed is not None:
             r["edicion_version"] = ed["version"]
@@ -796,29 +853,35 @@ def main():
         for k in [k for k in r if k.startswith("_")]:
             r.pop(k)
     feat = pd.DataFrame(filas)
-    base_cols = ["session_id", "paciente", "nro_sesion", "fecha", "placa", "cal_placa", "cal_mostrada",
+    base_cols = ["session_id", "paciente", "nro_sesion", "fecha", "placa", "cal_firmware", "cal_placa", "cal_mostrada",
                  "cal_confirmada", "adc_lineal_asumido", "notas", "microcortes", "segundos_perdidos",
                  "desconexiones", "z_inicial", "z_final"]
     extra = [c for c in ses.columns if c.startswith(("pac_", "ses_"))]
     df = ses[[c for c in base_cols if c in ses.columns] + extra].merge(feat, on="session_id", how="left")
     # Placa física: la cargada en la sesión (`board_id`) o la que vale para todas.
     placa_db = df["ses_board_id"] if "ses_board_id" in df else pd.Series(np.nan, index=df.index)
+    # Sin board_id: firmware rev 6 (placa 3.1) → se midió con una 3.1; si no, la placa 1.
+    por_firmware = np.where(pd.to_numeric(df["cal_firmware"], errors="coerce") == C.CAL_PLACA_3_1,
+                            "placa_3.1", C.PLACA_FISICA_POR_DEFECTO)
     df["placa_fisica"] = placa_db.where(placa_db.notna() & (placa_db.astype(str).str.strip() != ""),
-                                        C.PLACA_FISICA_POR_DEFECTO)
+                                        por_firmware)
     corte_r9 = pd.Timestamp(C.FECHA_CAMBIO_R9, tz="America/Argentina/Buenos_Aires")
     df["config_r9"] = np.where(df["fecha"] < corte_r9, "R9_2k2", "R9_1k2")
     df["z0_ohm_r9_1k2"] = df["z0_ohm"].where(df["config_r9"] == "R9_1k2")
+    df["config_hw"] = np.where(df["placa_fisica"] == "placa_3.1", "placa3.1",
+                               np.where(df["config_r9"] == "R9_2k2", "placa1_R9_2k2", "placa1_R9_1k2"))
 
     orden = (["session_id", "paciente", "nro_sesion", "fecha", "apta", "motivos", "editada", "apta_app",
               "nota_app", "protocolo", "sitio",
               "fin_sesion", "fin_por", "etiqueta_manual", "duplicada_de", "caida_pct", "caida_db",
-              "caida_pct_desde_inicio", "asentamiento_pct", "z_inicio_ohm",
+              "caida_pct_desde_inicio", "caida_pct_base", "asentamiento_pct", "z_inicio_ohm",
+              "escala_z", "cargas_alfa", "cargas_beta", "ganancia_r9",
               "pendiente_pct_h", "pendiente_ohm_h", "z0_ohm", "zf_ohm", "delta_z_ohm",
               "duracion_llenado_min", "duracion_min", "t_fsf_min", "caida_pct_fsf", "t_fdv_min", "caida_pct_fdv",
               "n_tomas", "agua_eventos_ml", "agua_ml_h", "t_primera_toma_min", "n_marcas",
               "edad", "sexo", "altura_m", "peso_kg", "imc", "circ_iliaca_cm", "temp_amb_c", "humedad_pct",
               "agua_declarada_ml", "ingesta_24h_txt", "covariables_de_legacy",
-              "placa", "placa_fisica", "config_r9", "z0_ohm_r9_1k2", "reescalada", "cal_placa", "cal_mostrada", "cal_confirmada", "k_cal_placa", "v_det_placa",
+              "placa", "placa_fisica", "config_r9", "config_hw", "z0_ohm_r9_1k2", "reescalada", "cal_placa", "cal_mostrada", "cal_confirmada", "k_cal_placa", "v_det_placa",
               "adc_lineal_asumido", "ruido_sigma_ohm", "umbral_artefacto_ohm", "fraccion_artefacto", "escalones",
               "fraccion_recorte", "recorte_fuente", "integridad", "microcortes", "segundos_perdidos",
               "desconexiones", "fs_hz", "n_muestras_bajadas", "t_basal_s", "t_fin_s", "cola_recortada_s",

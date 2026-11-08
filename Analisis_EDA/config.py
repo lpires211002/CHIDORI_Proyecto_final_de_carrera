@@ -30,12 +30,32 @@ ENV_APP = AQUI.parent / "Programacion_UI_Micro" / "UI_REACT" / ".env.local"
 # lleva a la escala de la placa 3.1 (calibracion.sql rev 6, cal 6: K 0,0180 ·
 # Vd 0,260). Si se carga `board_id` en la sesión, manda ese.
 PLACA_FISICA_POR_DEFECTO = "placa_1"
+CAL_PLACA_3_1 = 6                 # sesiones con firmware rev 6: medidas con una placa 3.1 (desde el 26/10)
 # Pero esa placa cambió el 27/09: R9 de 2,2k a 1,2k (U4D ~×4,4 → ×8,15). La rev 6
 # usa la misma K para antes y después, y en los datos se ve: el mismo sujeto da
 # Z basal ~1,6× mayor desde el 27/09 (P-004: 81–95 Ω → 147–153 Ω; P-002 y P-003
 # igual). La caída % no se entera (es un cociente de amplitudes), pero el valor
 # absoluto de Z solo se compara dentro de una misma configuración.
 FECHA_CAMBIO_R9 = "2026-09-27"    # P-004 s9 (27/09 22:40) ya es con 1,2k
+
+# ── Calibración que usa el análisis ──────────────────────────────────────
+# "cargas": la recta medida en banco con 7 resistencias de 23 a 220 Ω sobre la
+#   placa 3.1 (tesis, sección «Respuesta del equipo ante distintas cargas»):
+#   Vadc = 7,14 mV/Ω · R − 47 mV, R² = 0,9988. Se invierte la Z guardada a Vadc
+#   con las constantes de su calibración y se vuelve a Z con esta recta.
+#   La cal 6 (K 0,018 · Vd 0,260) sale de UN punto (120 Ω) y supone un déficit
+#   del detector constante; la recta muestra que no lo es (0,10 V a 23 Ω, 0,38 V
+#   a 220 Ω). La pendiente difiere ~21 % y la caída % cambia: con la cal 6 es
+#   ΔVadc/(Vadc0 + 0,260), con la recta ΔVadc/(Vadc0 + 0,047).
+#   Las sesiones anteriores al cambio de R9 se multiplican por la relación de
+#   ganancias de U4D (8,15 medido con 1,2k / 4,4 medido con 2,2k).
+#   Supuesto: el detector de la placa 1 se comporta como el de la 3.1 (no se
+#   tocó) y su ganancia con R9 1,2k (~55) es la de la 3.1 (53,2): ±4 %.
+# "base": la Z tal como está en la base (cal 6).
+CALIBRACION_ANALISIS = "cargas"
+CARGAS_PENDIENTE_V_OHM = 0.00714
+CARGAS_ORDENADA_V = -0.047
+GANANCIA_R9_1K2_SOBRE_2K2 = 8.15 / 4.4
 PROTOCOLO_POR_DEFECTO = "libre"   # se puede pisar por sesión en etiquetas_manuales.csv
 # Sitio de los electrodos: campo `electrode_site` de la sesión (si existe) o
 # columna `sitio` del CSV manual. Lo que no es abdomen va como control.
@@ -145,9 +165,10 @@ COVARIABLES_GRAFICO = [
     ("temp_amb_c", "Temp. ambiente (°C)"),
     ("humedad_pct", "Humedad ambiente (%)"),
     ("asentamiento_pct", "Asentamiento 0–10 min (%)"),
-    # Z basal: solo las sesiones con R9 = 1,2k (desde el 27/09), las únicas
-    # comparables entre sí en valor absoluto (ver FECHA_CAMBIO_R9).
-    ("z0_ohm_r9_1k2", "Z basal (Ω) · solo desde el 27/09"),
+    # Z basal: con la calibración por cargas (que corrige el cambio de R9) se
+    # comparan todas; con la de la base, solo las sesiones desde el 27/09.
+    (("z0_ohm", "Z basal (Ω · calibración por cargas)") if CALIBRACION_ANALISIS == "cargas"
+     else ("z0_ohm_r9_1k2", "Z basal (Ω) · solo desde el 27/09")),
     # Campos nuevos propuestos (aparecen solos cuando se carguen)
     ("ses_minutes_since_void", "Min desde la micción previa"),
     ("ses_fluid_24h_ml", "Líquido últimas 24 h (ml)"),
