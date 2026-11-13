@@ -13,6 +13,7 @@
 \usepackage{parskip}
 \usepackage{csquotes}
 \usepackage[backend=bibtex,style=ieee]{biblatex}
+\usepackage{float}
 
 \addbibresource{referencias.bib}
 
@@ -1355,7 +1356,7 @@ evitando que sesiones de navegador inactivas degraden la transmisión.
 
 \subsubsection{Máquina de estados y control físico}
 
-En la figura~\ref{fig:M_estados} se puede visualizar la máquina de estados ideada para este dispositivo.
+En la Figura~\ref{fig:M_estados} se puede visualizar la máquina de estados ideada para este dispositivo.
 El \textit{firmware} implementa una máquina de estados con los modos \textit{Inactivo}, \textit{Midiendo}
 y \textit{Alarma}; la evaluación de los umbrales de alarma se realiza en la interfaz y no en el microcontrolador, que actúa
 como un sensor de propósito simple. El equipo puede iniciarse y detenerse tanto desde la interfaz como
@@ -1363,15 +1364,41 @@ mediante un botón físico. Para evitar que un roce accidental o una vibración 
 medición prolongada, se estableció una asimetría deliberada en el antirrebote: iniciar una medición
 requiere sostener el botón durante 80~ms, mientras que detenerla requiere un sostenido de 1,5~s,
 confirmado con una señal sonora. Cada inicio de medición reinicializa el generador de señales como medida
-defensiva frente a eventuales fallos de arranque de la señal sinusoidal. 
-\begin{figure}[htbp]
+defensiva frente a eventuales fallos de arranque de la señal sinusoidal.
+
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.92\textwidth]{maquina_de_estados.drawio.png}
-    \caption{Esquema de la máquina de estados implementada. Resume visualmente los estados que tiene el dispositivo
-    y las condiciones para pasar de un estado al otro.}
+    \caption{Esquema de la máquina de estados implementada. Resume visualmente los estados del dispositivo
+    y las condiciones para pasar de uno a otro.}
     \label{fig:M_estados}
 \end{figure}
 
+\subsubsection{Interfaz física}
+
+Además de todo el desarrollo electrónico y técnico del prototipo, es esencial considerar que este
+dispositivo debe ser utilizable en el día a día de una persona de edad avanzada. Por ello, es
+fundamental diseñar una interfaz física que permita no solo portarlo, sino también protegerlo
+de caídas y golpes, y que resulte amigable para el usuario final. Por ejemplo, es probable que
+el usuario no confíe en un producto que es una placa de cobre con cables expuestos; en cambio, una
+carcasa que transmite modernidad y simplicidad le genera tranquilidad y confianza.
+Al tratarse de un producto orientado a entornos hogareños y no hospitalarios, es necesario
+lograr la adherencia del usuario.
+
+Por esta razón, se diseñó en Autodesk Fusion 360 la carcasa mostrada en la Figura~\ref{fig:Carcasa3d}. En su
+interior contiene la placa, fijada mediante insertos 3D, y la fuente de alimentación
+utilizada. Posee conectores magnéticos entre base y tapa que permiten un sellado firme y, a la vez,
+una apertura sencilla, necesaria porque se trata de un dispositivo experimental. Además,
+la carcasa tiene salidas para los cables de inyección y adquisición de la señal.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figuras/Carcasa3d.png}
+    \caption{Diseño en Autodesk Fusion 360 de la carcasa 3D. Se buscan bordes redondeados para evitar cortes o
+    incomodidades en el usuario. Además, se optó por un diseño blanco y negro mate para dar sensación
+    de calma.}
+    \label{fig:Carcasa3d}
+\end{figure}
 \subsection{Interfaz de usuario, registro de sesiones y base de datos}
 
 \subsubsection{Interfaz de usuario}
