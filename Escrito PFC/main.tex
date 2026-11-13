@@ -473,12 +473,12 @@ donde $Z_{c1}$ y $Z_{c2}$ son las impedancias de contacto. Como estas pueden sup
 variar durante la medición, sus cambios se confunden con los del tejido. En la configuración
 tetrapolar, en cambio, los electrodos de tensión se conectan a una entrada de impedancia muy alta,
 por lo que la corriente que circula a través de ellos es despreciable y casi no se produce caída de
-tensión en sus interfaces. La impedancia se estima entonces como
+tensión en sus interfaces. La impedancia se estima entonces como:
 \begin{equation}
     Z_{T}=\frac{V_{\mathrm{med}}}{I_{\mathrm{iny}}}.
 \end{equation}
 
-De esta manera, la impedancia de contacto electrodo--piel, generalmente mayor que la del tejido, tiene
+Donde $V_{\mathrm{med}}$ es la tensión medida y $I_{\mathrm{iny}}$ la corriente inyectada al paciente. De esta manera, la impedancia de contacto electrodo--piel, generalmente mayor que la del tejido, tiene
 un efecto mucho menor sobre la tensión registrada y se obtiene una mejor relación señal--ruido que con
 las configuraciones bipolar y tripolar. Esta ventaja justifica la elección del método tetrapolar para
 el monitoreo vesical. 
@@ -510,14 +510,7 @@ y regresión lineal \cite{noyori2021device}. También se desarrollaron dispositi
 portátiles que emplean algoritmos de aprendizaje profundo para reducir interferencias y artefactos en
 la señal \cite{dheman2023bladder}.
 
-Sin embargo, la medición superficial no registra únicamente la vejiga, sino también la contribución
-eléctrica de la piel, la grasa, los músculos, otros órganos y los fluidos atravesados por la corriente.
-La magnitud observada también depende de la distancia entre electrodos, la antropometría, la postura,
-la respiración, el movimiento, la temperatura, la sudoración y la composición de la orina. En
-consecuencia, una tendencia decreciente es fisiológicamente plausible, pero no basta para asumir una
-conversión universal entre ohms y mililitros. Revisiones recientes coinciden en que la bioimpedancia
-es prometedora para el monitoreo continuo, aunque su robustez fuera de condiciones controladas sigue
-siendo un desafío \cite{li2013monitoring,palla2023review,noyori2022review}.
+
 
 \subsubsection{Posicionamiento de electrodos}
 
@@ -590,22 +583,10 @@ seguridad establecidos por la norma IEC~60601-1 \cite{iec60601}. Los efectos fis
 corriente alterna dependen de su frecuencia. A frecuencias bajas, la corriente puede estimular nervios
 y músculos; por encima de aproximadamente 1~kHz, en cambio, cada semiciclo es demasiado breve para
 despolarizar las membranas excitables, y el umbral de estimulación aumenta de forma aproximadamente
-proporcional a la frecuencia \cite{webster2010medical,grimnes2015bioimpedance}. Por este motivo, a
-50~kHz pueden emplearse corrientes considerablemente mayores que a la frecuencia de la red sin
+proporcional a la frecuencia \cite{webster2010medical,grimnes2015bioimpedance}. La tabla ~\ref{tab:limites_iec} 
+resume los limites de corriente establecidos por la norma para una parte aplicada de tipo BF y muestra que a
+50~kHz pueden emplearse corrientes considerablemente mayores que a 50~Hz sin
 producir efectos fisiológicos.
-
-En los términos de la norma, la corriente de excitación es una corriente auxiliar de paciente: circula
-por el cuerpo entre los elementos de la parte aplicada y no tiene por finalidad producir un efecto
-fisiológico. Sus límites dependen del tipo de parte aplicada. Las partes de tipo BF (\textit{body
-floating}) están en contacto con el paciente y aisladas de tierra, mientras que las de tipo CF
-(\textit{cardiac floating}) admiten además la aplicación cardíaca directa y tienen límites más
-estrictos. Para electrodos colocados sobre la piel del abdomen corresponde considerar los límites de
-tipo BF. La norma fija valores para la condición normal de funcionamiento y para la condición de
-primer defecto, en la que falla uno de los medios de protección. Para corriente alterna, los valores
-de referencia se definen hasta 1~kHz; a frecuencias mayores, la corriente se pondera en frecuencia,
-lo que equivale a multiplicar el límite por la frecuencia expresada en kilohercios, con un máximo de
-10~mA eficaces en cualquier caso \cite{iec60601}. La Tabla~\ref{tab:limites_iec} resume los límites
-resultantes para una parte aplicada de tipo BF.
 
 \begin{table}[htbp]
     \centering
@@ -621,6 +602,19 @@ resultantes para una parte aplicada de tipo BF.
         \hline
     \end{tabular}
 \end{table}
+
+En los términos de la norma, la corriente de excitación es una corriente auxiliar de paciente: circula
+por el cuerpo entre los elementos de la parte aplicada y no tiene por finalidad producir un efecto
+fisiológico. Sus límites dependen del tipo de parte aplicada. Las partes de tipo BF (\textit{body
+floating}) están en contacto con el paciente y aisladas de tierra, mientras que las de tipo CF
+(\textit{cardiac floating}) admiten además la aplicación cardíaca directa y tienen límites más
+estrictos. Para electrodos colocados sobre la piel del abdomen corresponde considerar los límites de
+tipo BF. La norma fija valores para la condición normal de funcionamiento y para la condición de
+primer defecto, en la que falla uno de los medios de protección. Para corriente alterna, los valores
+de referencia se definen hasta 1~kHz; a frecuencias mayores, la corriente se pondera en frecuencia,
+lo que equivale a multiplicar el límite por la frecuencia expresada en kilohercios, con un máximo de
+10~mA eficaces en cualquier caso \cite{iec60601}.
+
 
 A 50~kHz y en condición normal, el límite resulta de 5~mA eficaces, cincuenta veces mayor que a
 frecuencias de hasta 1~kHz. La componente continua, en cambio, se limita a 10~$\mu$A, ya que produce
@@ -674,7 +668,8 @@ período de la excitación (20~$\mu$s), la amplitud de la senoide varía muy len
 sobre el llenado no está en la oscilación de 50~kHz, sino en su envolvente. La señal puede tratarse,
 por lo tanto, como una portadora modulada en amplitud (AM), y demodular consiste en extraer la
 envolvente, es decir, recuperar la variación lenta a partir de la señal de alta frecuencia. Dado que
-esas variaciones son lentas, la información útil ocupa una banda muy angosta alrededor de 50~kHz, lo
+esas variaciones son lentas, la información útil ocupa una banda muy angosta alrededor de la frecuencia
+de la portadora (50~kHz), lo
 que permite filtrar el resto del espectro sin perderla. Las principales estrategias para demodular una
 señal AM son \cite{lathi2009communication}:
 
@@ -693,8 +688,9 @@ señal AM son \cite{lathi2009communication}:
     \cite{li2013monitoring}.
 \end{itemize}
 
-En este trabajo se emplea la detección de pico. Para una señal de amplitud de pico $V_p$, la tensión
-obtenida es aproximadamente
+En este trabajo se emplea la detección de pico. Para una señal de amplitud de pico $V_p$ o amplitud pico a 
+pico $V_{pp}$, utilizando un diodo con tensión de caída en directa $V_F$, da como resultado la tensión detectada
+$V_{det}$:
 \begin{equation}
     V_{\mathrm{det}}\approx V_p-V_F=\frac{V_{\mathrm{pp}}}{2}-V_F,
 \end{equation}
@@ -732,13 +728,19 @@ abordado en este trabajo \cite{informe_grupo2_2025}:
     lineal para obtener la tensión del microcontrolador. A medida que las baterías se descargaban, su
     tensión se acercaba al mínimo requerido por el regulador, lo que se asoció con inconsistencias en
     las mediciones y con interrupciones en el envío de datos.
-    \item \textbf{Filtrado:} el pasabanda estaba formado por dos etapas de primer orden que concentraban
-    una ganancia elevada, y la ganancia real a 50~kHz resultó de solo el 24~\% de la teórica. Además,
+    \item \textbf{Filtrado:} el pasabanda se formaba a partir de dos filtros activos de primer orden 
+    (un pasabajos y un pasaaltos) con una ganancia teórica establecida. Sin embargo, al momento de
+    la implementación de los mismos en el laboratorio se encontro que  
+    la ganancia medida a 50~kHz resultó de solo el 24~\% de la teórica. Además,
     una atenuación fuera de banda de 20~dB por década resulta limitada para un detector de pico, que,
     como se discutió, responde a todo el contenido de la señal y no solo a la componente de 50~kHz.
-    \item \textbf{Implementación:} la placa utilizaba componentes pasantes, no contaba con capacitores
-    de desacople junto a los integrados ni con plano de masa, y el amplificador de instrumentación se
-    montaba en un módulo externo sobre zócalos.
+    \item \textbf{Implementación:} la placa utilizaba componentes pasantes (THT) limitando
+    la posibilidad de reducir el tamaño de la PCB.\@Tampoco contaba con capacitores
+    de desacople junto a los integrados ni con plano de masa afectando negativamente la estabilidad
+    de la señal medida.\@ Además el amplificador de instrumentación utilizado (INA122U) al ser un encapsulado
+    SMD (montaje superficial) tuvo que ser soldado a una PCB complementaria y era insertado en la PCB principal
+    conectandola mediante zócalos, esto provocaba inestabilidad en la señal medida e introducida ruido en el 
+    amplificador de instrumentación que es el primer componente de la etapa de adquisición de la señal.
     \item \textbf{Procesamiento:} el microcontrolador adquiría una muestra por segundo y transmitía el
     promedio de diez muestras, sin un tratamiento específico de valores extremos.
 \end{itemize}
@@ -802,7 +804,7 @@ resultados se transmiten de forma inalámbrica a una interfaz gráfica para su v
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\textwidth]{diagramabloquespfc.drawio.png}
+    \includegraphics[width=\textwidth]{diagramabloquespfc3.png}
     \caption{Diagrama de bloques del sistema de medición de bioimpedancia. El ESP32-C3 configura
     la excitación, digitaliza la señal detectada y transmite los resultados a la interfaz gráfica.}
     \label{fig:diagrama_bloques_sistema}
@@ -817,8 +819,8 @@ adquisición de tensión y control digital.
 
 \subsubsection{Generación de la señal de excitación}
 
-La señal de excitación se generó mediante el generador de onda programable AD9833, configurado y 
-alimentado por el microcontrolador ESP32-C3 SuperMini. El generador se programó para producir una onda 
+La señal de excitación se generó mediante el generador de onda programable AD9833, configurado
+por el microcontrolador ESP32-C3 SuperMini. El generador se programó para producir una onda 
 sinusoidal de 50~kHz y aproximadamente 0,6~V pico a pico.
 
 La salida del AD9833 presentaba una componente continua, por lo que se incorporó una etapa de
@@ -838,8 +840,13 @@ la componente continua sin atenuar de manera significativa la señal sinusoidal 
 \subsubsection{Inyección de corriente}
 
 Para acondicionar la señal obtenida del generador de señales, se utilizó uno de los amplificadores operacionales 
-del integrado TL082 en configuración inversora. Con una resistencia de entrada de 1~k$\Omega$ y una resistencia de
-realimentación de 10~k$\Omega$, se midió a la salida una amplitud de 3,22~V pico a pico.
+del integrado TL082 en configuración inversora. Con una resistencia de entrada $R_i$ de 1~k$\Omega$ y una resistencia de
+realimentación $R_f$ de 4,8~k$\Omega$ , se midió a la salida una amplitud de 3,22~V pico a pico. Recordemos que 
+la ganancia G de un amplifcador en configuración inversor se calcula de la siguiente manera:
+
+\begin{equation}
+    G = \frac{R_f}{R_i}
+\end{equation}
 
 El segundo amplificador del TL082 se utilizó para implementar una
 fuente de corriente Howland. Esta topología se emplea en sistemas de bioimpedancia debido a que puede
@@ -1044,12 +1051,13 @@ al mismo potencial que la entrada no inversora, conectada a masa. Esta condició
 Por lo tanto, desde la salida del capacitor existen dos caminos hacia un potencial de 0~V,
 uno a través de R3 y otro a través de R4. Para calcular la respuesta del pasaaltos, ambas
 resistencias quedan efectivamente en paralelo. Denominando $R_m$ a R3,
-$R_{\mathrm{in}}$ a R4 y $C_a$ al capacitor CHP1, la resistencia equivalente es
+$R_{\mathrm{in}}$ a R4 y $C_a$ al capacitor CHP1, la resistencia equivalente es:
 
 \begin{equation}
     R_p=R_m\parallel R_{\mathrm{in}}
     =\frac{1000\times330}{1000+330}~\Omega\approx248{,}1~\Omega,
 \end{equation}
+La frecuencia de corte equivalente es: 
 \begin{equation}
     f_{\mathrm{HP1}}=\frac{1}{2\pi R_pC_a}
     \approx32{,}1~\mathrm{kHz}.
@@ -1076,7 +1084,7 @@ en frecuencia se utiliza $s=j2\pi f$, donde $f$ es la frecuencia de la señal:
 
 La función de transferencia $H_3(s)$ relaciona la tensión de salida de U4A con la tensión
 de entrada del capacitor CHP1, es decir, con la salida de U5B. Al combinar el acoplamiento
-pasaaltos con la etapa inversora y su realimentación, se obtiene
+pasaaltos con la etapa inversora y su realimentación, se obtiene:
 
 \begin{equation}
     H_3(s)=-\frac{R_f}{R_{\mathrm{in}}}
@@ -1135,7 +1143,8 @@ La Figura~\ref{fig:acq_final} reúne las dos últimas etapas. En el filtro, $R$ 
 
 
 A continuación se dispone un pasabajos pasivo con una resistencia $R$ de 8,2~k$\Omega$ en serie
-y un capacitor $C$ de 270~pF a masa. El quinto operacional se conecta como seguidor después del
+y un capacitor $C$ de 270~pF a masa, este atenua ligeramente la señal antes de llegar 
+al siguiente operacional el cualse conecta como seguidor después del
 filtro para desacoplarlo de la carga del amplificador final. La transferencia ideal de esta sección es
 \begin{equation}
     H_5(s)=\frac{1}{1+sRC},\qquad
@@ -1146,7 +1155,7 @@ A 50~kHz, $|H_5|\approx0{,}821$.
 La sexta y última etapa es un amplificador inversor con una resistencia de entrada R9 de 2~k$\Omega$
 y una resistencia de realimentación R10 de 4,7~k$\Omega$:
 \begin{equation}
-    H_6=-\frac{R_f}{R_{\mathrm{in}}}=-\frac{4{,}7}{2}=-2{,}35.
+    H_6=-\frac{R_9}{R_{\mathrm{10}}}=-\frac{4{,}7}{2}=-2{,}35.
 \end{equation}
 Esta ganancia se seleccionó considerando la amplitud entregada por las etapas de filtrado.
 Con una señal de 260~mV pico a pico a la salida del INA, el modelo ideal predice aproximadamente
@@ -1164,13 +1173,13 @@ Con una señal de 260~mV pico a pico a la salida del INA, el modelo ideal predic
         Segunda & Inversor & 1,5 \\
         Tercera & Acoplamiento cargado y filtro inversor & 1,026 \\
         Cuarta & Pasaaltos activo & 3,374 \\
-        Quinta & Pasabajos y seguidor & 0,821 \\
+        Quinta & Pasabajos pasivo & 0,821 \\
         Sexta & Inversor & 2,35 \\
         \hline
     \end{tabular}
 \end{table}
 
-\paragraph{Ganancia y banda de la cadena.}
+\paragraph{Ganancia y ancho de banda de la cadena.}
 La transferencia posterior al INA es $H_{\mathrm{ac}}(s)=\prod_{i=1}^{6}H_i(s)$.
 Calculando con los valores sin redondear se obtiene
 \begin{equation}
@@ -1198,9 +1207,8 @@ amplificador, antes del detector. La ganancia a 50~kHz es aproximadamente 10,02~
     \label{fig:bode_cadena}
 \end{figure}
 
-Los límites de banda de la cadena se obtienen del producto de las transferencias y no
-coinciden con los cortes de los filtros considerados por separado. Estos cálculos emplean
-los valores nominales de los componentes y operacionales ideales; la respuesta medida
+Los límites de banda de la cadena se obtienen del producto de las transferencias. 
+Estos cálculos empleanlos valores nominales de los componentes y operacionales ideales; la respuesta medida
 del circuito se contrastará con esta referencia en la sección de resultados.
 
 \paragraph{Amplitudes previstas y verificación.}
@@ -1230,7 +1238,7 @@ en la salida del amplificador de instrumentación y las ganancias ideales de cad
 \end{table}
 La salida final prevista de 2,60~V pico a pico corresponde a una amplitud de aproximadamente
 1,30~V de pico para una senoide. La medición con la resistencia de 120~$\Omega$ dio 2,160~V
-pico a pico en el pin 14 del TL084.
+pico a pico como salida del último amplificador operacional.
 
 \paragraph{Detección y salida hacia el conversor.}
 La Figura~\ref{fig:acq_detector} muestra el conector J5 y el circuito detector.
@@ -1238,6 +1246,15 @@ El esquema distingue las conexiones SIN\_BAT54S y CON\_BAT54S. El bloque incluye
 D2 (BAT54S), el diodo D1 y el capacitor Cschottky1 de 10~nF.
 Este bloque funciona como un detector de envolvente, entregando una tensión continua proporcional a la amplitud de la señal de 50~kHz
 y permite su posterior digitalización. 
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[page=1,viewport=678 462 794 493,clip,width=0.51\textwidth]{placadef1.pdf}
+    \par\medskip
+    \includegraphics[page=1,viewport=635 362 795 431,clip,width=0.70\textwidth]{placadef1.pdf}
+    \caption{Conexiones de selección en J5 y bloque detector con salida Vout.}
+    \label{fig:acq_detector}
+\end{figure}
 
 El BAT54S contiene dos diodos Schottky en serie, con acceso a la unión entre ambos mediante
 el pin 3. Su baja caída de tensión directa permite rectificar señales de pequeña amplitud
@@ -1262,14 +1279,7 @@ donde $V_F$ representa la caída directa durante la conducción. Esta expresión
 capacitor alcanza aproximadamente el pico y que su descarga entre ciclos es pequeña.
 
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[page=1,viewport=678 462 794 493,clip,width=0.51\textwidth]{placadef1.pdf}
-    \par\medskip
-    \includegraphics[page=1,viewport=635 362 795 431,clip,width=0.70\textwidth]{placadef1.pdf}
-    \caption{Conexiones de selección en J5 y bloque detector con salida Vout.}
-    \label{fig:acq_detector}
-\end{figure}
+
 
 La tensión en Vout se aplica al ADC del ESP32-C3 SuperMini. La magnitud digitalizada representa el
 nivel entregado por el detector y se utiliza para estimar la amplitud
@@ -1305,7 +1315,7 @@ analógico--digital del ESP32-C3 SuperMini, de 12~bits de resolución y configur
 de 11~dB para admitir señales de hasta aproximadamente 3,3~V. Para compensar la no linealidad propia de
 este conversor, la lectura se realiza mediante la función de calibración de fábrica del fabricante en
 lugar de una conversión lineal directa. El microcontrolador muestrea esta entrada a una frecuencia
-aproximada de 700~Hz y promedia bloques de 192 muestras consecutivas, obteniendo así un valor de tensión
+aproximada de 700~Hz (es decir alrededor de 1,42 ms) y promedia bloques de 192 muestras consecutivas, obteniendo así un valor de tensión
 continua cada 274~ms aproximadamente, a partir del cual se calcula un valor bruto de impedancia mediante
 
 \begin{equation}
@@ -1345,14 +1355,22 @@ evitando que sesiones de navegador inactivas degraden la transmisión.
 
 \subsubsection{Máquina de estados y control físico}
 
-El \textit{firmware} implementa una máquina de estados con los modos \textit{Inactivo} y \textit{Midiendo}; la
-evaluación de los umbrales de alarma se realiza en la interfaz y no en el microcontrolador, que actúa
+En la figura~\ref{fig:M_estados} se puede visualizar la máquina de estados ideada para este dispositivo.
+El \textit{firmware} implementa una máquina de estados con los modos \textit{Inactivo}, \textit{Midiendo}
+y \textit{Alarma}; la evaluación de los umbrales de alarma se realiza en la interfaz y no en el microcontrolador, que actúa
 como un sensor de propósito simple. El equipo puede iniciarse y detenerse tanto desde la interfaz como
 mediante un botón físico. Para evitar que un roce accidental o una vibración interrumpan una sesión de
 medición prolongada, se estableció una asimetría deliberada en el antirrebote: iniciar una medición
 requiere sostener el botón durante 80~ms, mientras que detenerla requiere un sostenido de 1,5~s,
 confirmado con una señal sonora. Cada inicio de medición reinicializa el generador de señales como medida
-defensiva frente a eventuales fallos de arranque de la señal sinusoidal.
+defensiva frente a eventuales fallos de arranque de la señal sinusoidal. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]{maquina_de_estados.drawio.png}
+    \caption{Esquema de la máquina de estados implementada. Resume visualmente los estados que tiene el dispositivo
+    y las condiciones para pasar de un estado al otro.}
+    \label{fig:M_estados}
+\end{figure}
 
 \subsection{Interfaz de usuario, registro de sesiones y base de datos}
 
@@ -2000,6 +2018,16 @@ separado, ya que la cadena de acondicionamiento también se modificó entre amba
 
 \section{Conclusiones}
 
+ATENCAO la siguiente parte gus me dijo que la pasemos a conclusiones, la dejo aca y despues cuando escribamos esta parte la acomodamos
+\\
+Sin embargo, la medición superficial no registra únicamente la vejiga, sino también la contribución
+eléctrica de la piel, la grasa, los músculos, otros órganos y los fluidos atravesados por la corriente.
+La magnitud observada también depende de la distancia entre electrodos, la antropometría, la postura,
+la respiración, el movimiento, la temperatura, la sudoración y la composición de la orina. En
+consecuencia, una tendencia decreciente es fisiológicamente plausible, pero no basta para asumir una
+conversión universal entre ohms y mililitros. Revisiones recientes coinciden en que la bioimpedancia
+es prometedora para el monitoreo continuo, aunque su robustez fuera de condiciones controladas sigue
+siendo un desafío \cite{li2013monitoring,palla2023review,noyori2022review}.
 
 
 \printbibliography
